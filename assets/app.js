@@ -857,9 +857,10 @@
 })();
 
 /* =========================================================================
-   Bilah persetujuan cookie: satu baris tetap di bawah layar (bukan jendela
-   terpisah, tanpa lapisan gelap di belakang), pilihan disimpan di
-   localStorage supaya tidak muncul lagi di kunjungan berikutnya.
+   Bilah persetujuan cookie (Consent Mode v2): satu baris tetap di bawah layar
+   (bukan jendela terpisah, tanpa lapisan gelap di belakang). Pilihan pengunjung
+   disimpan di localStorage lalu diteruskan ke Google sebagai sinyal consent —
+   gtag() sudah tersedia dari skrip di <head>.
    ========================================================================= */
 (function () {
   'use strict';
@@ -868,17 +869,46 @@
   if (!bar) return;
 
   var okBtn = document.getElementById('cookiebar-ok');
-  var STORAGE_KEY = 'bahzi-cookie-ok';
+  var tolakBtn = document.getElementById('cookiebar-tolak');
+  var STORAGE_KEY = 'bahzi-cookie-consent';
 
   // localStorage bisa melempar error di mode privat / protokol file://.
-  var alreadyOk = false;
-  try {
-    alreadyOk = localStorage.getItem(STORAGE_KEY) === '1';
-  } catch (err) {
-    alreadyOk = false;
+  function bacaPilihan() {
+    try {
+      var v = localStorage.getItem(STORAGE_KEY);
+      if (v === 'granted' || v === 'denied') return v;
+      // Nilai dari versi lama ("Mengerti") tetap dihormati sebagai persetujuan.
+      if (localStorage.getItem('bahzi-cookie-ok') === '1') return 'granted';
+      return null;
+    } catch (err) {
+      return null;
+    }
   }
 
-  if (!alreadyOk) {
+  function simpanPilihan(pilihan) {
+    try { localStorage.setItem(STORAGE_KEY, pilihan); } catch (err) { /* mode privat: abaikan */ }
+  }
+
+  // Teruskan pilihan ke Google (GA4 + AdSense memakai sinyal yang sama).
+  // Bawaannya sudah 'denied' dari <head>, jadi update ini bisa dipanggil
+  // kapan saja — termasuk saat halaman dibuka oleh pengunjung yang sudah memilih.
+  function kirimConsent(pilihan) {
+    if (typeof window.gtag !== 'function') return;
+    var izin = pilihan === 'granted' ? 'granted' : 'denied';
+    window.gtag('consent', 'update', {
+      ad_storage: izin,
+      ad_user_data: izin,
+      ad_personalization: izin,
+      analytics_storage: izin
+    });
+  }
+
+  var pilihanTersimpan = bacaPilihan();
+  if (pilihanTersimpan) {
+    // Pengunjung yang sudah memilih tidak melihat bilah lagi, tapi sinyalnya
+    // tetap dikirim ulang setiap halaman dibuka.
+    kirimConsent(pilihanTersimpan);
+  } else {
     bar.hidden = false;
     document.body.classList.add('has-cookiebar');
     reserveCookiebarSpace();
@@ -895,14 +925,40 @@
     document.body.style.paddingBottom = (bar.offsetHeight + 12) + 'px';
   }
 
-  if (okBtn) {
-    okBtn.addEventListener('click', function () {
-      try { localStorage.setItem(STORAGE_KEY, '1'); } catch (err) { /* mode privat: abaikan */ }
-      bar.hidden = true;
-      document.body.classList.remove('has-cookiebar');
-      document.body.style.paddingBottom = '';
+  // Kalau pengunjung menolak, hapus cookie pengukuran yang mungkin sudah ada dari
+  // kunjungan sebelumnya. Consent Mode sendiri tidak menghapus cookie lama, jadi
+  // ini yang membuat penolakan benar-benar berlaku. (Cookie HttpOnly tidak bisa
+  // dihapus dari JavaScript — itu memang di luar jangkauan halaman.)
+  function hapusCookiePengukuran() {
+    var nama = ['_ga', '_gid', '_gat', '__gads', '__gpi'];
+    var host = location.hostname;
+    // Domain efektif: contoh "bahzi.fun" dan ".bahzi.fun" untuk subdomain.
+    var domain = host.split('.').slice(-2).join('.');
+    var daftar = document.cookie.split(';').map(function (c) { return c.trim().split('=')[0]; });
+    daftar.forEach(function (n) {
+      if (n !== '_ga' && !/^_ga_/.test(n) && nama.indexOf(n) === -1) return;
+      [host, '.' + host, domain, '.' + domain].forEach(function (d) {
+        document.cookie = n + '=; Max-Age=0; path=/; domain=' + d;
+        document.cookie = n + '=; Max-Age=0; path=/';
+      });
     });
   }
+
+  function tutup(pilihan) {
+    simpanPilihan(pilihan);
+    if (pilihan === 'denied') hapusCookiePengukuran();
+    kirimConsent(pilihan);
+    bar.hidden = true;
+    document.body.classList.remove('has-cookiebar');
+    document.body.style.paddingBottom = '';
+  }
+
+  if (okBtn) okBtn.addEventListener('click', function () { tutup('granted'); });
+  if (tolakBtn) tolakBtn.addEventListener('click', function () { tutup('denied'); });
+
+  // Halaman privasi menyediakan tautan "Ubah pilihan cookie" yang menghapus
+  // simpanan ini; setelah dihapus, bilah muncul lagi saat kembali ke beranda.
+  window.OmniToolsCookie = { kirimConsent: kirimConsent, bacaPilihan: bacaPilihan };
 
   // Tinggi bilah ikut berubah saat layar diputar atau jendela diubah ukurannya.
   window.addEventListener('resize', reserveCookiebarSpace);

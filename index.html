@@ -16,11 +16,22 @@
   <meta name="description" content="OmniTools dari bahzi.fun: 32 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF sudah bisa dipakai, alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
-  <!-- Google Analytics (GA4) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-MKL7XG6DH4"></script>
+  <!-- Google tag (gtag.js) + Consent Mode v2.
+       Bawaan sebelum pengunjung memilih: simpanan analitik & iklan DIMATIKAN,
+       dan sinyal itu dikirim lebih dulu sebelum pustaka gtag.js dimuat. -->
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      wait_for_update: 500
+    });
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-MKL7XG6DH4"></script>
+  <script>
     gtag('js', new Date());
     gtag('config', 'G-MKL7XG6DH4');
   </script>
@@ -420,9 +431,12 @@
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
-    <p class="cookiebar__text">Situs ini memakai cookie untuk statistik dan iklan dari Google.</p>
+    <p class="cookiebar__text">Cookie dipakai untuk statistik kunjungan dan iklan Google.</p>
+    <div class="cookiebar__actions">
+      <button class="btn btn--primary cookiebar__btn" id="cookiebar-ok" type="button">Setuju</button>
+      <button class="btn btn--ghost cookiebar__btn" id="cookiebar-tolak" type="button">Tolak</button>
+    </div>
     <a class="cookiebar__link" href="privasi.html">Kebijakan privasi</a>
-    <button class="btn btn--primary cookiebar__btn" id="cookiebar-ok" type="button">Mengerti</button>
   </div>
 
   <script src="assets/app.js?v=__V__" defer></script>

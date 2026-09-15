@@ -592,3 +592,18 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
 .legal .panel { margin-bottom: 1rem; }
 .legal .panel:last-child { margin-bottom: 0; }
 .legal .panel p:last-child { margin-bottom: 0; }
+
+/* ================= Target sentuh di perangkat sentuh ================= */
+/* Chip filter dan tombol kecil tingginya di bawah 44px (memang sengaja ringkas
+   untuk tetikus). Di perangkat berjari — ponsel & tablet — kontrolnya
+   dinaikkan ke minimal 44px supaya tidak salah tekan (pedoman iOS/Android,
+   WCAG 2.5.5). Desktop tidak berubah karena `pointer: coarse` tidak cocok. */
+.cookiebar__actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+@media (pointer: coarse) {
+  .chip,
+  .chips--status .chip { min-height: 44px; padding: .55rem .9rem; }
+  .btn { min-height: 44px; }
+  .navbar__link,
+  .footer__link { display: inline-flex; align-items: center; min-height: 44px; }
+}
