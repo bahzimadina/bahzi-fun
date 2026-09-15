@@ -31,12 +31,15 @@ RUN printf 'server {\n\
 }\n' > /etc/nginx/conf.d/default.conf
 
 COPY index.html /usr/share/nginx/html/index.html
+COPY privasi.html /usr/share/nginx/html/privasi.html
+# ads.txt: deklarasi penjual resmi untuk Google AdSense (harus ada di root domain).
+COPY ads.txt /usr/share/nginx/html/ads.txt
 COPY assets/ /usr/share/nginx/html/assets/
 
-# Cache-busting otomatis: ganti penanda __V__ di index.html dengan hash isi aset.
+# Cache-busting otomatis: ganti penanda __V__ dengan hash isi aset.
 # Setiap kali CSS/JS berubah, hash berubah -> URL aset berubah -> cache Cloudflare/browser tidak basi.
 RUN V=$(cat /usr/share/nginx/html/assets/styles.css /usr/share/nginx/html/assets/app.js | md5sum | cut -c1-10) \
-    && sed -i "s/__V__/$V/g" /usr/share/nginx/html/index.html \
+    && sed -i "s/__V__/$V/g" /usr/share/nginx/html/index.html /usr/share/nginx/html/privasi.html \
     && echo "asset version: $V" \
     && grep -o 'assets/[a-z]*\.\(css\|js\)?v=[a-z0-9]*' /usr/share/nginx/html/index.html
 

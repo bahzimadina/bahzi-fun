@@ -1,18 +1,16 @@
-/* app.js — OmniTools (demo) : data alat + render + pencarian + filter + counter.
-   Satu-satunya sumber data untuk section "Roadmap Alat" adalah CATEGORIES di bawah. */
+/* app.js: data alat, render, pencarian, filter, dan penghitung.
+   Satu-satunya sumber data untuk daftar alat adalah CATEGORIES di bawah. */
 (function () {
   'use strict';
 
   if ('IntersectionObserver' in window) { document.documentElement.classList.add('js-reveal'); }
 
   // --- Data status ------------------------------------------------------
-  // `server` = alat yang benar-benar berfungsi tapi diproses di server (API),
-  // bukan di browser. Urutan kunci di sini juga mengurutkan chip filter & counter.
+  // Status disederhanakan jadi dua: alat yang bisa dipakai sekarang, dan alat
+  // yang masih disiapkan. Urutan kunci di sini juga mengurutkan chip filter & counter.
   var STATUS = {
-    server: { label: 'Live (API)', short: 'Server', className: 'badge--api' },
-    live: { label: 'Live (demo)', short: 'Demo', className: 'badge--live' },
-    soon: { label: 'Segera', short: 'Segera', className: 'badge--soon' },
-    planned: { label: 'Rencana', short: 'Rencana', className: 'badge--planned' }
+    available: { label: 'Tersedia', short: 'Tersedia', className: 'badge--available' },
+    soon: { label: 'Segera', short: 'Segera', className: 'badge--soon' }
   };
 
   // Panel alat interaktif yang tersedia (didaftarkan oleh skrip panel di bawah).
@@ -29,12 +27,12 @@
       name: 'Gambar/Video/Audio',
       icon: 'icon-media',
       tools: [
-        { name: 'Image Resizer', desc: 'Ubah dimensi gambar langsung di browser tanpa unggah.', status: 'live' },
+        { name: 'Image Resizer', desc: 'Ubah dimensi gambar langsung di browser tanpa unggah.', status: 'soon' },
         { name: 'Image Converter', desc: 'Konversi format gambar umum tanpa kirim ke server.', status: 'soon' },
         { name: 'Image Editor', desc: 'Edit dasar seperti crop dan rotate di perangkat sendiri.', status: 'soon' },
         { name: 'Video Trimmer', desc: 'Potong klip video pendek tanpa upload.', status: 'soon' },
-        { name: 'Video Reverser', desc: 'Balik urutan frame video secara lokal.', status: 'planned' },
-        { name: 'Extract Audio', desc: 'Ambil trek audio dari file video di browser.', status: 'planned' }
+        { name: 'Video Reverser', desc: 'Balik urutan frame video secara lokal.', status: 'soon' },
+        { name: 'Extract Audio', desc: 'Ambil trek audio dari file video di browser.', status: 'soon' }
       ]
     },
     {
@@ -43,10 +41,10 @@
       icon: 'icon-pdf',
       tools: [
         { name: 'PDF Splitter', desc: 'Pecah dokumen PDF menjadi beberapa berkas.', status: 'soon' },
-        { name: 'PDF Merger', desc: 'Gabungkan beberapa PDF jadi satu berkas (diproses di server).', status: 'server', action: 'pdf-merge' },
-        { name: 'PDF Editor', desc: 'Sunting teks dan halaman PDF secara ringan.', status: 'planned' },
+        { name: 'PDF Merger', desc: 'Gabungkan beberapa PDF jadi satu berkas (diproses di server).', status: 'available', action: 'pdf-merge' },
+        { name: 'PDF Editor', desc: 'Sunting teks dan halaman PDF secara ringan.', status: 'soon' },
         { name: 'PDF to Image', desc: 'Ubah tiap halaman PDF menjadi gambar.', status: 'soon' },
-        { name: 'Compress PDF', desc: 'Perkecil ukuran berkas PDF tanpa server.', status: 'planned' }
+        { name: 'Compress PDF', desc: 'Perkecil ukuran berkas PDF tanpa server.', status: 'soon' }
       ]
     },
     {
@@ -54,10 +52,10 @@
       name: 'Teks & Daftar',
       icon: 'icon-text',
       tools: [
-        { name: 'Case Converter', desc: 'Ubah huruf besar/kecil dan format kalimat.', status: 'live' },
+        { name: 'Case Converter', desc: 'Ubah huruf besar/kecil dan format kalimat.', status: 'soon' },
         { name: 'List Shuffler', desc: 'Acak urutan baris dalam sebuah daftar.', status: 'soon' },
-        { name: 'Text Formatter', desc: 'Rapikan spasi, baris, dan format teks.', status: 'soon' },
-        { name: 'Word Counter', desc: 'Hitung jumlah kata, karakter, dan baris.', status: 'live' },
+        { name: 'Text Formatter', desc: 'Bereskan spasi, baris, dan format teks.', status: 'soon' },
+        { name: 'Word Counter', desc: 'Hitung jumlah kata, karakter, dan baris.', status: 'soon' },
         { name: 'Remove Duplicates', desc: 'Hapus baris duplikat dari sebuah daftar.', status: 'soon' }
       ]
     },
@@ -67,9 +65,9 @@
       icon: 'icon-clock',
       tools: [
         { name: 'Date Calculator', desc: 'Hitung selisih atau tambahan antar tanggal.', status: 'soon' },
-        { name: 'Time Zone Converter', desc: 'Konversi jam antar zona waktu berbeda.', status: 'planned' },
+        { name: 'Time Zone Converter', desc: 'Konversi jam antar zona waktu berbeda.', status: 'soon' },
         { name: 'Countdown Timer', desc: 'Hitung mundur ke tanggal atau momen tertentu.', status: 'soon' },
-        { name: 'Pomodoro Timer', desc: 'Timer fokus kerja dengan siklus istirahat.', status: 'planned' }
+        { name: 'Pomodoro Timer', desc: 'Timer fokus kerja dengan siklus istirahat.', status: 'soon' }
       ]
     },
     {
@@ -78,7 +76,7 @@
       icon: 'icon-math',
       tools: [
         { name: 'Prime Number Generator', desc: 'Hasilkan daftar bilangan prima dengan cepat.', status: 'soon' },
-        { name: 'Kalkulator Listrik (V/I/R)', desc: 'Hitung tegangan, arus, dan resistansi.', status: 'planned' },
+        { name: 'Kalkulator Listrik (V/I/R)', desc: 'Hitung tegangan, arus, dan resistansi.', status: 'soon' },
         { name: 'Kalkulator Persen', desc: 'Hitung persentase, kenaikan, dan potongan.', status: 'soon' },
         { name: 'Unit Converter', desc: 'Konversi satuan panjang, berat, dan lainnya.', status: 'soon' }
       ]
@@ -88,10 +86,10 @@
       name: 'Data',
       icon: 'icon-data',
       tools: [
-        { name: 'JSON Formatter & Validator', desc: 'Rapikan dan validasi struktur JSON.', status: 'live' },
+        { name: 'JSON Formatter & Validator', desc: 'Bereskan dan validasi struktur JSON.', status: 'soon' },
         { name: 'CSV Tools', desc: 'Lihat, sunting, dan konversi berkas CSV.', status: 'soon' },
-        { name: 'XML Tools', desc: 'Format dan validasi dokumen XML.', status: 'planned' },
-        { name: 'Base64 Encoder/Decoder', desc: 'Encode dan decode teks atau berkas Base64.', status: 'live' },
+        { name: 'XML Tools', desc: 'Format dan validasi dokumen XML.', status: 'soon' },
+        { name: 'Base64 Encoder/Decoder', desc: 'Encode dan decode teks atau berkas Base64.', status: 'soon' },
         { name: 'QR & Barcode Generator', desc: 'Buat kode QR dan barcode dari teks.', status: 'soon' }
       ]
     },
@@ -100,9 +98,9 @@
       name: 'AI',
       icon: 'icon-ai',
       tools: [
-        { name: 'Ringkas Teks', desc: 'Ringkas dokumen panjang jadi poin utama.', status: 'planned' },
-        { name: 'Ubah/Redesign Gambar', desc: 'Ubah gaya visual gambar dengan bantuan AI.', status: 'planned' },
-        { name: 'Transkripsi Audio', desc: 'Ubah rekaman suara menjadi teks.', status: 'planned' }
+        { name: 'Ringkas Teks', desc: 'Ringkas dokumen panjang jadi poin utama.', status: 'soon' },
+        { name: 'Ubah/Redesign Gambar', desc: 'Ubah gaya visual gambar dengan bantuan AI.', status: 'soon' },
+        { name: 'Transkripsi Audio', desc: 'Ubah rekaman suara menjadi teks.', status: 'soon' }
       ]
     }
   ];
@@ -123,6 +121,11 @@
     tplCard: document.getElementById('tpl-tool-card'),
     tplGroup: document.getElementById('tpl-tool-group')
   };
+
+  // Referensi diambil sekali: renderTools() mengosongkan #tools-grid di setiap
+  // render (termasuk tiap ketikan pencarian), jadi node iklan tidak boleh
+  // dibuat ulang, cukup dipindah masuk/keluar grid dengan node yang sama.
+  var adMid = document.querySelector('.ad-slot[data-ad-slot="tengah"]');
 
   // Hanya jalan jika section Alat ada di halaman ini.
   if (!els.grid || !els.tplCard || !els.tplGroup) {
@@ -220,32 +223,28 @@
     if (groups.length === 0) {
       els.grid.hidden = true;
       if (els.empty) els.empty.hidden = false;
+      if (adMid) adMid.hidden = true;
       return;
     }
     els.grid.hidden = false;
     if (els.empty) els.empty.hidden = true;
 
+    // Slot iklan tengah disisipkan setelah grup ke-4, atau setelah grup
+    // terakhir kalau hasil filter kurang dari 4 grup (minimal 2 grup).
+    var adInsertAfter = groups.length > 4 ? 3 : groups.length - 1;
+
     var fragAll = document.createDocumentFragment();
-    groups.forEach(function (group) {
+    groups.forEach(function (group, groupIndex) {
       var groupNode = els.tplGroup.content.firstElementChild.cloneNode(true);
       var titleEl = groupNode.querySelector('.tool-group__title');
       var countEl = groupNode.querySelector('.tool-group__count');
       var listEl = groupNode.querySelector('.tool-group__list');
       var noteEl = groupNode.querySelector('.tool-group__note');
 
-      if (titleEl) {
-        titleEl.textContent = group.category.name;
-        if (group.category.id === 'ai') {
-          var aiBadge = document.createElement('span');
-          aiBadge.className = 'badge badge--planned';
-          aiBadge.textContent = STATUS.planned.label;
-          titleEl.appendChild(document.createTextNode(' '));
-          titleEl.appendChild(aiBadge);
-        }
-      }
+      if (titleEl) titleEl.textContent = group.category.name;
       if (countEl) countEl.textContent = '(' + group.tools.length + ')';
       if (noteEl && group.category.id === 'ai') {
-        noteEl.textContent = 'Semua alat AI masih tahap rencana.';
+        noteEl.textContent = 'Belum ada alat di kategori ini yang bisa dipakai.';
         noteEl.hidden = false;
       }
 
@@ -275,7 +274,9 @@
           var openBtn = document.createElement('button');
           openBtn.type = 'button';
           openBtn.className = 'tool-card__open';
-          openBtn.setAttribute('aria-haspopup', 'dialog');
+          openBtn.setAttribute('aria-expanded', 'false');
+          openBtn.setAttribute('aria-controls', 'pdf-merge-panel');
+          openBtn.dataset.toolAction = tool.action;
           openBtn.setAttribute('aria-label', 'Buka alat ' + tool.name);
           openBtn.textContent = 'Buka alat';
           openBtn.addEventListener('click', function (event) {
@@ -291,8 +292,14 @@
       });
 
       fragAll.appendChild(groupNode);
+      // Selalu masukkan node iklan yang sama ke dalam grid pada posisi ini,
+      // termasuk saat hasil filter menyisakan sedikit grup. Menyisipkan (bukan
+      // melepas) node membuat `hidden` di bawah tetap berarti: iklan cuma
+      // disembunyikan, elemennya tidak hilang dari halaman.
+      if (adMid && groupIndex === adInsertAfter) fragAll.appendChild(adMid);
     });
     els.grid.appendChild(fragAll);
+    if (adMid) adMid.hidden = groups.length < 2;
   }
 
   function updateCounts(items) {
@@ -345,6 +352,19 @@
     if (els.search) els.search.focus();
   }
 
+  // --- Offset toolbar sticky --------------------------------------------
+  // Dipakai lewat --sticky-offset di CSS supaya panel alat dan judul grup
+  // kategori tidak tertutup navbar + toolbar sticky saat halaman digulir.
+  function updateStickyOffset() {
+    var navbar = document.querySelector('.navbar');
+    var toolbar = document.querySelector('.toolbar');
+    var height = (navbar ? navbar.offsetHeight : 0) + (toolbar ? toolbar.offsetHeight : 0);
+    // Batas atas dibuat longgar: di layar sempit toolbar bisa setinggi 200px
+    // lebih, dan pada zoom 200% angkanya bertambah lagi.
+    height = Math.max(80, Math.min(420, height));
+    document.documentElement.style.setProperty('--sticky-offset', height + 'px');
+  }
+
   // --- Reveal animasi ringan saat masuk viewport --------------------------
   function setupReveal() {
     var targets = document.querySelectorAll('.reveal');
@@ -385,13 +405,20 @@
   if (els.emptyReset) els.emptyReset.addEventListener('click', onReset);
   setupReveal();
   render();
+  updateStickyOffset();
+
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(updateStickyOffset, 150);
+  });
 })();
 
 /* =========================================================================
-   Panel alat: PDF Merger
-   Alat ini BENAR-BENAR diproses di server (bukan di browser): berkas dikirim
-   ke POST /api/pdf/merge milik OmniTools API, digabung di memori server,
-   lalu hasilnya diunduh. Karena itu tidak ada klaim "client-side" di sini.
+   Panel alat: Gabung PDF
+   Alat ini benar-benar diproses di server (bukan di browser): berkas dikirim
+   lewat unggahan ke layanan penggabung, diproses di memori server, lalu
+   hasilnya diunduh. Karena itu tidak ada klaim "diproses di perangkat" di sini.
 
    Skrip sengaja terpisah dari daftar alat di atas supaya keduanya tidak
    saling bergantung (daftar alat tetap jalan walau panel tidak ada).
@@ -399,11 +426,10 @@
 (function () {
   'use strict';
 
-  var modal = document.getElementById('pdf-merge-modal');
-  if (!modal) return;
+  var panel = document.getElementById('pdf-merge-panel');
+  if (!panel) return;
 
   var el = {
-    dialog: document.getElementById('pdf-merge-dialog'),
     close: document.getElementById('pdf-merge-close'),
     limits: document.getElementById('pdf-merge-limits'),
     input: document.getElementById('pdf-merge-input'),
@@ -416,18 +442,16 @@
     download: document.getElementById('pdf-merge-download')
   };
 
-  // Aturan bawaan: dipakai sampai /limits menjawab, atau bila API belum tersambung.
+  // Aturan bawaan: dipakai sampai batas dari server diketahui, atau bila
+  // layanan belum tersambung.
   var FALLBACK_LIMITS = { max_files: 10, max_total_mb: 25, max_total_bytes: 26214400, max_pages: 200 };
 
-  // Awalan URL API. Kosong = same-origin (path /api/... lewat gateway).
-  // Bisa diarahkan ke origin lain lewat <meta name="omnitools-api-base"> atau ?api=
-  var apiBase = '';
-  var metaBase = document.querySelector('meta[name="omnitools-api-base"]');
-  if (metaBase && metaBase.content) apiBase = metaBase.content.trim().replace(/\/+$/, '');
-  try {
-    var apiParam = new URLSearchParams(window.location.search).get('api');
-    if (apiParam) apiBase = apiParam.trim().replace(/\/+$/, '');
-  } catch (err) { /* URLSearchParams tidak tersedia — abaikan */ }
+  // Alamat dasar layanan penggabung. Kosong berarti sama asal (path
+  // /api/... lewat gateway). Bisa diarahkan ke domain lain lewat
+  // <meta name="omnitools-server-base">.
+  var serverBase = '';
+  var metaBase = document.querySelector('meta[name="omnitools-server-base"]');
+  if (metaBase && metaBase.content) serverBase = metaBase.content.trim().replace(/\/+$/, '');
 
   var state = {
     files: [],
@@ -437,7 +461,7 @@
     downloadUrl: null,
     lastFocus: null
   };
-  var focusSpec = null; // { index, act } — fokus yang dipulihkan setelah daftar digambar ulang
+  var focusSpec = null; // { index, act }: fokus yang dipulihkan setelah daftar digambar ulang
 
   // --- Pembantu ---------------------------------------------------------
   function maxFiles() { return state.limits.max_files || FALLBACK_LIMITS.max_files; }
@@ -549,9 +573,9 @@
     var buttons = el.list.querySelectorAll('button[data-act="' + spec.act + '"]');
     var target = buttons[spec.index] || buttons[buttons.length - 1] || el.list.querySelector('button');
     if (target && !target.disabled) {
-      target.focus();
+      target.focus({ preventScroll: true });
     } else if (el.submit) {
-      el.submit.focus();
+      el.submit.focus({ preventScroll: true });
     }
   }
 
@@ -602,8 +626,8 @@
     if (added) notes.push(added + ' berkas ditambahkan.');
     if (rejected.length) notes.push('Bukan PDF, dilewati: ' + rejected.join(', ') + '.');
     if (duplicate) notes.push(duplicate + ' berkas duplikat dilewati.');
-    if (tooMany) notes.push('Batas ' + maxFiles() + ' berkas tercapai — sisanya diabaikan.');
-    if (tooBig) notes.push('Total melebihi batas ' + state.limits.max_total_mb + ' MB — berkas itu tidak dimasukkan.');
+    if (tooMany) notes.push('Batas ' + maxFiles() + ' berkas tercapai, sisanya diabaikan.');
+    if (tooBig) notes.push('Total melebihi batas ' + state.limits.max_total_mb + ' MB, berkas itu tidak dimasukkan.');
     if (!notes.length) notes.push('Tidak ada berkas yang bisa ditambahkan.');
 
     var problem = rejected.length > 0 || tooMany || tooBig;
@@ -613,14 +637,14 @@
   // --- Aturan dari server ------------------------------------------------
   function describeLimits(online) {
     if (!el.limits) return;
-    var text = 'Maks ' + maxFiles() + ' berkas · total ' + state.limits.max_total_mb
-      + ' MB · ' + maxPages() + ' halaman';
-    el.limits.textContent = text + (online ? ' · aturan dari server' : ' · aturan bawaan');
+    var text = 'Maks ' + maxFiles() + ' berkas, total ' + state.limits.max_total_mb
+      + ' MB, ' + maxPages() + ' halaman';
+    el.limits.textContent = text + (online ? ', aturan dari server' : ', aturan bawaan');
   }
 
   function loadLimits() {
     if (state.limitsLoaded) return;
-    fetch(apiBase + '/api/pdf/merge/limits', { headers: { Accept: 'application/json' } })
+    fetch(serverBase + '/api/pdf/merge/limits', { headers: { Accept: 'application/json' } })
       .then(function (response) {
         if (!response.ok) throw new Error('HTTP ' + response.status);
         return response.json();
@@ -652,7 +676,7 @@
     return (match && match[1]) ? match[1] : 'gabungan.pdf';
   }
 
-  function readApiError(response) {
+  function readServerError(response) {
     return response.text().then(function (text) {
       var message = '';
       try {
@@ -662,7 +686,7 @@
       if (!message) {
         message = 'Server membalas HTTP ' + response.status + '.';
         if (response.status === 404) {
-          message += ' Endpoint /api/pdf/merge belum tersambung ke container omnitools-api.';
+          message += ' Penggabung PDF belum tersambung ke layanan di server. Coba lagi nanti.';
         }
       }
       throw new Error(message);
@@ -694,9 +718,9 @@
     revokeDownload();
     setStatus('Mengunggah ' + state.files.length + ' berkas (' + formatBytes(total) + ') dan menggabungkan di server…', 'busy');
 
-    fetch(apiBase + '/api/pdf/merge', { method: 'POST', body: form })
+    fetch(serverBase + '/api/pdf/merge', { method: 'POST', body: form })
       .then(function (response) {
-        if (!response.ok) return readApiError(response);
+        if (!response.ok) return readServerError(response);
         return response.blob().then(function (blob) {
           return { blob: blob, pages: response.headers.get('X-Page-Count'), name: downloadName(response) };
         });
@@ -726,59 +750,55 @@
   }
 
   // --- Buka / tutup panel ------------------------------------------------
+  function syncTriggers(expanded) {
+    var triggers = document.querySelectorAll('.tool-card__open[data-tool-action="pdf-merge"]');
+    triggers.forEach(function (trigger) {
+      trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    });
+  }
+
   function open() {
-    if (!modal.hidden) return;
-    state.lastFocus = document.activeElement;
-    modal.hidden = false;
-    document.body.classList.add('modal-open');
-    if (el.dialog) el.dialog.focus();
-    loadLimits();
-    renderList();
-    if (!state.files.length) {
-      setStatus('Pilih berkas PDF, atur urutannya (urutan = urutan halaman), lalu tekan "Gabung PDF".');
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (panel.hidden) {
+      state.lastFocus = document.activeElement;
+      panel.hidden = false;
+      loadLimits();
+      renderList();
+      if (!state.files.length) {
+        setStatus('Pilih berkas PDF, atur urutannya (urutan = urutan halaman), lalu tekan "Gabung PDF".');
+      }
+      syncTriggers(true);
+      panel.focus({ preventScroll: true });
     }
+    panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
   }
 
   function close() {
-    if (modal.hidden) return;
-    modal.hidden = true;
-    document.body.classList.remove('modal-open');
+    if (panel.hidden) return;
+    panel.hidden = true;
     revokeDownload();
     if (el.download) el.download.hidden = true;
-    if (state.lastFocus && typeof state.lastFocus.focus === 'function') state.lastFocus.focus();
+    syncTriggers(false);
+    if (state.lastFocus && typeof state.lastFocus.focus === 'function' && document.contains(state.lastFocus)) {
+      state.lastFocus.focus();
+    }
     state.lastFocus = null;
   }
 
-  var FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+  function toggle() {
+    if (panel.hidden) open(); else close();
+  }
 
   function onKeydown(event) {
-    if (modal.hidden) return;
-    if (event.key === 'Escape') {
+    if (panel.hidden) return;
+    if (event.key === 'Escape' && panel.contains(document.activeElement)) {
       event.preventDefault();
       close();
-      return;
-    }
-    if (event.key !== 'Tab' || !el.dialog) return;
-    var nodes = Array.prototype.filter.call(
-      el.dialog.querySelectorAll(FOCUSABLE),
-      function (node) { return node.offsetParent !== null || node === document.activeElement; }
-    );
-    if (!nodes.length) return;
-    var first = nodes[0];
-    var last = nodes[nodes.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   }
 
   // --- Pemasangan event --------------------------------------------------
   if (el.close) el.close.addEventListener('click', close);
-  var backdrop = modal.querySelector('[data-close]');
-  if (backdrop) backdrop.addEventListener('click', close);
   document.addEventListener('keydown', onKeydown);
 
   if (el.input) {
@@ -831,7 +851,59 @@
 
   window.addEventListener('beforeunload', revokeDownload);
 
-  // Daftarkan panel supaya kartu "PDF Merger" bisa membukanya.
+  // Daftarkan panel supaya kartu "PDF Merger" bisa membuka/menutupnya.
   window.OmniToolsPanels = window.OmniToolsPanels || {};
-  window.OmniToolsPanels['pdf-merge'] = open;
+  window.OmniToolsPanels['pdf-merge'] = toggle;
+})();
+
+/* =========================================================================
+   Bilah persetujuan cookie: satu baris tetap di bawah layar (bukan jendela
+   terpisah, tanpa lapisan gelap di belakang), pilihan disimpan di
+   localStorage supaya tidak muncul lagi di kunjungan berikutnya.
+   ========================================================================= */
+(function () {
+  'use strict';
+
+  var bar = document.getElementById('cookiebar');
+  if (!bar) return;
+
+  var okBtn = document.getElementById('cookiebar-ok');
+  var STORAGE_KEY = 'bahzi-cookie-ok';
+
+  // localStorage bisa melempar error di mode privat / protokol file://.
+  var alreadyOk = false;
+  try {
+    alreadyOk = localStorage.getItem(STORAGE_KEY) === '1';
+  } catch (err) {
+    alreadyOk = false;
+  }
+
+  if (!alreadyOk) {
+    bar.hidden = false;
+    document.body.classList.add('has-cookiebar');
+    reserveCookiebarSpace();
+  }
+
+  // Tinggi bilah berbeda antara ponsel (teks membungkus) dan desktop, jadi ruang
+  // yang disisihkan di bawah halaman diukur dari tinggi bilah yang sebenarnya.
+  // Tanpa ini, bilah bisa menutupi bagian akhir konten di layar sempit.
+  function reserveCookiebarSpace() {
+    if (bar.hidden) {
+      document.body.style.paddingBottom = '';
+      return;
+    }
+    document.body.style.paddingBottom = (bar.offsetHeight + 12) + 'px';
+  }
+
+  if (okBtn) {
+    okBtn.addEventListener('click', function () {
+      try { localStorage.setItem(STORAGE_KEY, '1'); } catch (err) { /* mode privat: abaikan */ }
+      bar.hidden = true;
+      document.body.classList.remove('has-cookiebar');
+      document.body.style.paddingBottom = '';
+    });
+  }
+
+  // Tinggi bilah ikut berubah saat layar diputar atau jendela diubah ukurannya.
+  window.addEventListener('resize', reserveCookiebarSpace);
 })();

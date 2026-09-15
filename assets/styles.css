@@ -1,5 +1,5 @@
 /* ==========================================================================
-   OmniTools (bahzi.fun) — styles.css
+   OmniTools (bahzi.fun): styles.css
    Tema: dark purple ala Sentry.io (token warna & gradient dari situs sentry.io).
    Mobile-first, dark mode default, tanpa aset/gambar eksternal (font self-host).
    Struktur halaman: navbar ringkas -> section Alat (#alat) dengan toolbar sticky
@@ -39,6 +39,9 @@
   /* brand */
   --brand: #7553ff;
   --brand-hover: #5f3fe0;
+  /* Ungu untuk TEKS. --brand dipakai untuk bidang/tombol; sebagai warna huruf
+     di atas latar gelap ia hanya 3,4:1 (gagal AA), jadi teks pakai versi terang. */
+  --brand-text: #c2b6ff;
   --blurple: #6a5fc1;
   --deep-1: #36166b;
   --deep-2: #422082;
@@ -140,6 +143,9 @@ svg { display: block; }
 .section__lead { color: var(--text-muted); font-size: .92rem; margin-bottom: 0; }
 
 main > section { padding-block: var(--pad-section); }
+/* Tautan anchor (menu Alat/Roadmap/FAQ) tidak boleh mendarat dengan judul
+   tertutup navbar sticky, jadi setiap section menyisakan jarak setinggi itu. */
+main > section { scroll-margin-top: calc(var(--nav-h) + 12px); }
 /* Section di bawah daftar alat dibuat lebih kecil/sekunder */
 .section--sub { padding-block: clamp(1.25rem, 1rem + 1vw, 1.9rem); }
 .section--sub .section__head { margin-bottom: .9rem; }
@@ -169,9 +175,8 @@ main > section { padding-block: var(--pad-section); }
   font-size: .72rem; font-weight: 600; padding: .2rem .6rem;
   border-radius: var(--radius-pill); border: 1px solid var(--border); white-space: nowrap;
 }
-.badge--live { color: var(--green); background: rgba(133, 232, 157, .12); border-color: rgba(133, 232, 157, .3); }
+.badge--available { color: var(--green); background: rgba(133, 232, 157, .12); border-color: rgba(133, 232, 157, .3); }
 .badge--soon { color: var(--yellow); background: rgba(255, 219, 74, .12); border-color: rgba(255, 219, 74, .3); }
-.badge--planned { color: var(--pink-light); background: rgba(250, 127, 170, .12); border-color: rgba(250, 127, 170, .3); }
 
 .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .chip {
@@ -216,7 +221,7 @@ main > section { padding-block: var(--pad-section); }
   text-decoration: none; color: var(--text-muted); font-weight: 500; font-size: .88rem;
   white-space: nowrap; padding: .4rem 0; transition: color var(--transition);
 }
-.navbar__link:hover { color: var(--brand); }
+.navbar__link:hover { color: var(--brand-text); }
 .navbar__cta { flex-shrink: 0; }
 
 /* ================= SECTION ALAT (#alat) ================= */
@@ -253,13 +258,18 @@ main > section { padding-block: var(--pad-section); }
 .toolbar__filters { display: flex; flex-direction: column; gap: .4rem; }
 .chips--status .chip { font-size: .78rem; min-height: 30px; padding: .2rem .7rem; }
 
-.search { position: relative; flex: 1 1 auto; min-width: 0; }
+.search { flex: 1 1 auto; min-width: 0; }
+.search__label {
+  display: block; margin-bottom: .3rem; font-size: .75rem; color: var(--text-muted);
+}
+.search__label-hint { font-weight: 400; }
+.search__field { position: relative; }
 .search__icon {
   position: absolute; left: .75rem; top: 50%; transform: translateY(-50%);
   width: 17px; height: 17px; color: var(--text-muted);
 }
 .search__input {
-  width: 100%; min-height: 40px; padding: .5rem .85rem .5rem 2.3rem;
+  width: 100%; min-height: 44px; padding: .5rem .85rem .5rem 2.3rem;
   background: var(--code); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text); font-size: .9rem;
 }
@@ -273,9 +283,9 @@ main > section { padding-block: var(--pad-section); }
 
 /* Grid alat: 7 grup kategori */
 .tools__grid { display: flex; flex-direction: column; gap: 1.4rem; }
-.tool-group { scroll-margin-top: calc(var(--nav-h) + 170px); }
+.tool-group { scroll-margin-top: calc(var(--nav-h) + var(--sticky-offset, 120px) + 14px); }
 .tool-group__title {
-  display: inline; font-size: 1rem; scroll-margin-top: calc(var(--nav-h) + 170px);
+  display: inline; font-size: 1rem; scroll-margin-top: calc(var(--nav-h) + var(--sticky-offset, 120px) + 14px);
 }
 .tool-group__count { color: var(--text-muted); font-size: .8rem; margin-left: .35rem; }
 .tool-group__note { display: block; color: var(--pink-light); font-size: .8rem; margin-top: .25rem; }
@@ -370,7 +380,7 @@ main > section { padding-block: var(--pad-section); }
   color: var(--text-muted); text-decoration: none; font-size: .85rem;
   min-height: 40px; display: inline-flex; align-items: center;
 }
-.footer__link:hover { color: var(--brand); }
+.footer__link:hover { color: var(--brand-text); }
 .footer__top {
   display: inline-flex; align-items: center; gap: .4rem; margin-left: auto;
   color: var(--text-muted); text-decoration: none; font-size: .85rem; min-height: 40px;
@@ -396,8 +406,13 @@ html.js-reveal .reveal.is-visible { opacity: 1; transform: translateY(0); }
   .chip { flex: 0 0 auto; }
 
   .navbar__brand-sub { display: none; }
-  .navbar__nav { gap: .7rem; }
-  .navbar__link { font-size: .82rem; }
+  /* Di layar sempit navbar harus tetap satu baris penuh tanpa memotong tautan:
+     jarak, ukuran huruf, dan tombol dirapatkan sedikit. */
+  .navbar__inner { gap: .5rem; }
+  .navbar__brand-text { font-size: .92rem; }
+  .navbar__nav { gap: .5rem; }
+  .navbar__link { font-size: .78rem; }
+  .navbar__cta { padding: .35rem .7rem; font-size: .8rem; }
 }
 
 @media (min-width: 720px) {
@@ -430,16 +445,12 @@ html.js-reveal .reveal.is-visible { opacity: 1; transform: translateY(0); }
 }
 
 /* ================= PDF Merger: kartu alat aktif ================= */
-/* Badge "Live (API)": alat benar-benar jalan, tapi diproses di SERVER (warna
-   ungu brand, dibedakan dari "Live (demo)" yang hijau). */
-.badge--api { color: #c2b6ff; background: rgba(117, 83, 255, .14); border-color: rgba(117, 83, 255, .45); }
-
 .tool-card--actionable { cursor: pointer; }
 .tool-card--actionable:hover { border-color: var(--brand); box-shadow: var(--glow-brand); }
 
 .tool-card__open {
   display: inline-flex; align-items: center; gap: .35rem;
-  min-height: 32px; padding: .3rem .75rem; margin-top: .1rem;
+  min-height: 44px; padding: .3rem .75rem; margin-top: .1rem;
   border-radius: 9px; border: 1px solid rgba(117, 83, 255, .45);
   background: rgba(117, 83, 255, .14); color: #fff;
   font-family: inherit; font-size: .78rem; font-weight: 600; cursor: pointer;
@@ -448,43 +459,35 @@ html.js-reveal .reveal.is-visible { opacity: 1; transform: translateY(0); }
 .tool-card__open:hover { background: var(--brand); border-color: var(--brand); }
 .tool-card__open:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-/* ================= PDF Merger: panel/modal alat ================= */
-body.modal-open { overflow: hidden; }
-
-.modal {
-  position: fixed; inset: 0; z-index: 200;
-  display: flex; align-items: center; justify-content: center; padding: 1rem;
-}
-.modal[hidden] { display: none; }
-.modal__backdrop { position: absolute; inset: 0; background: rgba(11, 7, 18, .74); }
-
-.modal__panel {
-  position: relative; width: min(660px, 100%); max-height: min(90vh, 820px); overflow: auto;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, .6);
+/* ================= PDF Merger: panel alat inline ================= */
+.tool-panel {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-card);
   padding: clamp(1rem, .8rem + 1vw, 1.4rem);
+  display: flex; flex-direction: column; gap: .9rem;
+  margin-block: .9rem 1.4rem;
+  scroll-margin-top: calc(var(--nav-h) + var(--sticky-offset, 120px) + 14px);
 }
-.modal__panel:focus { outline: none; }
-.modal__panel:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.tool-panel:focus { outline: none; }
+.tool-panel:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 
-.modal__head { display: flex; align-items: flex-start; gap: .75rem; margin-bottom: .7rem; }
-.modal__title { font-size: 1.08rem; margin: 0 0 .25rem; }
-.modal__sub { margin: 0; color: var(--brand); font-family: var(--font-mono); font-size: .78rem; }
-.modal__close {
-  margin-left: auto; flex: 0 0 auto; width: 36px; height: 36px; line-height: 1;
+.tool-panel__head { display: flex; align-items: flex-start; gap: .75rem; }
+.tool-panel__title { font-size: 1.08rem; margin: 0 0 .25rem; }
+.tool-panel__sub { margin: 0; color: var(--brand-text); font-family: var(--font-mono); font-size: .78rem; }
+.tool-panel__close {
+  margin-left: auto; flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: .4rem .9rem;
   border-radius: 9px; border: 1px solid var(--border); background: transparent;
-  color: var(--text); font-size: 1.05rem; cursor: pointer;
+  color: var(--text); font-size: .85rem; font-weight: 600; cursor: pointer;
   transition: border-color var(--transition), color var(--transition);
 }
-.modal__close:hover { border-color: var(--brand); color: #fff; }
+.tool-panel__close:hover { border-color: var(--brand); color: #fff; }
 
-.modal__note {
-  margin: 0 0 .85rem; padding: .55rem .7rem; font-size: .78rem; color: var(--text-muted);
+.tool-panel__note {
+  margin: 0; padding: .55rem .7rem; font-size: .78rem; color: var(--text-muted);
   background: rgba(117, 83, 255, .09); border: 1px solid rgba(117, 83, 255, .28);
   border-radius: var(--radius);
 }
 
-/* Area unggah (label → klik & keyboard otomatis membuka pemilih berkas) */
+/* Area unggah (label -> klik & keyboard otomatis membuka pemilih berkas) */
 .drop {
   display: flex; flex-direction: column; align-items: center; gap: .3rem;
   padding: 1.1rem .9rem; text-align: center; cursor: pointer;
@@ -499,7 +502,7 @@ body.modal-open { overflow: hidden; }
 .drop__hint { margin: .15rem 0 0; font-size: .74rem; color: var(--text-muted); }
 
 /* Daftar berkas terpilih */
-.filelist { list-style: none; margin: .9rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.filelist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .filelist[hidden] { display: none; }
 .filelist__item {
   display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem;
@@ -510,11 +513,11 @@ body.modal-open { overflow: hidden; }
 .filelist__name { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filelist__size { font-family: var(--font-mono); font-size: .73rem; color: var(--text-muted); }
 .filelist__actions { margin-left: auto; display: flex; gap: .3rem; flex: 0 0 auto; }
-.filelist__empty { margin: .85rem 0 0; font-size: .82rem; color: var(--text-muted); }
+.filelist__empty { margin: 0; font-size: .82rem; color: var(--text-muted); }
 
 .iconbtn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; line-height: 1; cursor: pointer;
+  width: 44px; height: 44px; line-height: 1; cursor: pointer;
   border: 1px solid var(--border); border-radius: 8px; background: transparent;
   color: var(--text); font-size: .85rem;
   transition: border-color var(--transition), color var(--transition), background var(--transition);
@@ -523,12 +526,9 @@ body.modal-open { overflow: hidden; }
 .iconbtn:disabled { opacity: .38; cursor: not-allowed; }
 .iconbtn--danger:hover:not(:disabled) { border-color: var(--pink-light); color: var(--pink-light); background: rgba(250, 127, 170, .12); }
 
-/* Status + aksi — footer lengket supaya tombol selalu terjangkau walau daftar
-   berkas panjang dan panel harus menggulir. */
-.modal__foot {
-  position: sticky; bottom: 0; z-index: 1;
-  margin-top: 1rem; padding-top: .9rem; padding-bottom: .15rem;
-  background: var(--surface); border-top: 1px solid var(--border);
+/* Status + aksi. Statis (bukan sticky): di panel inline, sticky-bottom akan
+   menempel di dasar viewport dan bertabrakan dengan bilah cookie. */
+.tool-panel__foot {
   display: flex; flex-direction: column; gap: .7rem;
 }
 .status {
@@ -544,17 +544,51 @@ body.modal-open { overflow: hidden; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.modal__actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.modal__actions .btn { flex: 1 1 auto; }
-.modal__actions .btn[hidden] { display: none; }
+.tool-panel__actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.tool-panel__actions .btn { flex: 1 1 auto; }
+.tool-panel__actions .btn[hidden] { display: none; }
 
 @media (max-width: 719px) {
-  .modal { padding: 0; align-items: flex-end; }
-  .modal__panel {
-    width: 100%; max-height: 92vh;
-    border-radius: var(--radius-card) var(--radius-card) 0 0;
-    border-bottom: none;
-  }
   .filelist__item { flex-wrap: wrap; }
 }
 
+/* ================= Ruang iklan ================= */
+/* Slot iklan tidak tampil selama kosong: muncul sendiri begitu kode unit iklan
+   (ins.adsbygoogle) ditempel di dalamnya. Jadi tidak ada kotak kosong yang
+   terlihat pengunjung sebelum iklan dipasang. */
+.ad-slot { display: none; }
+.ad-slot:has(ins.adsbygoogle) {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 110px; margin-block: 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: rgba(31, 22, 51, .5);
+}
+.ad-slot[data-ad-slot="tengah"]:has(ins.adsbygoogle) { min-height: 250px; }
+/* Slot tengah diturunkan tingginya di layar sempit supaya tidak jadi ruang
+   kosong raksasa di ponsel. Ditulis SETELAH aturan dasarnya, karena selektor
+   berspesifisitas sama: yang belakangan menang. */
+@media (max-width: 719px) {
+  .ad-slot[data-ad-slot="tengah"]:has(ins.adsbygoogle) { min-height: 180px; }
+}
+
+/* ================= Bilah persetujuan cookie ================= */
+.cookiebar {
+  position: fixed; inset-inline: 0; bottom: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  gap: .6rem .9rem; flex-wrap: wrap;
+  padding: .45rem .9rem;
+  background: var(--surface); border-top: 1px solid var(--border);
+  font-size: .82rem;
+}
+.cookiebar__text { margin: 0; color: var(--text-muted); }
+.cookiebar__link {
+  display: inline-flex; align-items: center; min-height: 44px;
+  color: var(--brand-text); text-decoration: underline;
+}
+.cookiebar__btn { min-height: 44px; }
+body.has-cookiebar { padding-bottom: 4.5rem; }
+
+/* ================= Halaman privasi ================= */
+.legal .panel { margin-bottom: 1rem; }
+.legal .panel:last-child { margin-bottom: 0; }
+.legal .panel p:last-child { margin-bottom: 0; }

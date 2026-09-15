@@ -7,25 +7,29 @@
   <meta name="theme-color" content="#181225">
   <meta name="robots" content="index,follow">
 
-  <!-- Awalan URL API OmniTools (Merge PDF). Kosong = API dilayani same-origin
-       lewat path /api/ (diproxy gateway). Isi mis. "https://api.bahzi.fun"
-       bila API ditempatkan di hostname terpisah. -->
-  <meta name="omnitools-api-base" content="">
+  <!-- Alamat dasar layanan penggabung PDF. Kosong berarti dilayani dari domain
+       yang sama. Isi dengan alamat penuh, misalnya "https://layanan.bahzi.fun",
+       kalau layanan ditempatkan di domain terpisah. -->
+  <meta name="omnitools-server-base" content="">
 
-  <title>OmniTools — 32 Alat Harian dalam Satu Tempat | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 32 alat online untuk gambar/video/audio, PDF, teks, tanggal, matematika, data, dan AI — sebagian besar diproses langsung di browser, alat yang berjalan di server ditandai jelas.">
+  <title>OmniTools: 32 alat harian | bahzi.fun</title>
+  <meta name="description" content="OmniTools dari bahzi.fun: 32 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF sudah bisa dipakai, alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
+
+  <!-- Google AdSense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5901632307149966"
+          crossorigin="anonymous"></script>
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
-  <meta property="og:title" content="OmniTools — 32 Alat Harian dalam Satu Tempat">
-  <meta property="og:description" content="Kumpulan alat online harian. Sebagian besar berjalan langsung di browser; alat yang diproses di server ditandai jelas.">
+  <meta property="og:title" content="OmniTools: 32 alat harian">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF sudah bisa dipakai, alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="OmniTools — 32 Alat Harian dalam Satu Tempat">
-  <meta name="twitter:description" content="Kumpulan alat online harian. Sebagian besar berjalan langsung di browser; alat yang diproses di server ditandai jelas.">
+  <meta name="twitter:title" content="OmniTools: 32 alat harian">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF sudah bisa dipakai, alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -121,7 +125,7 @@
   <!-- Navbar ringkas: wordmark + nama produk + menu + CTA kecil -->
   <header class="navbar" id="top">
     <div class="navbar__inner container">
-      <a class="navbar__brand" href="#top" aria-label="bahzi.fun — kembali ke atas">
+      <a class="navbar__brand" href="#top" aria-label="bahzi.fun: kembali ke atas">
         <svg class="wordmark" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
         <span class="navbar__brand-text">bahzi.fun</span>
         <span class="navbar__brand-sub">OmniTools</span>
@@ -131,7 +135,7 @@
         <a class="navbar__link" href="#roadmap">Roadmap</a>
         <a class="navbar__link" href="#faq">FAQ</a>
       </nav>
-      <a class="btn btn--primary btn--sm navbar__cta" href="#">Coba Gratis</a>
+      <a class="btn btn--primary btn--sm navbar__cta" href="#alat">Lihat alat</a>
     </div>
   </header>
 
@@ -142,18 +146,19 @@
       <div class="container">
 
         <div class="tools__head">
-          <h1 class="tools__title" id="alat-title">32 alat, satu tempat</h1>
-          <p class="tools__lead">Sebagian besar alat diproses di browser kamu sendiri. Alat bertanda <strong>Live (API)</strong> diproses di server kami — berkasnya dibuang dari memori setelah selesai.</p>
+          <h1 class="tools__title" id="alat-title">32 alat buat kerja harian</h1>
+          <p class="tools__lead">Penggabung PDF sudah bisa dipakai. Berkasnya diproses di server lalu dihapus setelah digabung. 31 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
         <div class="toolbar" role="search">
           <div class="toolbar__row">
             <div class="search">
-              <svg class="search__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
-              <label class="sr-only" for="tool-search">Cari alat</label>
-              <input class="search__input" type="search" id="tool-search" autocomplete="off"
-                     placeholder="Cari alat… (mis. PDF, resize, JSON)" aria-describedby="tool-counts">
+              <label class="search__label" for="tool-search">Cari alat <span class="search__label-hint">(mis. PDF, resize, JSON)</span></label>
+              <div class="search__field">
+                <svg class="search__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+                <input class="search__input" type="search" id="tool-search" autocomplete="off" aria-describedby="tool-counts">
+              </div>
             </div>
             <button class="btn btn--ghost" id="tools-reset" type="button" hidden>Reset</button>
           </div>
@@ -166,14 +171,67 @@
           <p class="toolbar__counts" id="tool-counts" aria-live="polite">Memuat data alat…</p>
         </div>
 
+        <!-- Ruang iklan (atas). Tempel kode unit iklan dari AdSense di dalam
+             <aside> ini, contohnya:
+             <ins class="adsbygoogle" style="display:block"
+                  data-ad-client="ca-pub-5901632307149966"
+                  data-ad-slot="0000000000"
+                  data-ad-format="auto" data-full-width-responsive="true"></ins>
+             lalu tambahkan: <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+             Ruang ini otomatis tampil begitu unit iklan terpasang. -->
+        <aside class="ad-slot" data-ad-slot="atas" aria-label="Iklan"></aside>
+
+        <!-- Panel alat: Gabung PDF. Tampil inline di alur halaman (bukan jendela
+             terpisah): dibuka lewat tombol "Buka alat" pada kartu PDF Merger,
+             ditutup lewat tombol Tutup atau tombol Esc saat fokus ada di panel. -->
+        <section class="tool-panel" id="pdf-merge-panel" hidden tabindex="-1" aria-labelledby="pdf-merge-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="pdf-merge-title">Gabung PDF</h2>
+              <p class="tool-panel__sub" id="pdf-merge-limits">Maks 10 berkas, total 25 MB, 200 halaman</p>
+            </div>
+            <button class="tool-panel__close" id="pdf-merge-close" type="button" aria-label="Tutup panel gabung PDF">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="pdf-merge-note">Berkas dikirim ke server untuk digabung di memori, lalu dihapus setelah selesai. Tidak ada berkas yang ditulis ke disk.</p>
+
+          <label class="drop" id="pdf-merge-drop" for="pdf-merge-input">
+            <svg class="drop__icon" aria-hidden="true"><use href="#icon-pdf"></use></svg>
+            <span class="drop__text">Tarik dan lepas berkas PDF di sini, atau <span class="drop__browse">pilih berkas</span></span>
+            <span class="drop__hint">Hanya berkas PDF. Urutan pada daftar menentukan urutan halaman hasil.</span>
+            <input class="sr-only" type="file" id="pdf-merge-input" accept="application/pdf,.pdf" multiple>
+          </label>
+
+          <ol class="filelist" id="pdf-merge-list" aria-label="Berkas PDF terpilih" hidden></ol>
+          <p class="filelist__empty" id="pdf-merge-empty">Belum ada berkas dipilih.</p>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="pdf-merge-status" role="status" aria-live="polite">Pilih berkas PDF, atur urutannya, lalu tekan "Gabung PDF".</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="pdf-merge-clear" type="button" disabled>Kosongkan</button>
+              <button class="btn btn--primary" id="pdf-merge-submit" type="button" disabled>Gabung PDF</button>
+              <a class="btn btn--secondary" id="pdf-merge-download" href="#" download="gabungan.pdf" hidden>Unduh hasil</a>
+            </div>
+          </div>
+        </section>
+
         <div class="tools__grid" id="tools-grid"></div>
         <p class="tools__empty" id="tools-empty" hidden aria-live="polite">
           Tidak ada alat yang cocok dengan pencarianmu.
           <button class="btn btn--ghost" id="tools-empty-reset" type="button">Reset filter</button>
         </p>
 
+        <!-- Ruang iklan (tengah daftar). Tempel kode unit iklan dari AdSense di
+             dalam <aside> ini seperti pada ruang iklan atas. -->
+        <aside class="ad-slot" data-ad-slot="tengah" aria-label="Iklan">
+          <!-- assets/app.js MEMINDAHKAN elemen ini ke dalam #tools-grid setiap
+               kali daftar dirender (referensinya diambil sekali saja, node ini
+               tidak pernah dibuat ulang), karena renderTools() mengosongkan
+               seluruh isi grid setiap kali dipanggil. -->
+        </aside>
+
         <noscript>
-          <p class="tools__noscript">Daftar alat interaktif membutuhkan JavaScript. Kategori yang tersedia: Gambar/Video/Audio, PDF, Teks &amp; Daftar, Tanggal &amp; Waktu, Matematika, Data, dan AI (rencana).</p>
+          <p class="tools__noscript">Daftar alat interaktif membutuhkan JavaScript. Kategori yang tersedia: Gambar/Video/Audio, PDF, Teks &amp; Daftar, Tanggal &amp; Waktu, Matematika, Data, dan AI (segera).</p>
         </noscript>
       </div>
     </section>
@@ -198,46 +256,6 @@
       </section>
     </template>
 
-    <!-- ============ Panel alat: Merge PDF (diproses di server) ============ -->
-    <!-- Modal ini dibuka dari kartu "PDF Merger" (assets/app.js) dan bicara ke
-         OmniTools API lewat POST /api/pdf/merge. Statis di HTML supaya punya
-         struktur aksesibilitas yang jelas. -->
-    <div class="modal" id="pdf-merge-modal" hidden>
-      <div class="modal__backdrop" data-close="1"></div>
-      <div class="modal__panel" id="pdf-merge-dialog" role="dialog" aria-modal="true"
-           aria-labelledby="pdf-merge-title" aria-describedby="pdf-merge-privacy" tabindex="-1">
-
-        <div class="modal__head">
-          <div>
-            <h2 class="modal__title" id="pdf-merge-title">PDF Merger</h2>
-            <p class="modal__sub" id="pdf-merge-limits">Maks 10 berkas · total 25 MB · 200 halaman</p>
-          </div>
-          <button class="modal__close" id="pdf-merge-close" type="button" aria-label="Tutup panel PDF Merger">✕</button>
-        </div>
-
-        <p class="modal__note" id="pdf-merge-privacy">Berkas dikirim ke server kami untuk digabung, lalu dihapus dari memori setelah selesai. Alat lain di halaman ini tetap berjalan di browser kamu.</p>
-
-        <label class="drop" id="pdf-merge-drop" for="pdf-merge-input">
-          <svg class="drop__icon" aria-hidden="true"><use href="#icon-pdf"></use></svg>
-          <span class="drop__text">Tarik &amp; lepas berkas PDF di sini, atau <span class="drop__browse">pilih berkas</span></span>
-          <span class="drop__hint">Hanya berkas PDF — urutan pada daftar menentukan urutan halaman hasil.</span>
-          <input class="sr-only" type="file" id="pdf-merge-input" accept="application/pdf,.pdf" multiple>
-        </label>
-
-        <ol class="filelist" id="pdf-merge-list" aria-label="Berkas PDF terpilih" hidden></ol>
-        <p class="filelist__empty" id="pdf-merge-empty">Belum ada berkas dipilih.</p>
-
-        <div class="modal__foot">
-          <p class="status" id="pdf-merge-status" role="status" aria-live="polite">Pilih berkas PDF, atur urutannya, lalu tekan “Gabung PDF”.</p>
-          <div class="modal__actions">
-            <button class="btn btn--ghost" id="pdf-merge-clear" type="button" disabled>Kosongkan</button>
-            <button class="btn btn--primary" id="pdf-merge-submit" type="button" disabled>Gabung PDF</button>
-            <a class="btn btn--secondary" id="pdf-merge-download" href="#" download="gabungan.pdf" hidden>Unduh hasil</a>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- ================= KENAPA OMNITOOLS (sekunder) ================= -->
     <section class="features section--sub" id="kenapa" aria-labelledby="kenapa-title">
       <div class="container">
@@ -247,23 +265,23 @@
         <div class="features__grid">
           <article class="card card--compact reveal">
             <svg class="card__icon" aria-hidden="true"><use href="#icon-shield"></use></svg>
-            <h3 class="card__title">Files tetap di perangkatmu</h3>
-            <p class="card__desc">Alat berbasis browser tidak mengunggah berkas. Alat server ditandai jelas.</p>
+            <h3 class="card__title">Berkas tidak ditulis ke disk</h3>
+            <p class="card__desc">Penggabung PDF memproses di memori server, lalu menghapusnya.</p>
           </article>
           <article class="card card--compact reveal">
-            <svg class="card__icon" aria-hidden="true"><use href="#icon-bolt"></use></svg>
-            <h3 class="card__title">Ringan, tanpa instalasi</h3>
-            <p class="card__desc">Buka tab, langsung pakai, tanpa akun.</p>
+            <svg class="card__icon" aria-hidden="true"><use href="#icon-tag"></use></svg>
+            <h3 class="card__title">Tanpa akun</h3>
+            <p class="card__desc">Tidak perlu daftar atau masuk.</p>
           </article>
           <article class="card card--compact reveal">
             <svg class="card__icon" aria-hidden="true"><use href="#icon-grid"></use></svg>
-            <h3 class="card__title">7 kategori, 32 alat</h3>
-            <p class="card__desc">Semua kebutuhan harian dalam satu pintu.</p>
+            <h3 class="card__title">Ramah ponsel</h3>
+            <p class="card__desc">Tata letak menyesuaikan layar, dari ponsel sampai desktop.</p>
           </article>
           <article class="card card--compact reveal">
-            <svg class="card__icon" aria-hidden="true"><use href="#icon-code"></use></svg>
-            <h3 class="card__title">Open source &amp; self-host</h3>
-            <p class="card__desc">Bisa dijalankan sendiri lewat container.</p>
+            <svg class="card__icon" aria-hidden="true"><use href="#icon-box"></use></svg>
+            <h3 class="card__title">7 kategori, 32 alat</h3>
+            <p class="card__desc">Dikelompokkan supaya gampang dicari.</p>
           </article>
         </div>
       </div>
@@ -280,16 +298,16 @@
           <ol class="phases__grid">
             <li class="phase reveal">
               <span class="phase__num">Fase 1</span>
-              <span class="phase__when">~3 bulan pertama</span>
-              <h3 class="phase__title">MVP — 6 alat inti</h3>
+              <span class="phase__when">3 bulan pertama</span>
+              <h3 class="phase__title">6 alat inti</h3>
               <ul class="phase__list">
-                <li class="phase__item">6 alat Live (demo)</li>
-                <li class="phase__item">UI dasar &amp; dark mode</li>
+                <li class="phase__item">6 alat jalan di browser</li>
+                <li class="phase__item">Tata letak dasar &amp; mode gelap</li>
               </ul>
             </li>
             <li class="phase reveal">
               <span class="phase__num">Fase 2</span>
-              <span class="phase__when">~3–6 bulan</span>
+              <span class="phase__when">3 sampai 6 bulan</span>
               <h3 class="phase__title">Perluas kategori + PWA</h3>
               <ul class="phase__list">
                 <li class="phase__item">Kategori PDF, Data, Waktu</li>
@@ -298,11 +316,11 @@
             </li>
             <li class="phase reveal">
               <span class="phase__num">Fase 3</span>
-              <span class="phase__when">~6–12 bulan</span>
+              <span class="phase__when">6 sampai 12 bulan</span>
               <h3 class="phase__title">AI &amp; kolaborasi</h3>
               <ul class="phase__list">
                 <li class="phase__item">Alat AI on-device</li>
-                <li class="phase__item">API publik (dievaluasi)</li>
+                <li class="phase__item">Ekspor dan impor berkas</li>
               </ul>
             </li>
           </ol>
@@ -324,8 +342,8 @@
           </li>
           <li class="step reveal">
             <span class="step__num">2</span>
-            <h3 class="step__title">Proses cepat</h3>
-            <p class="step__desc">Alat browser mengolah berkas di perangkatmu; alat server memproses lewat API kami.</p>
+            <h3 class="step__title">Berkas diproses</h3>
+            <p class="step__desc">Alat yang jalan di browser mengolah berkas di perangkatmu, yang lain dikerjakan di server.</p>
           </li>
           <li class="step reveal">
             <span class="step__num">3</span>
@@ -345,29 +363,35 @@
         <div class="faq__list">
           <details class="faq__item">
             <summary class="faq__q">Apakah OmniTools gratis?<svg class="faq__chevron" aria-hidden="true"><use href="#icon-chevron"></use></svg></summary>
-            <div class="faq__a">Ya, alat inti direncanakan gratis. Halaman ini adalah demo, belum ada paket berbayar.</div>
+            <div class="faq__a">Ya, tidak ada paket berbayar di halaman ini dan tidak perlu bikin akun.</div>
           </details>
           <details class="faq__item">
             <summary class="faq__q">Apakah file saya diunggah ke server?<svg class="faq__chevron" aria-hidden="true"><use href="#icon-chevron"></use></svg></summary>
-            <div class="faq__a">Untuk alat yang berjalan di browser: tidak. Khusus alat bertanda <strong>Live (API)</strong> seperti Merge PDF, berkas dikirim ke server kami untuk diproses, lalu dihapus dari memori setelah selesai — tidak disimpan di disk.</div>
+            <div class="faq__a">Khusus penggabung PDF, ya: berkas dikirim ke server untuk digabung di memori lalu dihapus setelah selesai, tidak ditulis ke disk. Alat lain belum bisa dipakai, jadi belum ada yang diunggah.</div>
           </details>
           <details class="faq__item">
             <summary class="faq__q">Bisakah saya self-host?<svg class="faq__chevron" aria-hidden="true"><use href="#icon-chevron"></use></svg></summary>
-            <div class="faq__a">Rencananya bisa, lewat image container yang ringan. Saat ini belum tersedia.</div>
+            <div class="faq__a">Belum bisa. Rencananya nanti bisa dijalankan sendiri lewat container.</div>
           </details>
           <details class="faq__item">
             <summary class="faq__q">Kapan rilis?<svg class="faq__chevron" aria-hidden="true"><use href="#icon-chevron"></use></svg></summary>
-            <div class="faq__a">Bertahap sesuai roadmap; belum ada tanggal pasti — halaman ini masih demo.</div>
+            <div class="faq__a">Dirilis bertahap, belum ada tanggal pasti.</div>
           </details>
           <details class="faq__item">
-            <summary class="faq__q">Ada API-nya?<svg class="faq__chevron" aria-hidden="true"><use href="#icon-chevron"></use></svg></summary>
-            <div class="faq__a">Sudah ada API internal yang menggerakkan alat server (mis. <code>/api/pdf/merge</code> untuk Merge PDF). API publik masih direncanakan di Fase 3 dan sedang dievaluasi.</div>
+            <summary class="faq__q">Kenapa gabungan PDF saya gagal?<svg class="faq__chevron" aria-hidden="true"><use href="#icon-chevron"></use></svg></summary>
+            <div class="faq__a">Biasanya karena salah satu dari ini: berkas terkunci kata sandi, berkas rusak atau bukan benar-benar PDF, jumlah halaman melebihi 200, jumlah berkas lebih dari 10, atau total ukuran di atas 25 MB. Pesan galat dari server akan muncul di panel alat.</div>
           </details>
         </div>
       </div>
     </section>
 
   </main>
+
+  <div class="container">
+    <!-- Ruang iklan (bawah, sebelum footer). Tempel kode unit iklan dari
+         AdSense di dalam <aside> ini seperti pada ruang iklan atas. -->
+    <aside class="ad-slot" data-ad-slot="bawah" aria-label="Iklan"></aside>
+  </div>
 
   <footer class="footer">
     <div class="footer__inner container">
@@ -376,17 +400,21 @@
         <p class="footer__copy">© 2026 bahzi.fun</p>
       </div>
       <nav class="footer__nav" aria-label="Tautan footer">
-        <a class="footer__link" href="#" aria-label="Buka repositori GitHub (dummy)">GitHub</a>
-        <a class="footer__link" href="#" aria-label="Hubungi kami (dummy)">Kontak</a>
-        <a class="footer__link" href="#" aria-label="Baca kebijakan privasi (dummy)">Privacy</a>
+        <a class="footer__link" href="privasi.html">Kebijakan privasi</a>
       </nav>
       <a class="footer__top" href="#top" aria-label="Kembali ke atas">
         <svg aria-hidden="true"><use href="#icon-arrow-up"></use></svg>
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Halaman demo — belum ada produk nyata. Tema: dark purple.</p>
+    <p class="footer__note container">Baru penggabung PDF yang bisa dipakai. Alat lain sedang disiapkan.</p>
   </footer>
+
+  <div class="cookiebar" id="cookiebar" hidden>
+    <p class="cookiebar__text">Situs ini memakai cookie untuk iklan dari Google.</p>
+    <a class="cookiebar__link" href="privasi.html">Kebijakan privasi</a>
+    <button class="btn btn--primary cookiebar__btn" id="cookiebar-ok" type="button">Mengerti</button>
+  </div>
 
   <script src="assets/app.js?v=__V__" defer></script>
 </body>
