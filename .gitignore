@@ -24,3 +24,9 @@ Thumbs.db
 # Dokumen internal — JANGAN dipublikasikan
 .internal/
 REQUIREMENT.md
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

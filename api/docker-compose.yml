@@ -1,0 +1,37 @@
+# Compose KHUSUS API OmniTools (Merge PDF).
+# Sengaja terpisah dari docker-compose.yml di root proyek (itu milik situs statis).
+# Jalankan dari folder ini:  docker compose up -d --build
+services:
+  omnitools-api:
+    build: .
+    image: omnitools-api:latest
+    container_name: omnitools-api
+    restart: unless-stopped
+    # TIDAK ada port yang dipublikasikan ke host — diakses lewat web-gateway
+    # (by Host) atau reverse proxy yang ikut di network `webnet`.
+    networks:
+      - webnet
+    environment:
+      - LOG_LEVEL=INFO
+    # Pengerasan ringan: filesystem read-only + /tmp kecil di memori.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    # Batas memori: penggabungan 10 berkas / 25 MB butuh ruang di memori.
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "/srv/app/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      app: omnitools-api
+      domain: bahzi.fun
+      description: "API OmniTools (Merge PDF) untuk bahzi.fun"
+
+networks:
+  webnet:
+    external: true

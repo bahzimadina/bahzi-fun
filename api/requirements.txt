@@ -1,0 +1,5 @@
+# OmniTools API — dependensi produksi (Python 3.12 di Docker)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pypdf==5.1.0
+python-multipart==0.0.20

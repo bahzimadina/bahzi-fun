@@ -17,7 +17,8 @@ Halaman ini adalah **etalase konsep**: memperkenalkan gagasan OmniTools secara r
 - **Tema gelap** dengan palet ungu (referensi visual dari gaya situs sentry.io).
 - **Responsif** dari layar ponsel sampai desktop.
 - **Aksesibilitas** — navigasi keyboard, fokus terlihat, `aria-label`, skip-link, dan dukungan `prefers-reduced-motion`.
-- **Tanpa dependency** — satu HTML, satu CSS, satu JavaScript vanilla. Tanpa framework, tanpa build step, tanpa CDN, tanpa analytics; font dilayani dari berkas lokal.
+- **Satu alat sudah berfungsi**: **Merge PDF** — panel di halaman ini memanggil API Python (`api/`, FastAPI) untuk menggabungkan berkas, lalu hasilnya bisa langsung diunduh.
+- **Tanpa dependency di sisi halaman** — satu HTML, satu CSS, satu JavaScript vanilla. Tanpa framework, tanpa build step, tanpa CDN, tanpa analytics; font dilayani dari berkas lokal.
 - **Siap deploy** sebagai gambar Docker (nginx) dengan penomoran versi aset otomatis agar cache tidak menyajikan berkas lama.
 
 ## Menjalankan lokal
@@ -44,13 +45,26 @@ Container tidak mem-publish port; di produksi diakses lewat reverse proxy berbas
 ```
 index.html            Halaman (navbar, daftar alat, dan bagian pendukung).
 assets/styles.css     Gaya tampilan (tema gelap, responsif, font lokal).
-assets/app.js         Data alat, render daftar, pencarian, filter, penghitung.
+assets/app.js         Data alat, render daftar, pencarian, filter, panel alat.
 assets/fonts/         Berkas font lokal.
+api/                  API Python (FastAPI) untuk alat Merge PDF + uji otomatisnya.
 Dockerfile            Gambar nginx + penomoran versi aset.
-docker-compose.yml    Menjalankan container.
+docker-compose.yml    Menjalankan container situs.
 ```
+
+## API
+
+Folder `api/` berisi layanan Python (FastAPI + uvicorn + pypdf) yang dipanggil halaman lewat `/api/...`:
+
+```bash
+cd api
+docker compose up -d --build
+```
+
+Endpoint: `GET /health`, `GET /api/pdf/merge/limits`, `POST /api/pdf/merge` (multipart, field `files`).
+Berkas diproses di memori dan tidak ditulis ke disk. Detailnya ada di `api/README.md`.
 
 ## Catatan
 
-- Demo ini tidak memiliki backend, API, database, autentikasi, form nyata, maupun service worker.
+- Halaman statis tidak punya backend sendiri; satu alat (Merge PDF) memakai API Python di folder `api/`. Fitur lain masih demo: belum ada database, autentikasi, maupun form nyata.
 - Referensi gaya visual diambil dari situs sentry.io; proyek ini tidak berafiliasi dengan Sentry.
