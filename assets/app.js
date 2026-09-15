@@ -27,7 +27,7 @@
       name: 'Gambar/Video/Audio',
       icon: 'icon-media',
       tools: [
-        { name: 'Image Resizer', desc: 'Ubah dimensi gambar langsung di browser tanpa unggah.', status: 'soon' },
+        { name: 'Image Resizer', desc: 'Ubah dimensi gambar langsung di browser tanpa unggah.', status: 'available', action: 'image-resizer' },
         { name: 'Image Converter', desc: 'Konversi format gambar umum tanpa kirim ke server.', status: 'soon' },
         { name: 'Image Editor', desc: 'Edit dasar seperti crop dan rotate di perangkat sendiri.', status: 'soon' },
         { name: 'Video Trimmer', desc: 'Potong klip video pendek tanpa upload.', status: 'soon' },
@@ -275,7 +275,7 @@
           openBtn.type = 'button';
           openBtn.className = 'tool-card__open';
           openBtn.setAttribute('aria-expanded', 'false');
-          openBtn.setAttribute('aria-controls', 'pdf-merge-panel');
+          openBtn.setAttribute('aria-controls', tool.action + '-panel');
           openBtn.dataset.toolAction = tool.action;
           openBtn.setAttribute('aria-label', 'Buka alat ' + tool.name);
           openBtn.textContent = 'Buka alat';

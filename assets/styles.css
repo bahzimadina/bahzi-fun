@@ -606,4 +606,49 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   .btn { min-height: 44px; }
   .navbar__link,
   .footer__link { display: inline-flex; align-items: center; min-height: 44px; }
+  .imgres__check { min-height: 44px; }
+  .field input[type="number"],
+  .field select { min-height: 44px; }
+  .field input[type="range"] { min-height: 44px; }
+}
+
+/* ================= Image Resizer: panel alat inline ================= */
+.imgres__info, .imgres__result {
+  margin: 0; padding: .6rem .7rem; font-size: .85rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.imgres__filename {
+  margin: 0 0 .2rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imgres__meta { margin: 0; font-family: var(--font-mono); font-size: .78rem; color: var(--text-muted); }
+
+.imgres__controls { display: flex; flex-direction: column; gap: .8rem; }
+.imgres__row { display: flex; flex-wrap: wrap; gap: .8rem; }
+.imgres__row .field { flex: 1 1 160px; }
+
+.field { display: flex; flex-direction: column; gap: .3rem; }
+.field label { font-size: .8rem; color: var(--text-muted); }
+.field input[type="number"],
+.field select {
+  min-height: 40px; padding: .45rem .6rem; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--code); color: var(--text);
+  font-family: var(--font-sans); font-size: .88rem;
+  transition: border-color var(--transition);
+}
+.field input[type="number"]:focus, .field select:focus { border-color: var(--brand); }
+.field input[type="range"] { accent-color: var(--brand); width: 100%; }
+
+.imgres__check {
+  display: inline-flex; align-items: center; gap: .5rem; width: fit-content;
+  font-size: .86rem; cursor: pointer;
+}
+.imgres__check input[type="checkbox"] { accent-color: var(--brand); width: 17px; height: 17px; }
+
+.imgres__presets { display: flex; flex-wrap: wrap; gap: .5rem; }
+
+@media (pointer: coarse) {
+  .field input[type="number"],
+  .field select,
+  .field input[type="range"] { min-height: 44px; }
 }
