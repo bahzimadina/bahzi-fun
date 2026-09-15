@@ -1,0 +1,26 @@
+# Jangan pernah commit kredensial
+.env
+.env.*
+*.env
+*secret*
+*token*
+*.key
+*.pem
+id_rsa*
+credentials.json
+.netrc
+.git-credentials
+
+# Folder internal — tidak untuk repo publik
+dns-backup/
+backup-sebelum-sentry/
+.singa/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*~
+
+# Dokumen internal — JANGAN dipublikasikan
+.internal/
+REQUIREMENT.md

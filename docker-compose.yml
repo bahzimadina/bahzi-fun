@@ -1,0 +1,17 @@
+services:
+  bahzi-landing:
+    build: .
+    container_name: bahzi-landing
+    image: bahzi-landing:latest
+    restart: unless-stopped
+    # Tidak ada port yang dipublikasikan ke host — diakses lewat web-gateway (by Host).
+    networks:
+      - webnet
+    labels:
+      app: bahzi-fun-landing
+      domain: bahzi.fun
+      description: "Landing page OmniTools di bahzi.fun"
+
+networks:
+  webnet:
+    external: true
