@@ -652,3 +652,10 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   .field select,
   .field input[type="range"] { min-height: 44px; }
 }
+
+/* Tautan kecil di perangkat sentuh: samakan ke target 44px. Ditaruh paling
+   akhir berkas supaya tidak tertimpa blok CSS yang ditambahkan belakangan. */
+@media (pointer: coarse) {
+  .navbar__brand,
+  .footer__top { display: inline-flex; align-items: center; min-height: 44px; }
+}
