@@ -28,9 +28,36 @@ API_DIR = Path(__file__).resolve().parent
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
+from PIL import Image  # noqa: E402
 from pypdf import PdfReader, PdfWriter  # noqa: E402
 
 from app import __version__  # noqa: E402
+from app.image_convert import (  # noqa: E402
+    EMPTY_FILE as IMG_EMPTY_FILE,
+    IMAGE_TOO_LARGE as IMG_IMAGE_TOO_LARGE,
+    IMAGE_UNREADABLE as IMG_IMAGE_UNREADABLE,
+    INVALID_QUALITY as IMG_INVALID_QUALITY,
+    MAX_BYTES as IMG_MAX_BYTES,
+    MAX_FILES as IMG_MAX_FILES,
+    MAX_PIXELS as IMG_MAX_PIXELS,
+    NO_FILES as IMG_NO_FILES,
+    NOT_IMAGE as IMG_NOT_IMAGE,
+    PAYLOAD_TOO_LARGE as IMG_PAYLOAD_TOO_LARGE,
+    QUALITY_DEFAULT as IMG_QUALITY_DEFAULT,
+    QUALITY_MAX as IMG_QUALITY_MAX,
+    QUALITY_MIN as IMG_QUALITY_MIN,
+    TARGETS as IMG_TARGETS,
+    TOO_MANY_FILES as IMG_TOO_MANY_FILES,
+    UNSUPPORTED_TARGET as IMG_UNSUPPORTED_TARGET,
+    ImageConvertError,
+    check_file_count as check_image_file_count,
+    check_total_size as check_image_total_size,
+    convert_image,
+    detect_format,
+    is_supported_image,
+    normalize_quality,
+    normalize_target,
+)
 from app.pdf_merge import (  # noqa: E402
     ERR_EMPTY_FILE,
     ERR_ENCRYPTED,
@@ -77,6 +104,30 @@ def make_encrypted_pdf(pages: int = 1, password: str = "rahasia") -> bytes:
 
 def page_count(data: bytes) -> int:
     return len(PdfReader(io.BytesIO(data)).pages)
+
+
+def make_image(format: str = "PNG", size: tuple[int, int] = (60, 60), color: str = "blue", mode: str | None = None) -> bytes:
+    """Buat berkas gambar uji di memori."""
+    img_mode = mode or ("RGBA" if "A" in format.upper() else "RGB")
+    img = Image.new(img_mode, size, color)
+    buf = io.BytesIO()
+    save_fmt = "JPEG" if format.upper() in ("JPG", "JPEG") else format.upper()
+    img.save(buf, format=save_fmt)
+    return buf.getvalue()
+
+
+def expect_image_error(func, code: str, status: int) -> ImageConvertError:
+    """Pastikan func() melempar ImageConvertError dengan kode + status yang tepat."""
+    try:
+        func()
+    except ImageConvertError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar ImageConvertError {code}")
 
 
 def expect_error(func, code: str, status: int) -> PdfMergeError:
@@ -174,6 +225,129 @@ def test_menolak_pdf_terproteksi_sandi() -> None:
     expect_error(lambda: merge_pdfs([make_encrypted_pdf(1)]), ERR_ENCRYPTED, 422)
 
 
+# --- Uji logika Image Converter ---------------------------------------------
+def test_image_magic_bytes_detection() -> None:
+    png_data = make_image("PNG")
+    jpeg_data = make_image("JPEG")
+    webp_data = make_image("WEBP")
+
+    assert detect_format(png_data) == "png"
+    assert detect_format(jpeg_data) == "jpeg"
+    assert detect_format(webp_data) == "webp"
+    assert is_supported_image(png_data) is True
+    assert is_supported_image(jpeg_data) is True
+    assert is_supported_image(webp_data) is True
+
+    assert detect_format(b"") is None
+    assert detect_format(b"bukan gambar") is None
+    assert is_supported_image(b"bukan gambar") is False
+
+
+def test_image_convert_png_ke_jpeg_sukses() -> None:
+    png = make_image("PNG", size=(50, 50), color="green")
+    result = convert_image(png, target="jpeg", quality=85)
+    assert result.input_format == "png"
+    assert result.output_format == "jpeg"
+    assert result.width == 50
+    assert result.height == 50
+    assert result.data.startswith(b"\xff\xd8\xff")
+    assert detect_format(result.data) == "jpeg"
+
+
+def test_image_convert_jpeg_ke_webp_sukses() -> None:
+    jpeg = make_image("JPEG", size=(40, 40), color="red")
+    result = convert_image(jpeg, target="webp", quality=80)
+    assert result.input_format == "jpeg"
+    assert result.output_format == "webp"
+    assert detect_format(result.data) == "webp"
+
+
+def test_image_convert_png_ke_png_sukses() -> None:
+    png = make_image("PNG", size=(30, 30), color="yellow")
+    result = convert_image(png, target="png")
+    assert result.input_format == "png"
+    assert result.output_format == "png"
+    assert detect_format(result.data) == "png"
+
+
+def test_image_convert_format_target_sama_dengan_masukan() -> None:
+    jpeg = make_image("JPEG", size=(35, 35), color="blue")
+    result_jpeg = convert_image(jpeg, target="jpeg")
+    assert result_jpeg.output_format == "jpeg"
+
+    webp = make_image("WEBP", size=(35, 35), color="cyan")
+    result_webp = convert_image(webp, target="webp")
+    assert result_webp.output_format == "webp"
+
+
+def test_image_convert_kualitas_rendah_lebih_kecil_dari_kualitas_tinggi() -> None:
+    img = Image.new("RGB", (120, 120))
+    pixels = img.load()
+    for x in range(120):
+        for y in range(120):
+            pixels[x, y] = ((x * 7) % 256, (y * 11) % 256, ((x + y) * 13) % 256)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    png_bytes = buf.getvalue()
+
+    res_q20 = convert_image(png_bytes, target="jpeg", quality=20)
+    res_q95 = convert_image(png_bytes, target="jpeg", quality=95)
+    assert len(res_q20.data) < len(res_q95.data), (
+        f"Kualitas 20 ({len(res_q20.data)} bytes) harus lebih kecil dari 95 ({len(res_q95.data)} bytes)"
+    )
+
+
+def test_image_convert_alpha_ke_jpeg_latar_putih() -> None:
+    img = Image.new("RGBA", (30, 30), (0, 0, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    png_transparent = buf.getvalue()
+
+    result = convert_image(png_transparent, target="jpeg")
+    assert result.output_format == "jpeg"
+    out_img = Image.open(io.BytesIO(result.data))
+    assert out_img.mode == "RGB"
+    assert out_img.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_image_convert_menolak_tanpa_berkas() -> None:
+    expect_image_error(lambda: check_image_file_count(0), IMG_NO_FILES, 400)
+
+
+def test_image_convert_menolak_dua_berkas() -> None:
+    expect_image_error(lambda: check_image_file_count(2), IMG_TOO_MANY_FILES, 400)
+
+
+def test_image_convert_menolak_berkas_kosong() -> None:
+    expect_image_error(lambda: convert_image(b""), IMG_EMPTY_FILE, 400)
+
+
+def test_image_convert_menolak_bukan_gambar() -> None:
+    expect_image_error(lambda: convert_image(b"ini berkas teks yang dinamai gambar.png"), IMG_NOT_IMAGE, 400)
+
+
+def test_image_convert_menolak_target_tidak_didukung() -> None:
+    png = make_image("PNG")
+    expect_image_error(lambda: convert_image(png, target="gif"), IMG_UNSUPPORTED_TARGET, 400)
+    expect_image_error(lambda: convert_image(png, target="tiff"), IMG_UNSUPPORTED_TARGET, 400)
+
+
+def test_image_convert_menolak_kualitas_tidak_valid() -> None:
+    png = make_image("PNG")
+    expect_image_error(lambda: convert_image(png, quality=0), IMG_INVALID_QUALITY, 400)
+    expect_image_error(lambda: convert_image(png, quality=101), IMG_INVALID_QUALITY, 400)
+    expect_image_error(lambda: convert_image(png, quality="abc"), IMG_INVALID_QUALITY, 400)
+
+
+def test_image_convert_menolak_gambar_rusak() -> None:
+    corrupted = b"\x89PNG\r\n\x1a\n" + b"xyz" * 50
+    expect_image_error(lambda: convert_image(corrupted, target="jpeg"), IMG_IMAGE_UNREADABLE, 422)
+
+
+def test_image_convert_menolak_ukuran_lewat_batas() -> None:
+    expect_image_error(lambda: check_image_total_size(IMG_MAX_BYTES + 1), IMG_PAYLOAD_TOO_LARGE, 413)
+
+
 # --- Uji HTTP lewat TestClient (butuh httpx) ---------------------------------
 def _test_client():
     try:
@@ -259,6 +433,94 @@ def test_http_merge_tanpa_berkas_ditolak_400() -> None:
     response = client.post("/api/pdf/merge", files=[])
     assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == "NO_FILES"
+
+
+def test_http_image_convert_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/image/convert/limits")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["max_files"] == IMG_MAX_FILES
+    assert body["max_bytes"] == IMG_MAX_BYTES
+    assert body["max_total_mb"] == 15
+    assert body["max_pixels"] == IMG_MAX_PIXELS
+    assert body["targets"] == ["jpeg", "png", "webp"]
+    assert body["target_labels"]["jpeg"] == "JPG"
+    assert body["quality_min"] == 10
+    assert body["quality_max"] == 100
+    assert body["quality_default"] == 85
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_http_image_convert_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    png_data = make_image("PNG", size=(60, 60), color="magenta")
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.png", png_data, "image/png"))],
+        data={"format": "jpeg", "quality": "80"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("image/jpeg")
+    assert 'filename="hasil.jpg"' in response.headers["content-disposition"]
+    assert response.headers["cache-control"].startswith("no-store")
+    assert response.headers["x-input-format"] == "png"
+    assert response.headers["x-output-format"] == "jpeg"
+    assert response.headers["x-pixels"] == "3600"
+    assert response.headers["x-total-bytes"] == str(len(response.content))
+    assert "x-processing-ms" in response.headers
+    assert response.content.startswith(b"\xff\xd8\xff")
+
+
+def test_http_image_convert_tanpa_berkas_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/image/convert", files=[])
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_NO_FILES
+
+
+def test_http_image_convert_dua_berkas_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    files = [
+        ("files", ("a.png", make_image("PNG"), "image/png")),
+        ("files", ("b.png", make_image("PNG"), "image/png")),
+    ]
+    response = client.post("/api/image/convert", files=files)
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_TOO_MANY_FILES
+
+
+def test_http_image_convert_bukan_gambar_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("palsu.png", b"ini cuma teks", "image/png"))],
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_NOT_IMAGE
+
+
+def test_http_image_convert_kualitas_tidak_valid_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.png", make_image("PNG"), "image/png"))],
+        data={"quality": "150"},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_INVALID_QUALITY
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

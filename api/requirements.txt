@@ -3,3 +3,5 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pypdf==5.1.0
 python-multipart==0.0.20
+# Dipakai Image Converter; wheel manylinux sudah membawa dukungan JPEG/PNG/WebP
+pillow==12.3.0

@@ -647,10 +647,18 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
 
 .imgres__presets { display: flex; flex-wrap: wrap; gap: .5rem; }
 
+/* ================= Image Converter: panel alat inline ================= */
+.convert-options { display: flex; flex-direction: column; gap: .8rem; }
+
 @media (pointer: coarse) {
   .field input[type="number"],
   .field select,
-  .field input[type="range"] { min-height: 44px; }
+  .field input[type="range"],
+  #image-converter-format,
+  #image-converter-quality,
+  #image-converter-submit,
+  #image-converter-clear,
+  #image-converter-download { min-height: 44px; }
 }
 
 /* Tautan kecil di perangkat sentuh: samakan ke target 44px. Ditaruh paling

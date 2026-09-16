@@ -17,12 +17,30 @@ import logging
 import os
 import time
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from . import __version__
+from .image_convert import (
+    CHUNK_SIZE as IMG_CHUNK_SIZE,
+    MAX_BYTES as IMG_MAX_BYTES,
+    MAX_FILES as IMG_MAX_FILES,
+    MAX_PIXELS as IMG_MAX_PIXELS,
+    MIME_TYPES as IMG_MIME_TYPES,
+    QUALITY_DEFAULT as IMG_QUALITY_DEFAULT,
+    QUALITY_MAX as IMG_QUALITY_MAX,
+    QUALITY_MIN as IMG_QUALITY_MIN,
+    TARGET_LABELS as IMG_TARGET_LABELS,
+    TARGETS as IMG_TARGETS,
+    ImageConvertError,
+    check_file_count as check_image_file_count,
+    check_total_size as check_image_total_size,
+    convert_image,
+    normalize_quality,
+    normalize_target,
+)
 from .pdf_merge import (
     CHUNK_SIZE,
     ERR_TOO_LARGE,
@@ -51,8 +69,8 @@ app = FastAPI(
     title="OmniTools API",
     version=__version__,
     description=(
-        "API server untuk alat OmniTools (bahzi.fun). Alat aktif: Merge PDF. "
-        "Berkas diproses di memori dan tidak disimpan."
+        "API server untuk alat OmniTools (bahzi.fun). Alat aktif: Merge PDF, "
+        "Image Converter. Berkas diproses di memori dan tidak disimpan."
     ),
 )
 
@@ -67,7 +85,15 @@ if _cors_origins:
         allow_origins=_cors_origins,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["X-File-Count", "X-Page-Count", "X-Total-Bytes", "X-Processing-Ms"],
+        expose_headers=[
+            "X-File-Count",
+            "X-Page-Count",
+            "X-Total-Bytes",
+            "X-Processing-Ms",
+            "X-Input-Format",
+            "X-Output-Format",
+            "X-Pixels",
+        ],
     )
 
 
@@ -76,6 +102,13 @@ if _cors_origins:
 async def handle_pdf_error(request: Request, exc: PdfMergeError) -> JSONResponse:
     """Error yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
     logger.warning("ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
+@app.exception_handler(ImageConvertError)
+async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONResponse:
+    """Error konversi gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("konversi ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
@@ -160,6 +193,37 @@ def _reject_oversized_content_length(request: Request) -> None:
         check_total_size(declared - CONTENT_LENGTH_SLACK)
 
 
+async def _read_capped_image(upload: UploadFile, remaining_budget: int) -> bytes:
+    """Baca unggahan gambar sepotong-sepotong, tolak bila lewat batas."""
+    if remaining_budget <= 0:
+        check_image_total_size(IMG_MAX_BYTES + 1)
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(IMG_CHUNK_SIZE)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > remaining_budget:
+            check_image_total_size(IMG_MAX_BYTES + 1)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _reject_oversized_image_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas gambar."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > IMG_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        check_image_total_size(declared - CONTENT_LENGTH_SLACK)
+
+
 def _limits_payload() -> dict:
     return {
         "max_files": MAX_FILES,
@@ -172,6 +236,28 @@ def _limits_payload() -> dict:
         "note": (
             "Berkas dikirim ke server ini, digabung di memori, lalu dibuang setelah "
             "respons dikirim. Tidak ada berkas yang disimpan di disk."
+        ),
+    }
+
+
+def _image_convert_limits_payload() -> dict:
+    return {
+        "max_files": IMG_MAX_FILES,
+        "max_bytes": IMG_MAX_BYTES,
+        "max_total_mb": IMG_MAX_BYTES // (1024 * 1024),
+        "max_pixels": IMG_MAX_PIXELS,
+        "targets": list(IMG_TARGETS.keys()),
+        "target_labels": IMG_TARGET_LABELS,
+        "quality_min": IMG_QUALITY_MIN,
+        "quality_max": IMG_QUALITY_MAX,
+        "quality_default": IMG_QUALITY_DEFAULT,
+        "quality_applies_to": ["jpeg", "webp"],
+        "accept": "image/png,image/jpeg,image/webp",
+        "result_filename": "hasil",
+        "processed_on": "server",
+        "note": (
+            "Gambar dikirim ke server untuk dikonversi di memori, lalu dihapus "
+            "setelah respons dikirim. Tidak ada berkas yang disimpan di disk."
         ),
     }
 
@@ -237,6 +323,64 @@ async def pdf_merge(request: Request, files: list[UploadFile] = File(default=[])
     return Response(content=result.data, media_type="application/pdf", headers=headers)
 
 
+@app.get("/api/image/convert/limits")
+async def image_convert_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Image Converter."""
+    return JSONResponse(content=_image_convert_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/image/convert")
+async def image_convert(
+    request: Request,
+    files: list[UploadFile] = File(default=[]),
+    format: str = Form(default="jpeg"),
+    quality: str | None = Form(default=None),
+):
+    """Konversi satu gambar antar format (PNG ⇄ JPEG ⇄ WebP).
+
+    Respons: binary gambar, Content-Type sesuai format output,
+    Content-Disposition: attachment; filename="hasil.<ext>".
+    """
+    started = time.perf_counter()
+
+    uploads = [f for f in files if f is not None]
+    check_image_file_count(len(uploads))
+    _reject_oversized_image_content_length(request)
+
+    payload = await _read_capped_image(uploads[0], IMG_MAX_BYTES)
+    check_image_total_size(len(payload))
+
+    norm_target = normalize_target(format)
+    norm_quality = normalize_quality(quality)
+
+    result = convert_image(payload, target=norm_target, quality=norm_quality)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "konversi selesai: in=%s out=%s piksel=%d byte=%d durasi=%.0fms",
+        result.input_format,
+        result.output_format,
+        result.width * result.height,
+        len(result.data),
+        duration_ms,
+    )
+
+    ext = IMG_TARGETS[result.output_format].lstrip(".")
+    media_type = IMG_MIME_TYPES[result.output_format]
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="hasil.{ext}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Input-Format": result.input_format,
+        "X-Output-Format": result.output_format,
+        "X-Pixels": str(result.width * result.height),
+        "X-Total-Bytes": str(len(result.data)),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=media_type, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -244,5 +388,6 @@ async def root() -> dict:
         "service": SERVICE_NAME,
         "version": __version__,
         "docs": "/docs",
-        "tools": ["pdf-merge"],
+        "tools": ["pdf-merge", "image-convert"],
     }
+

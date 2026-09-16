@@ -13,7 +13,7 @@
   <meta name="omnitools-server-base" content="">
 
   <title>OmniTools: 32 alat harian | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 32 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF dan Ubah ukuran gambar sudah bisa dipakai, sisanya masih disiapkan.">
+  <meta name="description" content="OmniTools dari bahzi.fun: 32 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, dan Konversi gambar sudah bisa dipakai, sisa 29 alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
   <!-- Google tag (gtag.js) + Consent Mode v2.
@@ -43,13 +43,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
   <meta property="og:title" content="OmniTools: 32 alat harian">
-  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF dan Ubah ukuran gambar sudah bisa dipakai, sisanya masih disiapkan.">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, dan Konversi gambar sudah bisa dipakai, sisa 29 alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OmniTools: 32 alat harian">
-  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF dan Ubah ukuran gambar sudah bisa dipakai, sisanya masih disiapkan.">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, dan Konversi gambar sudah bisa dipakai, sisa 29 alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -167,7 +167,7 @@
 
         <div class="tools__head">
           <h1 class="tools__title" id="alat-title">32 alat buat kerja harian</h1>
-          <p class="tools__lead">Penggabung PDF dan Ubah ukuran gambar sudah bisa dipakai. Berkasnya diproses di server lalu dihapus setelahnya. Sisanya, 30 alat lain, masih disiapkan.</p>
+          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, dan Konversi gambar sudah bisa dipakai. Sisa 29 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
@@ -315,6 +315,62 @@
               <button class="btn btn--ghost" id="image-resizer-clear" type="button" disabled>Kosongkan</button>
               <button class="btn btn--primary" id="image-resizer-submit" type="button" disabled>Ubah ukuran</button>
               <a class="btn btn--secondary" id="image-resizer-download" href="#" download="hasil.jpg" hidden>Unduh hasil</a>
+            </div>
+          </div>
+        </section>
+
+        <!-- Panel alat: Konversi gambar. Tampil inline di alur halaman: dibuka lewat
+             tombol "Buka alat" pada kartu Image Converter, ditutup lewat tombol
+             Tutup atau Esc. Berkas dikirim ke server untuk dikonversi di memori,
+             lalu dihapus setelah respons dikirim. -->
+        <section class="tool-panel" id="image-converter-panel" hidden tabindex="-1" aria-labelledby="image-converter-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="image-converter-title">Konversi gambar</h2>
+              <p class="tool-panel__sub" id="image-converter-limits">Maks 1 berkas, total 15 MB (PNG, JPG, WebP)</p>
+            </div>
+            <button class="tool-panel__close" id="image-converter-close" type="button" aria-label="Tutup panel konversi gambar">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="image-converter-note">Gambar dikirim ke server untuk dikonversi di memori, lalu dihapus setelah selesai. Tidak ada berkas yang disimpan di disk.</p>
+
+          <label class="drop" id="image-converter-drop" for="image-converter-input">
+            <svg class="drop__icon" aria-hidden="true"><use href="#icon-media"></use></svg>
+            <span class="drop__text">Tarik dan lepas gambar di sini, atau <span class="drop__browse">pilih berkas</span></span>
+            <span class="drop__hint">PNG, JPG, atau WebP. Satu gambar per proses.</span>
+            <input class="sr-only" type="file" id="image-converter-input" accept="image/png,image/jpeg,image/webp">
+          </label>
+
+          <p class="filelist__empty" id="image-converter-empty">Belum ada gambar dipilih.</p>
+
+          <div class="imgres__info" id="image-converter-info" hidden>
+            <p class="imgres__filename" id="image-converter-filename"></p>
+            <p class="imgres__meta" id="image-converter-meta"></p>
+          </div>
+
+          <div class="imgres__controls" id="image-converter-controls" hidden>
+            <div class="imgres__row">
+              <div class="field">
+                <label for="image-converter-format">Format tujuan</label>
+                <select id="image-converter-format">
+                  <option value="jpeg">JPG</option>
+                  <option value="png">PNG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+              <div class="field" id="image-converter-quality-field">
+                <label for="image-converter-quality">Kualitas (<span id="image-converter-quality-value">85</span>%)</label>
+                <input type="range" id="image-converter-quality" min="10" max="100" value="85">
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="image-converter-status" role="status" aria-live="polite">Pilih berkas gambar PNG, JPG, atau WebP untuk mulai konversi.</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="image-converter-clear" type="button" disabled>Kosongkan</button>
+              <button class="btn btn--primary" id="image-converter-submit" type="button" disabled>Konversi gambar</button>
+              <a class="btn btn--secondary" id="image-converter-download" href="#" download="hasil.jpg" hidden>Unduh hasil</a>
             </div>
           </div>
         </section>
@@ -511,7 +567,7 @@
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Baru penggabung PDF yang bisa dipakai. Alat lain sedang disiapkan.</p>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, dan Konversi gambar sudah bisa dipakai. Sisa 29 alat lain sedang disiapkan.</p>
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
@@ -525,5 +581,6 @@
 
   <script src="assets/app.js?v=__V__" defer></script>
   <script src="assets/tool-image-resizer.js?v=__V__" defer></script>
+  <script src="assets/tool-image-converter.js?v=__V__" defer></script>
 </body>
 </html>
