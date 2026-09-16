@@ -66,5 +66,5 @@ Berkas diproses di memori dan tidak ditulis ke disk. Detailnya ada di `api/READM
 
 ## Catatan
 
-- Halaman statis tidak punya backend sendiri; satu alat (Merge PDF) memakai API Python di folder `api/`. Fitur lain masih demo: belum ada database, autentikasi, maupun form nyata.
+- Halaman statis tidak punya backend sendiri; alat yang butuh pemrosesan lebih berat dijalankan oleh API Python kecil di folder `api/` (mis. penggabung PDF). Fitur lain masih demo: belum ada database, autentikasi, maupun form nyata.
 - Referensi gaya visual diambil dari situs sentry.io; proyek ini tidak berafiliasi dengan Sentry.
