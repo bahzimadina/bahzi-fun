@@ -52,6 +52,17 @@ from .pdf_merge import (
     check_total_size,
     merge_pdfs,
 )
+from .word_count import (
+    CHUNK_SIZE as WC_CHUNK_SIZE,
+    ENTRY_LIMIT as WC_ENTRY_LIMIT,
+    MAX_BYTES as WC_MAX_BYTES,
+    MAX_CHARS as WC_MAX_CHARS,
+    NO_TEXT as WC_NO_TEXT,
+    TOO_LONG as WC_TOO_LONG,
+    INVALID_REQUEST as WC_INVALID_REQUEST,
+    WordCountError,
+    count_text,
+)
 
 SERVICE_NAME = "omnitools-api"
 OUTPUT_FILENAME = "gabungan.pdf"
@@ -70,7 +81,7 @@ app = FastAPI(
     version=__version__,
     description=(
         "API server untuk alat OmniTools (bahzi.fun). Alat aktif: Merge PDF, "
-        "Image Converter. Berkas diproses di memori dan tidak disimpan."
+        "Image Converter, Word Counter. Berkas dan teks diproses di memori dan tidak disimpan."
     ),
 )
 
@@ -93,6 +104,8 @@ if _cors_origins:
             "X-Input-Format",
             "X-Output-Format",
             "X-Pixels",
+            "X-Char-Count",
+            "X-Word-Count",
         ],
     )
 
@@ -112,19 +125,32 @@ async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONRe
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
+@app.exception_handler(WordCountError)
+async def handle_word_count_error(request: Request, exc: WordCountError) -> JSONResponse:
+    """Error hitung kata yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("hitung kata ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) → 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
+    if request.url.path.startswith("/api/word-count"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field teks bernama 'text'."
+    elif request.url.path.startswith("/api/image/convert"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
+    else:
+        msg = (
+            "Permintaan tidak valid. Kirim multipart/form-data dengan satu "
+            "atau lebih field bernama 'files' berisi berkas PDF."
+        )
     return JSONResponse(
         status_code=400,
         content={
             "error": {
                 "code": "INVALID_REQUEST",
-                "message": (
-                    "Permintaan tidak valid. Kirim multipart/form-data dengan satu "
-                    "atau lebih field bernama 'files' berisi berkas PDF."
-                ),
+                "message": msg,
             }
         },
     )
@@ -262,6 +288,37 @@ def _image_convert_limits_payload() -> dict:
     }
 
 
+def _reject_oversized_word_count_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas teks."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > WC_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise WordCountError(
+            WC_TOO_LONG,
+            f"Ukuran permintaan melebihi batas {WC_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+def _word_count_limits_payload() -> dict:
+    return {
+        "max_chars": WC_MAX_CHARS,
+        "max_bytes": WC_MAX_BYTES,
+        "max_mb": WC_MAX_BYTES // (1024 * 1024),
+        "processed_on": "server",
+        "note": (
+            "Teks dikirim ke server untuk dihitung di memori, lalu dibuang setelah "
+            "selesai. Tidak ada teks yang disimpan di disk."
+        ),
+    }
+
+
+
 # --- Endpoint -----------------------------------------------------------------
 @app.get("/health")
 async def health() -> dict:
@@ -381,6 +438,51 @@ async def image_convert(
     return Response(content=result.data, media_type=media_type, headers=headers)
 
 
+@app.get("/api/word-count/limits")
+async def word_count_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Word Counter."""
+    return JSONResponse(content=_word_count_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/word-count")
+async def word_count(
+    request: Request,
+    text: str = Form(default=None),
+):
+    """Hitung kata, karakter, kalimat, dan perkiraan waktu baca di memori.
+
+    Menerima multipart/form-data dengan field `text`.
+    Respons: JSON application/json.
+    Header: Cache-Control: no-store, no-cache, must-revalidate + Pragma: no-cache,
+            X-Char-Count, X-Word-Count, X-Processing-Ms.
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_word_count_content_length(request)
+
+    if text is None:
+        raise WordCountError(WC_INVALID_REQUEST, "Field teks 'text' wajib disertakan.", 400)
+
+    result = count_text(text)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung kata selesai: kata=%d karakter=%d durasi=%.0fms",
+        result.words,
+        result.chars,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Char-Count": str(result.chars),
+        "X-Word-Count": str(result.words),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result.to_dict(), headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -388,6 +490,7 @@ async def root() -> dict:
         "service": SERVICE_NAME,
         "version": __version__,
         "docs": "/docs",
-        "tools": ["pdf-merge", "image-convert"],
+        "tools": ["pdf-merge", "image-convert", "word-count"],
     }
+
 

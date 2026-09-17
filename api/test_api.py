@@ -75,6 +75,18 @@ from app.pdf_merge import (  # noqa: E402
     is_pdf_bytes,
     merge_pdfs,
 )
+from app.word_count import (  # noqa: E402
+    INVALID_REQUEST as WC_INVALID_REQUEST,
+    MAX_BYTES as WC_MAX_BYTES,
+    MAX_CHARS as WC_MAX_CHARS,
+    NO_TEXT as WC_NO_TEXT,
+    STOP_WORDS as WC_STOP_WORDS,
+    TOO_LONG as WC_TOO_LONG,
+    WordCountError,
+    WordCountResult,
+    count_text,
+    validate_text,
+)
 
 SKIPPED: list[str] = []
 
@@ -142,6 +154,21 @@ def expect_error(func, code: str, status: int) -> PdfMergeError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar PdfMergeError {code}")
+
+
+def expect_word_count_error(func, code: str, status: int) -> WordCountError:
+    """Pastikan func() melempar WordCountError dengan kode + status yang tepat."""
+    try:
+        func()
+    except WordCountError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar WordCountError {code}")
+
 
 
 # --- Uji logika murni --------------------------------------------------------
@@ -348,6 +375,94 @@ def test_image_convert_menolak_ukuran_lewat_batas() -> None:
     expect_image_error(lambda: check_image_total_size(IMG_MAX_BYTES + 1), IMG_PAYLOAD_TOO_LARGE, 413)
 
 
+# --- Uji logika Word Counter ------------------------------------------------
+def test_word_count_logika_teks_normal() -> None:
+    res = count_text("Halo dunia. Ini uji coba!")
+    assert res.chars == 25
+    assert res.chars_no_spaces == 21
+    assert res.words == 5
+    assert res.unique_words == 5
+    assert res.sentences == 2
+    assert res.paragraphs == 1
+    assert res.lines == 1
+    assert res.reading_minutes == 1
+    assert res.speaking_minutes == 1
+    assert res.longest_word == "dunia"
+    # 'ini' dan 'uji' < 4 huruf, jadi tidak masuk top_words
+    top_dict = {item["word"]: item["count"] for item in res.top_words}
+    assert top_dict == {"halo": 1, "dunia": 1, "coba": 1}
+
+
+def test_word_count_logika_paragraf_dan_baris() -> None:
+    text = (
+        "Paragraf pertama terdiri dari dua baris.\n"
+        "Ini baris kedua pada paragraf pertama.\n\n"
+        "Paragraf kedua hanya satu baris.\n\n\n"
+        "Paragraf ketiga adalah penutup."
+    )
+    res = count_text(text)
+    assert res.paragraphs == 3
+    assert res.lines == 4
+    assert res.sentences == 4
+
+
+def test_word_count_logika_case_insensitive_dan_top_words() -> None:
+    # "Kucing" ditulis dengan variasi kapital, stop words Indonesia ("dan", "di", "itu") diabaikan
+    text = "Kucing makan ikan. kucing dan KUCING tidur di kasur itu! Ikan sangat lezat."
+    res = count_text(text)
+    assert res.words == 13
+    # unique_words tidak peka huruf besar-kecil
+    lower_set = {
+        "kucing", "makan", "ikan", "dan", "tidur", "di", "kasur", "itu", "sangat", "lezat"
+    }
+    assert res.unique_words == len(lower_set)
+    # top_words: 'kucing' 3 kali, 'ikan' 2 kali; stopword 'dan', 'di', 'itu' tidak muncul
+    top_dict = {item["word"]: item["count"] for item in res.top_words}
+    assert top_dict["kucing"] == 3
+    assert top_dict["ikan"] == 2
+    for sw in WC_STOP_WORDS:
+        assert sw not in top_dict
+
+
+def test_word_count_logika_waktu_baca_dan_bicara() -> None:
+    # 250 kata: waktu baca ceil(250/200) = 2 menit, waktu bicara ceil(250/130) = 2 menit
+    words_250 = " ".join(["kata"] * 250)
+    res = count_text(words_250)
+    assert res.words == 250
+    assert res.reading_minutes == 2
+    assert res.speaking_minutes == 2
+
+    # 1 kata: minimal 1 menit
+    res_one = count_text("Satu")
+    assert res_one.words == 1
+    assert res_one.reading_minutes == 1
+    assert res_one.speaking_minutes == 1
+
+
+def test_word_count_logika_kata_terpanjang_seri() -> None:
+    # Bila ada beberapa kata dengan panjang sama, kata pertama yang ditemukan dipilih
+    res = count_text("satu dua tiga")  # 'satu' dan 'tiga' sama-sama 4 huruf
+    assert res.longest_word == "satu"
+
+
+def test_word_count_logika_menolak_teks_kosong() -> None:
+    expect_word_count_error(lambda: count_text(""), WC_NO_TEXT, 400)
+
+
+def test_word_count_logika_menolak_hanya_spasi() -> None:
+    expect_word_count_error(lambda: count_text("   \n\t  "), WC_NO_TEXT, 400)
+
+
+def test_word_count_logika_menolak_terlalu_panjang() -> None:
+    long_text = "a" * (WC_MAX_CHARS + 1)
+    expect_word_count_error(lambda: count_text(long_text), WC_TOO_LONG, 413)
+
+
+def test_word_count_logika_menolak_none() -> None:
+    expect_word_count_error(lambda: count_text(None), WC_INVALID_REQUEST, 400)  # type: ignore[arg-type]
+
+
+
 # --- Uji HTTP lewat TestClient (butuh httpx) ---------------------------------
 def _test_client():
     try:
@@ -523,6 +638,145 @@ def test_http_image_convert_kualitas_tidak_valid_ditolak_400() -> None:
     assert response.json()["error"]["code"] == IMG_INVALID_QUALITY
 
 
+def test_http_word_count_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/word-count/limits")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["processed_on"] == "server"
+    assert body["max_chars"] == WC_MAX_CHARS
+    assert body["max_bytes"] == WC_MAX_BYTES
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_http_word_count_teks_normal_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/word-count", data={"text": "Halo dunia. Ini uji coba!"})
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/json")
+
+    # Respons sukses tidak memuat Cache-Control yang membolehkan cache
+    cache = response.headers.get("cache-control", "")
+    assert "no-store" in cache
+    assert "no-cache" in cache
+    assert response.headers.get("pragma") == "no-cache"
+
+    # Header ringkas
+    assert response.headers.get("x-char-count") == "25"
+    assert response.headers.get("x-word-count") == "5"
+    assert "x-processing-ms" in response.headers
+
+    body = response.json()
+    assert body["chars"] == 25
+    assert body["chars_no_spaces"] == 21
+    assert body["words"] == 5
+    assert body["unique_words"] == 5
+    assert body["sentences"] == 2
+    assert body["paragraphs"] == 1
+    assert body["lines"] == 1
+    assert body["reading_minutes"] == 1
+    assert body["speaking_minutes"] == 1
+    assert body["longest_word"] == "dunia"
+
+
+def test_http_word_count_paragraf_dan_baris() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    text = (
+        "Baris 1 paragraf 1\n"
+        "Baris 2 paragraf 1\n\n"
+        "Baris 3 paragraf 2\n\n\n"
+        "Baris 4 paragraf 3"
+    )
+    response = client.post("/api/word-count", data={"text": text})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["paragraphs"] == 3
+    assert body["lines"] == 4
+
+
+def test_http_word_count_case_insensitive_dan_top_words() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    text = "Mawar mawar MAWAR melati melati melati melati anggrek."
+    response = client.post("/api/word-count", data={"text": text})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["unique_words"] == 3
+    words = [item["word"] for item in body["top_words"]]
+    assert words[0] == "melati"
+    assert body["top_words"][0]["count"] == 4
+    assert words[1] == "mawar"
+    assert body["top_words"][1]["count"] == 3
+
+
+def test_http_word_count_teks_kosong_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/word-count", data={"text": ""})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == WC_NO_TEXT
+
+
+def test_http_word_count_teks_hanya_spasi_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/word-count", data={"text": "   \n\t  "})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == WC_NO_TEXT
+
+
+def test_http_word_count_teks_terlalu_panjang_ditolak_413() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    long_text = "x" * (WC_MAX_CHARS + 10)
+    response = client.post("/api/word-count", data={"text": long_text})
+    assert response.status_code == 413, response.text
+    assert response.json()["error"]["code"] == WC_TOO_LONG
+
+
+def test_http_word_count_bukan_multipart_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/word-count", json={"text": "Halo dunia"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == WC_INVALID_REQUEST
+
+
+def test_http_word_count_field_text_hilang_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/word-count", data={})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] in (WC_INVALID_REQUEST, WC_NO_TEXT)
+
+
+def test_http_word_count_cache_headers_tidak_membolehkan_cache() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/word-count", data={"text": "Uji cache header"})
+    assert response.status_code == 200
+    cache_control = response.headers.get("Cache-Control", "")
+    assert "public" not in cache_control
+    assert "max-age" not in cache_control
+    assert "no-store" in cache_control
+    assert "no-cache" in cache_control
+    assert response.headers.get("Pragma") == "no-cache"
+
+
+
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------
 def test_http_live_jika_env_diisi() -> None:
     """Jalankan hanya bila OMNITOOLS_API_URL diisi, mis. http://127.0.0.1:8077."""
@@ -573,6 +827,27 @@ def test_http_live_jika_env_diisi() -> None:
     assert cache.startswith("no-store"), cache
     assert pages_header == "5", pages_header
     assert page_count(data) == 5
+
+    # Word Count live lewat multipart/form-data
+    boundary_wc = "----omnitoolswc"
+    body_wc = (
+        f"--{boundary_wc}\r\n"
+        f'Content-Disposition: form-data; name="text"\r\n\r\n'
+        f"Halo dunia. Ini uji coba!\r\n"
+        f"--{boundary_wc}--\r\n"
+    ).encode()
+    req_wc = urllib.request.Request(
+        base + "/api/word-count",
+        data=body_wc,
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary_wc}"},
+    )
+    with urllib.request.urlopen(req_wc, timeout=10) as resp:
+        assert resp.status == 200
+        wc_data = json.loads(resp.read().decode())
+        assert wc_data["words"] == 5
+        assert wc_data["chars"] == 25
+
 
 
 # --- Runner mandiri ---------------------------------------------------------

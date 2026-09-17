@@ -55,7 +55,7 @@
         { name: 'Case Converter', desc: 'Ubah huruf besar/kecil dan format kalimat.', status: 'soon' },
         { name: 'List Shuffler', desc: 'Acak urutan baris dalam sebuah daftar.', status: 'soon' },
         { name: 'Text Formatter', desc: 'Bereskan spasi, baris, dan format teks.', status: 'soon' },
-        { name: 'Word Counter', desc: 'Hitung jumlah kata, karakter, dan baris.', status: 'soon' },
+        { name: 'Word Counter', desc: 'Hitung kata, karakter, kalimat, dan perkiraan waktu baca.', status: 'available', action: 'word-count' },
         { name: 'Remove Duplicates', desc: 'Hapus baris duplikat dari sebuah daftar.', status: 'soon' }
       ]
     },

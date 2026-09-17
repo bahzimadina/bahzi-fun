@@ -667,3 +667,106 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   .navbar__brand,
   .footer__top { display: inline-flex; align-items: center; min-height: 44px; }
 }
+
+/* ================= Word Counter: panel alat inline ================= */
+.wordcount__input-wrap {
+  display: flex; flex-direction: column; gap: .35rem; width: 100%;
+}
+.wordcount__label {
+  font-size: .82rem; color: var(--text-muted); font-weight: 500;
+}
+.wordcount__textarea {
+  width: 100%; min-height: 140px; padding: .65rem .8rem;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--code); color: var(--text);
+  font-family: var(--font-sans); font-size: .9rem; line-height: 1.5;
+  resize: vertical; box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.wordcount__textarea:focus {
+  border-color: var(--brand); outline: none;
+}
+
+.wordcount__results {
+  display: flex; flex-direction: column; gap: .8rem; margin-top: .3rem;
+}
+.wordcount__hint {
+  margin: 0; padding: .65rem .8rem; font-size: .82rem; color: var(--text-muted);
+  background: var(--surface); border: 1px dashed var(--border);
+  border-radius: var(--radius); text-align: center;
+}
+.wordcount__hint[hidden] { display: none; }
+
+.wordcount__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+  gap: .55rem;
+}
+.wordcount__grid[hidden] { display: none; }
+
+.wordcount__card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: .65rem .45rem; gap: .25rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); min-height: 64px; box-sizing: border-box;
+}
+.wordcount__card-label {
+  font-size: .73rem; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.wordcount__card-value {
+  font-size: 1.12rem; font-weight: 700; color: var(--text);
+  font-family: var(--font-mono); line-height: 1.2;
+}
+
+.wordcount__details {
+  display: flex; flex-direction: column; gap: .8rem;
+  padding: .75rem .85rem; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.wordcount__details[hidden] { display: none; }
+
+.wordcount__detail-group {
+  display: flex; flex-direction: column; gap: .35rem;
+}
+.wordcount__detail-title {
+  margin: 0; font-size: .82rem; font-weight: 600; color: var(--text);
+}
+.wordcount__longest {
+  margin: 0; font-size: .86rem; color: var(--brand-text);
+  font-family: var(--font-mono); word-break: break-word; overflow-wrap: break-word;
+}
+.wordcount__top-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.wordcount__top-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .2rem 0; font-size: .84rem; border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+.wordcount__top-item:last-child { border-bottom: none; }
+.wordcount__top-word {
+  font-family: var(--font-mono); color: var(--text);
+  word-break: break-word; overflow-wrap: break-word;
+}
+.wordcount__top-count {
+  font-family: var(--font-mono); font-size: .78rem; color: var(--brand-text);
+  background: rgba(117, 83, 255, .15); padding: .15rem .45rem;
+  border-radius: 4px; flex-shrink: 0; margin-left: .5rem;
+}
+.wordcount__top-empty {
+  margin: 0; font-size: .8rem; color: var(--text-muted); font-style: italic;
+}
+.wordcount__top-empty[hidden] { display: none; }
+
+/* ================= Word Counter: target sentuh di perangkat sentuh ================= */
+@media (pointer: coarse) {
+  #word-count-input,
+  #word-count-submit,
+  #word-count-clear,
+  #word-count-close {
+    min-height: 44px;
+  }
+}
+
