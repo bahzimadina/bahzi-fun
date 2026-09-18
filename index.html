@@ -13,7 +13,7 @@
   <meta name="omnitools-server-base" content="">
 
   <title>OmniTools: 32 alat harian | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 32 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, dan Hitung kata sudah bisa dipakai, sisa 28 alat lain masih disiapkan.">
+  <meta name="description" content="OmniTools dari bahzi.fun: 32 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, dan Pengubah huruf sudah bisa dipakai, sisa 27 alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
   <!-- Google tag (gtag.js) + Consent Mode v2.
@@ -43,13 +43,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
   <meta property="og:title" content="OmniTools: 32 alat harian">
-  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, dan Hitung kata sudah bisa dipakai, sisa 28 alat lain masih disiapkan.">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, dan Pengubah huruf sudah bisa dipakai, sisa 27 alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OmniTools: 32 alat harian">
-  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, dan Hitung kata sudah bisa dipakai, sisa 28 alat lain masih disiapkan.">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, dan Pengubah huruf sudah bisa dipakai, sisa 27 alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -167,7 +167,7 @@
 
         <div class="tools__head">
           <h1 class="tools__title" id="alat-title">32 alat buat kerja harian</h1>
-          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, dan Hitung kata sudah bisa dipakai. Sisa 28 alat lain masih disiapkan.</p>
+          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, dan Pengubah huruf sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
@@ -458,6 +458,64 @@
           </div>
         </section>
 
+        <!-- Panel alat: Pengubah huruf. Tampil inline di alur halaman: dibuka lewat
+             tombol "Buka alat" pada kartu Case Converter, ditutup lewat tombol
+             Tutup atau Esc. Teks dikirim ke server untuk diubah di memori,
+             lalu dibuang setelah selesai. -->
+        <section class="tool-panel" id="case-convert-panel" hidden tabindex="-1" aria-labelledby="case-convert-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="case-convert-title">Pengubah huruf</h2>
+              <p class="tool-panel__sub" id="case-convert-limits">Maks 200.000 karakter, aturan bawaan</p>
+            </div>
+            <button class="tool-panel__close" id="case-convert-close" type="button" aria-label="Tutup panel pengubah huruf">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="case-convert-note">Teks dikirim ke server untuk diubah di memori, lalu dibuang setelah selesai. Tidak ada teks yang disimpan di disk.</p>
+
+          <div class="caseconvert__input-wrap">
+            <label class="caseconvert__label" for="case-convert-input">Teks untuk diubah</label>
+            <textarea class="caseconvert__textarea" id="case-convert-input" rows="6" placeholder="Ketik atau tempel teks di sini…"></textarea>
+          </div>
+
+          <fieldset class="caseconvert__fieldset">
+            <legend class="caseconvert__legend">Mau diubah jadi apa?</legend>
+            <div class="caseconvert__modes" id="case-convert-modes">
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="upper" checked> <span>HURUF BESAR</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="lower"> <span>huruf kecil</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="title"> <span>Kapital Tiap Kata</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="sentence"> <span>Kapital Awal Kalimat</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="inverse"> <span>Balik Besar-Kecil</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="alternating"> <span>Selang-seling</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="camel"> <span>camelCase</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="snake"> <span>snake_case</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="kebab"> <span>kebab-case</span></label>
+              <label class="caseconvert__mode-label"><input type="radio" name="case-convert-mode" value="slug"> <span>slug-url</span></label>
+            </div>
+          </fieldset>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="case-convert-status" role="status" aria-live="polite">Ketik atau tempel teks, pilih mode, lalu tekan "Ubah".</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="case-convert-clear" type="button" disabled>Bersihkan</button>
+              <button class="btn btn--primary" id="case-convert-submit" type="button" disabled>Ubah</button>
+            </div>
+          </div>
+
+          <div class="caseconvert__results" id="case-convert-results" aria-live="polite">
+            <p class="caseconvert__hint" id="case-convert-hint">Hasil akan muncul di sini.</p>
+            <div class="caseconvert__output-wrap" id="case-convert-output-wrap" hidden>
+              <label class="caseconvert__label" for="case-convert-output">Hasil</label>
+              <textarea class="caseconvert__output" id="case-convert-output" rows="6" readonly></textarea>
+              <p class="caseconvert__meta" id="case-convert-meta"></p>
+              <div class="tool-panel__actions caseconvert__output-actions">
+                <button class="btn btn--ghost" id="case-convert-copy" type="button">Salin hasil</button>
+                <button class="btn btn--primary" id="case-convert-download" type="button">Unduh .txt</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="tools__grid" id="tools-grid"></div>
         <p class="tools__empty" id="tools-empty" hidden aria-live="polite">
           Tidak ada alat yang cocok dengan pencarianmu.
@@ -650,7 +708,7 @@
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, dan Hitung kata sudah bisa dipakai. Sisa 28 alat lain masih disiapkan.</p>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, dan Pengubah huruf sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.</p>
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
@@ -666,5 +724,6 @@
   <script src="assets/tool-image-resizer.js?v=__V__" defer></script>
   <script src="assets/tool-image-converter.js?v=__V__" defer></script>
   <script src="assets/tool-word-counter.js?v=__V__" defer></script>
+  <script src="assets/tool-case-converter.js?v=__V__" defer></script>
 </body>
 </html>

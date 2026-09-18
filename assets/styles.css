@@ -770,3 +770,112 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Case Converter: panel alat inline ================= */
+.caseconvert__input-wrap {
+  display: flex; flex-direction: column; gap: .35rem; width: 100%;
+}
+.caseconvert__label {
+  font-size: .82rem; color: var(--text-muted); font-weight: 500;
+}
+.caseconvert__textarea {
+  width: 100%; min-height: 120px; padding: .65rem .8rem;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--code); color: var(--text);
+  font-family: var(--font-sans); font-size: .9rem; line-height: 1.5;
+  resize: vertical; box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.caseconvert__textarea:focus {
+  border-color: var(--brand); outline: none;
+}
+
+.caseconvert__fieldset {
+  margin: 0; padding: 0; border: none; width: 100%;
+}
+.caseconvert__legend {
+  font-size: .82rem; color: var(--text-muted); font-weight: 500; margin-bottom: .4rem;
+}
+.caseconvert__modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: .4rem;
+  width: 100%;
+}
+.caseconvert__mode-label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .84rem;
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color var(--transition), background-color var(--transition);
+  user-select: none;
+}
+.caseconvert__mode-label:hover {
+  border-color: var(--brand);
+}
+.caseconvert__mode-label:has(input:checked) {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .15);
+  color: #fff;
+  font-weight: 500;
+}
+.caseconvert__mode-label input[type="radio"] {
+  accent-color: var(--brand);
+  margin: 0;
+  cursor: pointer;
+}
+.caseconvert__mode-label input[type="radio"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.caseconvert__results {
+  display: flex; flex-direction: column; gap: .8rem; margin-top: .3rem;
+}
+.caseconvert__hint {
+  margin: 0; padding: .65rem .8rem; font-size: .82rem; color: var(--text-muted);
+  background: var(--surface); border: 1px dashed var(--border);
+  border-radius: var(--radius); text-align: center;
+}
+.caseconvert__hint[hidden] { display: none; }
+.caseconvert__output-wrap {
+  display: flex; flex-direction: column; gap: .5rem; width: 100%;
+}
+.caseconvert__output-wrap[hidden] { display: none; }
+.caseconvert__output {
+  width: 100%; min-height: 120px; padding: .65rem .8rem;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--code); color: var(--text);
+  font-family: var(--font-mono); font-size: .88rem; line-height: 1.5;
+  resize: vertical; box-sizing: border-box;
+  word-break: break-word; overflow-wrap: break-word;
+}
+.caseconvert__output:focus {
+  border-color: var(--brand); outline: none;
+}
+.caseconvert__meta {
+  margin: 0; font-size: .82rem; color: var(--text-muted); font-family: var(--font-mono);
+}
+.caseconvert__output-actions {
+  display: flex; gap: .5rem; margin-top: .2rem;
+}
+
+/* ================= Case Converter: target sentuh di perangkat sentuh ================= */
+@media (pointer: coarse) {
+  #case-convert-submit,
+  #case-convert-clear,
+  #case-convert-copy,
+  #case-convert-download,
+  #case-convert-close,
+  #case-convert-panel .caseconvert__mode-label,
+  #case-convert-panel label {
+    min-height: 44px;
+  }
+}
+

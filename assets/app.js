@@ -52,7 +52,7 @@
       name: 'Teks & Daftar',
       icon: 'icon-text',
       tools: [
-        { name: 'Case Converter', desc: 'Ubah huruf besar/kecil dan format kalimat.', status: 'soon' },
+        { name: 'Case Converter', desc: 'Ubah huruf besar/kecil dan format kalimat.', status: 'available', action: 'case-convert' },
         { name: 'List Shuffler', desc: 'Acak urutan baris dalam sebuah daftar.', status: 'soon' },
         { name: 'Text Formatter', desc: 'Bereskan spasi, baris, dan format teks.', status: 'soon' },
         { name: 'Word Counter', desc: 'Hitung kata, karakter, kalimat, dan perkiraan waktu baca.', status: 'available', action: 'word-count' },

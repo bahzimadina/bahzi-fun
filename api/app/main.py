@@ -52,6 +52,19 @@ from .pdf_merge import (
     check_total_size,
     merge_pdfs,
 )
+from .case_convert import (
+    CHUNK_SIZE as CC_CHUNK_SIZE,
+    MAX_BYTES as CC_MAX_BYTES,
+    MAX_CHARS as CC_MAX_CHARS,
+    MODE_ORDER as CC_MODE_ORDER,
+    MODES as CC_MODES,
+    NO_TEXT as CC_NO_TEXT,
+    TOO_LONG as CC_TOO_LONG,
+    UNSUPPORTED_MODE as CC_UNSUPPORTED_MODE,
+    INVALID_REQUEST as CC_INVALID_REQUEST,
+    CaseConvertError,
+    convert_case,
+)
 from .word_count import (
     CHUNK_SIZE as WC_CHUNK_SIZE,
     ENTRY_LIMIT as WC_ENTRY_LIMIT,
@@ -81,7 +94,7 @@ app = FastAPI(
     version=__version__,
     description=(
         "API server untuk alat OmniTools (bahzi.fun). Alat aktif: Merge PDF, "
-        "Image Converter, Word Counter. Berkas dan teks diproses di memori dan tidak disimpan."
+        "Image Converter, Word Counter, Case Converter. Berkas dan teks diproses di memori dan tidak disimpan."
     ),
 )
 
@@ -106,6 +119,7 @@ if _cors_origins:
             "X-Pixels",
             "X-Char-Count",
             "X-Word-Count",
+            "X-Case-Mode",
         ],
     )
 
@@ -132,11 +146,20 @@ async def handle_word_count_error(request: Request, exc: WordCountError) -> JSON
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
+@app.exception_handler(CaseConvertError)
+async def handle_case_convert_error(request: Request, exc: CaseConvertError) -> JSONResponse:
+    """Error ubah huruf yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("ubah huruf ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) → 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/word-count"):
+    if request.url.path.startswith("/api/case"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
+    elif request.url.path.startswith("/api/word-count"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field teks bernama 'text'."
     elif request.url.path.startswith("/api/image/convert"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
@@ -318,6 +341,38 @@ def _word_count_limits_payload() -> dict:
     }
 
 
+def _reject_oversized_case_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas teks."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > CC_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise CaseConvertError(
+            CC_TOO_LONG,
+            "Ukuran permintaan melebihi batas 1 MB.",
+            413,
+        )
+
+
+def _case_convert_limits_payload() -> dict:
+    return {
+        "max_chars": CC_MAX_CHARS,
+        "max_bytes": CC_MAX_BYTES,
+        "max_mb": CC_MAX_BYTES // (1024 * 1024),
+        "modes": CC_MODE_ORDER,
+        "mode_labels": CC_MODES,
+        "processed_on": "server",
+        "note": (
+            "Teks dikirim ke server untuk diubah di memori, lalu dibuang setelah "
+            "selesai. Tidak ada teks yang disimpan di disk."
+        ),
+    }
+
+
 
 # --- Endpoint -----------------------------------------------------------------
 @app.get("/health")
@@ -461,7 +516,11 @@ async def word_count(
     _reject_oversized_word_count_content_length(request)
 
     if text is None:
-        raise WordCountError(WC_INVALID_REQUEST, "Field teks 'text' wajib disertakan.", 400)
+        form = await request.form()
+        if "text" in form:
+            text = ""
+        else:
+            raise WordCountError(WC_INVALID_REQUEST, "Field teks 'text' wajib disertakan.", 400)
 
     result = count_text(text)
     duration_ms = (time.perf_counter() - started) * 1000
@@ -483,6 +542,57 @@ async def word_count(
     return JSONResponse(content=result.to_dict(), headers=headers)
 
 
+@app.get("/api/case/limits")
+async def case_convert_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Case Converter."""
+    return JSONResponse(content=_case_convert_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/case")
+async def case_convert_endpoint(
+    request: Request,
+    text: str = Form(default=None),
+    mode: str = Form(default=None),
+):
+    """Ubah format huruf teks di memori sesuai mode yang dipilih.
+
+    Menerima multipart/form-data dengan field `text` dan `mode`.
+    Respons: JSON application/json.
+    Header: Cache-Control: no-store, no-cache, must-revalidate + Pragma: no-cache,
+            X-Case-Mode, X-Char-Count, X-Processing-Ms.
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_case_content_length(request)
+
+    if text is None or mode is None:
+        form = await request.form()
+        if text is None and "text" in form:
+            text = ""
+        if mode is None and "mode" in form:
+            mode = ""
+
+    result = convert_case(text, mode)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "ubah huruf selesai: mode=%s chars_in=%d chars_out=%d durasi=%.0fms",
+        result.mode,
+        result.chars_in,
+        result.chars_out,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Case-Mode": result.mode,
+        "X-Char-Count": str(result.chars_out),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result.to_dict(), headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -490,7 +600,7 @@ async def root() -> dict:
         "service": SERVICE_NAME,
         "version": __version__,
         "docs": "/docs",
-        "tools": ["pdf-merge", "image-convert", "word-count"],
+        "tools": ["pdf-merge", "image-convert", "word-count", "case-convert"],
     }
 
 

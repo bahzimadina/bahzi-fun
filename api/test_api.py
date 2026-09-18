@@ -87,6 +87,22 @@ from app.word_count import (  # noqa: E402
     count_text,
     validate_text,
 )
+from app.case_convert import (  # noqa: E402
+    CHUNK_SIZE as CC_CHUNK_SIZE,
+    INVALID_REQUEST as CC_INVALID_REQUEST,
+    MAX_BYTES as CC_MAX_BYTES,
+    MAX_CHARS as CC_MAX_CHARS,
+    MODE_ORDER as CC_MODE_ORDER,
+    MODES as CC_MODES,
+    NO_TEXT as CC_NO_TEXT,
+    TOO_LONG as CC_TOO_LONG,
+    UNSUPPORTED_MODE as CC_UNSUPPORTED_MODE,
+    CaseConvertError,
+    CaseConvertResult,
+    convert_case,
+    normalize_mode,
+    validate_text as validate_case_text,
+)
 
 SKIPPED: list[str] = []
 
@@ -168,6 +184,20 @@ def expect_word_count_error(func, code: str, status: int) -> WordCountError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar WordCountError {code}")
+
+
+def expect_case_convert_error(func, code: str, status: int) -> CaseConvertError:
+    """Pastikan func() melempar CaseConvertError dengan kode + status yang tepat."""
+    try:
+        func()
+    except CaseConvertError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar CaseConvertError {code}")
 
 
 
@@ -460,6 +490,53 @@ def test_word_count_logika_menolak_terlalu_panjang() -> None:
 
 def test_word_count_logika_menolak_none() -> None:
     expect_word_count_error(lambda: count_text(None), WC_INVALID_REQUEST, 400)  # type: ignore[arg-type]
+
+
+def test_case_convert_logika_semua_mode() -> None:
+    # Uji 10 mode menghasilkan keluaran yang benar sesuai spesifikasi
+    assert convert_case("halo dunia", "upper").text == "HALO DUNIA"
+    assert convert_case("HALO DUNIA", "lower").text == "halo dunia"
+    assert convert_case("halo dunia don't stop dua-tiga", "title").text == "Halo Dunia Don't Stop Dua-tiga"
+    assert convert_case("halo dunia. apa kabar? baik! tentu saja.\nbaris baru", "sentence").text == (
+        "Halo dunia. Apa kabar? Baik! Tentu saja.\nBaris baru"
+    )
+    assert convert_case("Halo Dunia 123", "inverse").text == "hALO dUNIA 123"
+    assert convert_case("abcd", "alternating").text == "aBcD"
+    assert convert_case("a b c d", "alternating").text == "a B c D"
+    assert convert_case("halo dunia", "camel").text == "haloDunia"
+    assert convert_case("halo dunia", "snake").text == "halo_dunia"
+    assert convert_case("halo dunia", "kebab").text == "halo-dunia"
+    assert convert_case("Halo, Dunia! 2x", "slug").text == "halo-dunia-2x"
+
+
+def test_case_convert_logika_changed() -> None:
+    res_unchanged = convert_case("halo dunia", "lower")
+    assert res_unchanged.changed is False
+    res_changed = convert_case("halo dunia", "upper")
+    assert res_changed.changed is True
+
+
+def test_case_convert_logika_menolak_teks_kosong() -> None:
+    expect_case_convert_error(lambda: convert_case("", "upper"), CC_NO_TEXT, 400)
+
+
+def test_case_convert_logika_menolak_hanya_spasi() -> None:
+    expect_case_convert_error(lambda: convert_case("   \n\t  ", "upper"), CC_NO_TEXT, 400)
+
+
+def test_case_convert_logika_menolak_terlalu_panjang() -> None:
+    long_text = "a" * (CC_MAX_CHARS + 1)
+    expect_case_convert_error(lambda: convert_case(long_text, "upper"), CC_TOO_LONG, 413)
+
+
+def test_case_convert_logika_menolak_none_text() -> None:
+    expect_case_convert_error(lambda: convert_case(None, "upper"), CC_INVALID_REQUEST, 400)
+
+
+def test_case_convert_logika_mode_tidak_valid() -> None:
+    expect_case_convert_error(lambda: convert_case("halo", None), CC_INVALID_REQUEST, 400)
+    expect_case_convert_error(lambda: convert_case("halo", ""), CC_INVALID_REQUEST, 400)
+    expect_case_convert_error(lambda: convert_case("halo", "mode_palsu"), CC_UNSUPPORTED_MODE, 400)
 
 
 
@@ -774,6 +851,101 @@ def test_http_word_count_cache_headers_tidak_membolehkan_cache() -> None:
     assert "no-store" in cache_control
     assert "no-cache" in cache_control
     assert response.headers.get("Pragma") == "no-cache"
+
+
+def test_http_case_convert_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/case/limits")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["processed_on"] == "server"
+    assert body["max_chars"] == CC_MAX_CHARS
+    assert body["max_bytes"] == CC_MAX_BYTES
+    assert body["modes"] == CC_MODE_ORDER
+    assert body["mode_labels"] == CC_MODES
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_http_case_convert_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/case", data={"text": "halo dunia", "mode": "upper"})
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/json")
+
+    # Header no-cache
+    cache = response.headers.get("cache-control", "")
+    assert "no-store" in cache
+    assert "no-cache" in cache
+    assert response.headers.get("pragma") == "no-cache"
+
+    # Header metadata
+    assert response.headers.get("x-case-mode") == "upper"
+    assert response.headers.get("x-char-count") == "10"
+    assert "x-processing-ms" in response.headers
+
+    body = response.json()
+    assert body["mode"] == "upper"
+    assert body["text"] == "HALO DUNIA"
+    assert body["chars_in"] == 10
+    assert body["chars_out"] == 10
+    assert body["words"] == 2
+    assert body["changed"] is True
+
+
+def test_http_case_convert_teks_kosong_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/case", data={"text": "", "mode": "upper"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == CC_NO_TEXT
+
+
+def test_http_case_convert_teks_hanya_spasi_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/case", data={"text": "   \n\t  ", "mode": "upper"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == CC_NO_TEXT
+
+
+def test_http_case_convert_mode_tidak_valid_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # Mode tidak dikenal
+    response = client.post("/api/case", data={"text": "halo", "mode": "tidak_ada"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == CC_UNSUPPORTED_MODE
+
+    # Mode tidak disertakan
+    response2 = client.post("/api/case", data={"text": "halo"})
+    assert response2.status_code == 400, response2.text
+    assert response2.json()["error"]["code"] == CC_INVALID_REQUEST
+
+
+def test_http_case_convert_bukan_multipart_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/case", json={"text": "halo", "mode": "upper"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == CC_INVALID_REQUEST
+
+
+def test_http_case_convert_teks_terlalu_panjang_ditolak_413() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    long_text = "x" * (CC_MAX_CHARS + 10)
+    response = client.post("/api/case", data={"text": long_text, "mode": "upper"})
+    assert response.status_code == 413, response.text
+    assert response.json()["error"]["code"] == CC_TOO_LONG
 
 
 
