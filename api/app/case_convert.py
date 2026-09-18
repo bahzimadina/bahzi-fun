@@ -1,4 +1,4 @@
-"""Logika pengubahan huruf (Case Converter) — fungsi murni, tanpa HTTP, mudah diuji.
+"""Logika pengubahan huruf (Case Converter): fungsi murni, tanpa HTTP, mudah diuji.
 
 Modul ini tidak bergantung pada FastAPI/HTTP dan tidak melakukan I/O disk.
 Semua pemrosesan dilakukan di memori. Teks pengguna tidak pernah dicatat ke log.
