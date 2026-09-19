@@ -98,6 +98,7 @@
       name: 'AI',
       icon: 'icon-ai',
       tools: [
+        { name: 'Ambil teks dari gambar', desc: 'Baca teks dari gambar scan atau PDF hasil pindai.', status: 'available', href: '/ocr/' },
         { name: 'Ringkas Teks', desc: 'Ringkas dokumen panjang jadi poin utama.', status: 'soon' },
         { name: 'Ubah/Redesign Gambar', desc: 'Ubah gaya visual gambar dengan bantuan AI.', status: 'soon' },
         { name: 'Transkripsi Audio', desc: 'Ubah rekaman suara menjadi teks.', status: 'soon' }
@@ -243,9 +244,14 @@
 
       if (titleEl) titleEl.textContent = group.category.name;
       if (countEl) countEl.textContent = '(' + group.tools.length + ')';
-      if (noteEl && group.category.id === 'ai') {
-        noteEl.textContent = 'Belum ada alat di kategori ini yang bisa dipakai.';
-        noteEl.hidden = false;
+      if (noteEl) {
+        var hasAvailable = group.tools.some(function (t) { return t.status === 'available'; });
+        if (!hasAvailable) {
+          noteEl.textContent = 'Belum ada alat di kategori ini yang bisa dipakai.';
+          noteEl.hidden = false;
+        } else {
+          noteEl.hidden = true;
+        }
       }
 
       group.tools.forEach(function (tool) {
@@ -265,9 +271,25 @@
           statusNode.className = 'badge ' + info.className + ' tool-card__status';
         }
 
-        // Alat yang punya panel interaktif: kartu bisa diklik + tombol "Buka alat"
+        // Alat yang punya tautan halaman atau panel interaktif: kartu bisa diklik + tombol "Buka alat"
         // (tombol = jalur keyboard; klik area kartu = kenyamanan tambahan).
-        if (tool.action && bodyNode) {
+        if (tool.href && bodyNode) {
+          cardNode.classList.add('tool-card--actionable');
+
+          var openLink = document.createElement('a');
+          openLink.className = 'tool-card__open';
+          openLink.href = tool.href;
+          openLink.setAttribute('aria-label', 'Buka alat ' + tool.name);
+          openLink.textContent = 'Buka alat';
+          openLink.addEventListener('click', function (event) {
+            event.stopPropagation();
+          });
+          bodyNode.appendChild(openLink);
+
+          cardNode.addEventListener('click', function () {
+            window.location.href = tool.href;
+          });
+        } else if (tool.action && bodyNode) {
           cardNode.classList.add('tool-card--actionable');
           cardNode.dataset.toolAction = tool.action;
 

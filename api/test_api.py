@@ -29,7 +29,8 @@ API_DIR = Path(__file__).resolve().parent
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
+import pymupdf  # noqa: E402
 from pypdf import PdfReader, PdfWriter  # noqa: E402
 
 from app import __version__  # noqa: E402
@@ -110,6 +111,27 @@ from app.case_convert import (  # noqa: E402
     normalize_mode,
     validate_text as validate_case_text,
 )
+from app.ocr import (  # noqa: E402
+    BUSY as OCR_BUSY,
+    DAMAGED_FILE as OCR_DAMAGED_FILE,
+    DEFAULT_LANG as OCR_DEFAULT_LANG,
+    EMPTY_FILE as OCR_EMPTY_FILE,
+    INVALID_LANG as OCR_INVALID_LANG,
+    LANGUAGES as OCR_LANGUAGES,
+    LANGS as OCR_LANGS,
+    MAX_BYTES as OCR_MAX_BYTES,
+    MAX_PAGES as OCR_MAX_PAGES,
+    NO_FILE as OCR_NO_FILE,
+    OCR_FAILED,
+    OCR_TIMEOUT,
+    TIME_LIMIT_SECONDS as OCR_TIME_LIMIT_SECONDS,
+    TOO_LARGE as OCR_TOO_LARGE,
+    TOO_MANY_PAGES as OCR_TOO_MANY_PAGES,
+    UNSUPPORTED_FILE as OCR_UNSUPPORTED_FILE,
+    OcrError,
+    OcrResult,
+    run_ocr,
+)
 
 SKIPPED: list[str] = []
 
@@ -167,6 +189,40 @@ def make_svg(width: int | None = 200, height: int | None = 100) -> bytes:
   <rect width="200" height="100" fill="url(#g)"/>
   <text x="10" y="50" font-size="20" fill="white">Hi</text>
 </svg>""".encode("utf-8")
+
+
+def make_ocr_png(text: str = "KUCING OREN") -> bytes:
+    """Buat berkas PNG uji berisi teks jelas (font bawaan, kontras tinggi)."""
+    img = Image.new("RGB", (400, 120), color="white")
+    draw = ImageDraw.Draw(img)
+    draw.text((30, 40), text, fill="black")
+    img_large = img.resize((800, 240), Image.Resampling.NEAREST)
+    buf = io.BytesIO()
+    img_large.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def make_ocr_pdf(page1_text: str = "SURAT SATU", page2_text: str = "BERKAS DUA") -> bytes:
+    """Buat dokumen PDF uji 2 halaman dengan PyMuPDF berisi teks berbeda per halaman."""
+    doc = pymupdf.open()
+    p1 = doc.new_page(width=300, height=100)
+    p1.insert_text((30, 50), page1_text, fontsize=24, color=(0, 0, 0))
+    p2 = doc.new_page(width=300, height=100)
+    p2.insert_text((30, 50), page2_text, fontsize=24, color=(0, 0, 0))
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def make_many_page_pdf(pages: int = 16) -> bytes:
+    """Buat dokumen PDF dengan sejumlah halaman tertentu."""
+    doc = pymupdf.open()
+    for _ in range(pages):
+        doc.new_page(width=200, height=200)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
 
 
 def expect_image_error(func, code: str, status: int) -> ImageConvertError:
@@ -1401,6 +1457,209 @@ def test_http_case_convert_teks_terlalu_panjang_ditolak_413() -> None:
     response = client.post("/api/case", data={"text": long_text, "mode": "upper"})
     assert response.status_code == 413, response.text
     assert response.json()["error"]["code"] == CC_TOO_LONG
+
+
+# --- Uji OCR (Ambil teks dari gambar & PDF) ---------------------------------
+def test_ocr_logic_detect_file_type() -> None:
+    from app.ocr import detect_file_type
+    assert detect_file_type(b"%PDF-1.4") == "pdf"
+    assert detect_file_type(b"\x89PNG\r\n\x1a\n...") == "image"
+    assert detect_file_type(b"\xff\xd8\xff...") == "image"
+    assert detect_file_type(b"RIFF\x00\x00\x00\x00WEBP...") == "image"
+    assert detect_file_type(b"II*\x00...") == "image"
+    assert detect_file_type(b"MM\x00*...") == "image"
+    assert detect_file_type(b"bukan gambar atau pdf") is None
+
+
+def test_ocr_logic_empty_data() -> None:
+    try:
+        run_ocr(b"")
+    except OcrError as exc:
+        assert exc.code == OCR_EMPTY_FILE
+        assert exc.status_code == 400
+    else:
+        assert False, "Harus melempar OcrError"
+
+
+def test_ocr_logic_unsupported_data() -> None:
+    try:
+        run_ocr(b"Hello World plain text")
+    except OcrError as exc:
+        assert exc.code == OCR_UNSUPPORTED_FILE
+        assert exc.status_code == 400
+    else:
+        assert False, "Harus melempar OcrError"
+
+
+def test_ocr_logic_invalid_lang() -> None:
+    try:
+        run_ocr(make_ocr_png("TES"), lang="invalid_lang")
+    except OcrError as exc:
+        assert exc.code == OCR_INVALID_LANG
+        assert exc.status_code == 400
+    else:
+        assert False, "Harus melempar OcrError"
+
+
+def test_http_ocr_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/ocr/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_bytes"] == OCR_MAX_BYTES
+    assert body["max_pages"] == OCR_MAX_PAGES
+    assert body["time_limit_seconds"] == OCR_TIME_LIMIT_SECONDS
+    assert "languages" in body
+    assert any(lang["value"] == "ind" for lang in body["languages"])
+    assert any(lang["value"] == "eng" for lang in body["languages"])
+    assert any(lang["value"] == "ind+eng" for lang in body["languages"])
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_http_ocr_gambar_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    png_bytes = make_ocr_png("KUCING OREN")
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("kucing.png", png_bytes, "image/png"))],
+        data={"lang": "ind+eng"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    text_lower = body["text"].lower()
+    assert "kucing" in text_lower or "oren" in text_lower
+    assert body["pages"] == 1
+    assert body["source"] == "image"
+    assert body["empty"] is False
+    assert body["chars"] > 0
+    assert response.headers["x-page-count"] == "1"
+    assert "x-char-count" in response.headers
+    assert "x-processing-ms" in response.headers
+    assert response.headers["x-ocr-lang"] == "ind+eng"
+    assert "no-store" in response.headers["cache-control"]
+
+
+def test_http_ocr_pdf_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    pdf_bytes = make_ocr_pdf("SURAT SATU", "BERKAS DUA")
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("dokumen.pdf", pdf_bytes, "application/pdf"))],
+        data={"lang": "ind+eng"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    text_lower = body["text"].lower()
+    assert "surat" in text_lower or "satu" in text_lower
+    assert "berkas" in text_lower or "dua" in text_lower
+    assert body["pages"] == 2
+    assert body["source"] == "pdf"
+    assert body["empty"] is False
+    assert "=== Halaman 1 ===" in body["text"]
+    assert "=== Halaman 2 ===" in body["text"]
+    assert response.headers["x-page-count"] == "2"
+
+
+def test_http_ocr_tanpa_field_file_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/ocr", data={"lang": "ind"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_http_ocr_berkas_kosong_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("kosong.png", b"", "image/png"))],
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == OCR_EMPTY_FILE
+
+
+def test_http_ocr_berkas_teks_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("catatan.txt", b"Halo ini berkas teks biasa", "text/plain"))],
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == OCR_UNSUPPORTED_FILE
+
+
+def test_http_ocr_berkas_terlalu_besar_ditolak_413() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    large_payload = b"\x89PNG\r\n\x1a\n" + b"0" * (OCR_MAX_BYTES + 100)
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("besar.png", large_payload, "image/png"))],
+    )
+    assert response.status_code == 413, response.text
+    body = response.json()
+    assert body["error"]["code"] == OCR_TOO_LARGE
+
+
+def test_http_ocr_pdf_terlalu_banyak_halaman_ditolak_413() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    pdf_bytes = make_many_page_pdf(OCR_MAX_PAGES + 1)
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("dokumen_tebal.pdf", pdf_bytes, "application/pdf"))],
+    )
+    assert response.status_code == 413, response.text
+    body = response.json()
+    assert body["error"]["code"] == OCR_TOO_MANY_PAGES
+
+
+def test_http_ocr_lang_tidak_dikenal_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    png_bytes = make_ocr_png("TES")
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("tes.png", png_bytes, "image/png"))],
+        data={"lang": "xx"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == OCR_INVALID_LANG
+
+
+def test_http_ocr_pdf_rusak_ditolak_422() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    corrupted_pdf = b"%PDF-1.7\n" + b"\x00" * 2000
+    response = client.post(
+        "/api/ocr",
+        files=[("file", ("rusak.pdf", corrupted_pdf, "application/pdf"))],
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"]["code"] == OCR_DAMAGED_FILE
+    assert body["error"]["code"] != "INTERNAL_ERROR"
+    assert "tidak bisa dibaca" in body["error"]["message"].lower()
+
 
 
 

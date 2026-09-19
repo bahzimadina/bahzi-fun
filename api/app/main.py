@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .image_convert import (
@@ -78,6 +80,17 @@ from .word_count import (
     WordCountError,
     count_text,
 )
+from .ocr import (
+    CHUNK_SIZE as OCR_CHUNK_SIZE,
+    LANGS as OCR_LANGS,
+    LANGUAGES as OCR_LANGUAGES,
+    MAX_BYTES as OCR_MAX_BYTES,
+    MAX_PAGES as OCR_MAX_PAGES,
+    TIME_LIMIT_SECONDS as OCR_TIME_LIMIT_SECONDS,
+    TOO_LARGE as OCR_TOO_LARGE,
+    OcrError,
+    run_ocr,
+)
 
 SERVICE_NAME = "omnitools-api"
 OUTPUT_FILENAME = "gabungan.pdf"
@@ -123,8 +136,12 @@ if _cors_origins:
             "X-Char-Count",
             "X-Word-Count",
             "X-Case-Mode",
+            "X-Ocr-Lang",
         ],
     )
+
+# Batasi satu proses OCR sekaligus di tingkat modul
+_ocr_semaphore = threading.Semaphore(1)
 
 
 # --- Handler error -----------------------------------------------------------
@@ -156,11 +173,20 @@ async def handle_case_convert_error(request: Request, exc: CaseConvertError) -> 
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
+@app.exception_handler(OcrError)
+async def handle_ocr_error(request: Request, exc: OcrError) -> JSONResponse:
+    """Error OCR yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("ambil teks ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) → 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/case"):
+    if request.url.path.startswith("/api/ocr"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi gambar atau PDF."
+    elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/word-count"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field teks bernama 'text'."
@@ -603,6 +629,84 @@ async def case_convert_endpoint(
     return JSONResponse(content=result.to_dict(), headers=headers)
 
 
+@app.get("/api/ocr/limits")
+async def ocr_limits() -> JSONResponse:
+    """Batas yang berlaku untuk OCR."""
+    return JSONResponse(
+        content={
+            "max_bytes": OCR_MAX_BYTES,
+            "max_pages": OCR_MAX_PAGES,
+            "languages": [{"value": k, "label": v} for k, v in OCR_LANGUAGES.items()],
+            "time_limit_seconds": OCR_TIME_LIMIT_SECONDS,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/ocr")
+async def ocr_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    lang: str = Form(default=None),
+):
+    """Ambil teks dari gambar atau dokumen PDF di memori.
+
+    Menerima multipart/form-data dengan field `file` dan opsional `lang`.
+    Respons: JSON application/json.
+    Header: Cache-Control: no-store, no-cache, must-revalidate + Pragma: no-cache,
+            X-Page-Count, X-Char-Count, X-Processing-Ms, X-Ocr-Lang.
+    """
+    raw_cl = request.headers.get("content-length")
+    if raw_cl:
+        try:
+            declared = int(raw_cl)
+            if declared > OCR_MAX_BYTES + CONTENT_LENGTH_SLACK:
+                raise OcrError(OCR_TOO_LARGE, "Ukuran berkas lebih dari 20 MB.", 413)
+        except ValueError:
+            pass
+
+    chunks: list[bytes] = []
+    total_bytes = 0
+    while True:
+        chunk = await file.read(OCR_CHUNK_SIZE)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > OCR_MAX_BYTES:
+            raise OcrError(OCR_TOO_LARGE, "Ukuran berkas lebih dari 20 MB.", 413)
+        chunks.append(chunk)
+
+    data = b"".join(chunks)
+    if len(data) == 0:
+        raise OcrError("EMPTY_FILE", "Berkasnya kosong.", 400)
+
+    if not _ocr_semaphore.acquire(blocking=False):
+        raise OcrError("BUSY", "Masih ada proses lain yang sedang berjalan. Coba lagi sebentar.", 429)
+
+    try:
+        result = await run_in_threadpool(run_ocr, data, lang)
+    finally:
+        _ocr_semaphore.release()
+
+    logger.info(
+        "ambil teks selesai: pages=%d chars=%d durasi=%dms lang=%s",
+        result.pages,
+        result.chars,
+        result.duration_ms,
+        result.language,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Page-Count": str(result.pages),
+        "X-Char-Count": str(result.chars),
+        "X-Processing-Ms": str(result.duration_ms),
+        "X-Ocr-Lang": result.language,
+    }
+    return JSONResponse(content=result.to_dict(), headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -610,7 +714,8 @@ async def root() -> dict:
         "service": SERVICE_NAME,
         "version": __version__,
         "docs": "/docs",
-        "tools": ["pdf-merge", "image-convert", "word-count", "case-convert"],
+        "tools": ["pdf-merge", "image-convert", "word-count", "case-convert", "ocr"],
     }
+
 
 

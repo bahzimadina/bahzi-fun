@@ -10,7 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
-RUN apt-get update && apt-get install -y --no-install-recommends libcairo2 && rm -rf /var/lib/apt/lists/*
+# libcairo2 untuk Image Converter (cairosvg); mesin Tesseract + data bahasa ind/eng dipakai alat ambil teks (OCR)
+RUN apt-get update && apt-get install -y --no-install-recommends libcairo2 tesseract-ocr tesseract-ocr-ind tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 
 # Dependensi lebih dulu supaya layer cache tidak batal saat kode berubah.
 COPY requirements.txt /srv/requirements.txt

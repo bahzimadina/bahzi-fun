@@ -6,3 +6,8 @@ python-multipart==0.0.20
 # Dipakai Image Converter; wheel manylinux sudah membawa dukungan JPEG/PNG/WebP
 pillow==12.3.0
 cairosvg==2.9.1
+# Dipakai alat ambil teks (OCR); wrapper mesin Tesseract OCR
+pytesseract==0.3.13
+# Dipakai alat ambil teks (OCR); membaca dokumen PDF dan merender halaman ke gambar
+PyMuPDF==1.28.2
+

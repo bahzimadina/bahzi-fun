@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181225">
+  <meta name="robots" content="index,follow">
+
+  <title>Ambil teks dari gambar &amp; PDF | bahzi.fun</title>
+  <meta name="description" content="Ambil teks dari gambar scan, foto dokumen, atau PDF di browser. Batas 20 MB dan 15 halaman, mendukung bahasa Indonesia dan Inggris. Berkas diproses lalu langsung dihapus. Tulisan tangan belum didukung.">
+  <link rel="canonical" href="https://bahzi.fun/ocr/">
+
+  <!-- Google tag (gtag.js) + Consent Mode v2 -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      wait_for_update: 500
+    });
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-MKL7XG6DH4"></script>
+  <script>
+    gtag('js', new Date());
+    gtag('config', 'G-MKL7XG6DH4');
+  </script>
+
+  <!-- Google AdSense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5901632307149966"
+          crossorigin="anonymous"></script>
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="bahzi.fun">
+  <meta property="og:title" content="Ambil teks dari gambar &amp; PDF | bahzi.fun">
+  <meta property="og:description" content="Ambil teks dari gambar scan, foto dokumen, atau PDF di browser. Batas 20 MB dan 15 halaman, mendukung bahasa Indonesia dan Inggris. Berkas diproses lalu langsung dihapus. Tulisan tangan belum didukung.">
+  <meta property="og:url" content="https://bahzi.fun/ocr/">
+  <meta property="og:locale" content="id_ID">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Ambil teks dari gambar &amp; PDF | bahzi.fun">
+  <meta name="twitter:description" content="Ambil teks dari gambar scan, foto dokumen, atau PDF di browser. Batas 20 MB dan 15 halaman, mendukung bahasa Indonesia dan Inggris. Berkas diproses lalu langsung dihapus. Tulisan tangan belum didukung.">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
+
+  <link rel="stylesheet" href="/assets/styles.css?v=__V__">
+  <script src="/assets/tool-ocr.js?v=__V__" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Lewati ke konten utama</a>
+
+  <!-- Sprite ikon inline -->
+  <svg class="svg-sprite" aria-hidden="true" hidden>
+    <defs>
+      <linearGradient id="bz-gradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fd44b0"></stop>
+        <stop offset="1" stop-color="#7553ff"></stop>
+      </linearGradient>
+    </defs>
+    <symbol id="icon-logo" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="9" fill="url(#bz-gradient)"></rect>
+      <text x="16" y="22" text-anchor="middle" font-size="16" font-weight="700" fill="#150f23">b</text>
+    </symbol>
+    <symbol id="icon-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 19V5M6 11l6-6 6 6"></path>
+    </symbol>
+  </svg>
+
+  <header class="navbar" id="top">
+    <div class="navbar__inner container">
+      <a class="navbar__brand" href="/" aria-label="bahzi.fun: kembali ke beranda">
+        <svg class="wordmark" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
+        <span class="navbar__brand-text">bahzi.fun</span>
+        <span class="navbar__brand-sub">OmniTools</span>
+      </a>
+      <nav class="navbar__nav" aria-label="Navigasi utama">
+        <a class="navbar__link" href="/">Beranda</a>
+        <a class="navbar__link" href="/#alat">Alat</a>
+        <a class="navbar__link" href="/#faq">FAQ</a>
+      </nav>
+      <a class="btn btn--primary btn--sm navbar__cta" href="/#alat">Lihat alat</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="tools section--sub" aria-labelledby="ocr-title">
+      <div class="container ocr__page">
+        <div class="tools__head">
+          <p class="ocr__back"><a class="ocr__back-link" href="/">&larr; Kembali ke beranda</a></p>
+          <h1 class="tools__title" id="ocr-title">Ambil teks dari gambar & PDF</h1>
+          <p class="tools__lead">Ekstrak teks cetak atau hasil scan dari foto dan dokumen PDF langsung ke teks biasa.</p>
+        </div>
+
+        <div class="ocr__notice">
+          <p class="ocr__notice-title">Catatan penggunaan:</p>
+          <ul class="ocr__notice-list">
+            <li>Hasil terbaik diperoleh dari teks cetak atau pindaian yang jelas, tajam, dan tegak.</li>
+            <li>Tulisan tangan belum didukung pada versi ini.</li>
+            <li>Bahasa yang didukung: bahasa Indonesia, bahasa Inggris, atau campuran keduanya.</li>
+            <li>Privasi: berkas diproses di memori server lalu langsung dihapus setelah selesai (tidak disimpan).</li>
+          </ul>
+          <p class="ocr__limits-desc" id="ocr-limits-desc">Batas berkas: maksimal 20 MB per berkas dan PDF maksimal 15 halaman.</p>
+        </div>
+
+        <div class="container">
+          <aside class="ad-slot" data-ad-slot="atas" aria-label="Iklan"></aside>
+        </div>
+
+        <div class="ocr__app panel" id="ocr-app">
+          <form id="ocr-form" class="ocr__form">
+            <!-- Area unggah berkas (drag & drop) -->
+            <div class="ocr__dropzone" id="ocr-dropzone" tabindex="0" role="region" aria-label="Area pilih berkas gambar atau PDF">
+              <input type="file" id="ocr-file-input" class="ocr__file-input" accept="image/*,application/pdf" aria-label="Unggah gambar atau PDF">
+              <div class="ocr__drop-content">
+                <svg class="ocr__drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <p class="ocr__drop-title">Tarik dan letakkan berkas di sini</p>
+                <p class="ocr__drop-subtitle">atau</p>
+                <button type="button" class="btn btn--secondary ocr__browse-btn" id="ocr-browse-btn">Pilih berkas</button>
+                <p class="ocr__drop-hint">Format didukung: JPG, PNG, WebP, TIFF, atau PDF</p>
+              </div>
+            </div>
+
+            <!-- Ringkasan berkas yang dipilih -->
+            <div class="ocr__file-box" id="ocr-file-box" hidden>
+              <div class="ocr__file-details">
+                <span class="ocr__file-badge" id="ocr-file-type">BERKAS</span>
+                <div class="ocr__file-text">
+                  <p class="ocr__file-name" id="ocr-file-name"></p>
+                  <p class="ocr__file-size" id="ocr-file-size"></p>
+                </div>
+              </div>
+              <button type="button" class="btn btn--ghost btn--sm ocr__remove-btn" id="ocr-remove-btn" aria-label="Ganti berkas">Ganti berkas</button>
+            </div>
+
+            <!-- Pilihan bahasa -->
+            <div class="ocr__section">
+              <span class="ocr__section-label" id="ocr-lang-heading">Pilihan bahasa:</span>
+              <div class="ocr__lang-list" id="ocr-lang-list" role="radiogroup" aria-labelledby="ocr-lang-heading">
+                <!-- Diisi otomatis dari limits atau default -->
+              </div>
+            </div>
+
+            <!-- Tombol aksi -->
+            <div class="ocr__actions">
+              <button type="submit" class="btn btn--primary ocr__submit-btn" id="ocr-submit-btn" disabled>Ambil teks</button>
+              <button type="button" class="btn btn--ghost ocr__reset-btn" id="ocr-reset-btn" disabled>Kosongkan</button>
+            </div>
+          </form>
+
+          <!-- Status informasi & proses -->
+          <div class="status ocr__status" id="ocr-status" aria-live="polite">Pilih berkas gambar atau PDF untuk memulai.</div>
+
+          <!-- Panel hasil OCR -->
+          <div class="ocr__results" id="ocr-results" hidden>
+            <div class="ocr__results-head">
+              <h2 class="ocr__results-title">Hasil pembacaan teks</h2>
+              <p class="ocr__results-meta" id="ocr-results-meta"></p>
+            </div>
+            <textarea id="ocr-output" class="ocr__output" readonly rows="12" aria-label="Teks hasil pembacaan"></textarea>
+            <div class="ocr__results-actions">
+              <button type="button" class="btn btn--secondary ocr__copy-btn" id="ocr-copy-btn">Salin teks</button>
+              <button type="button" class="btn btn--secondary ocr__download-btn" id="ocr-download-btn">Unduh .txt</button>
+            </div>
+          </div>
+
+          <p class="ocr__privacy-tag">Semua berkas yang diproses langsung dibersihkan dari memori dan tidak disimpan.</p>
+        </div>
+
+        <div class="container">
+          <aside class="ad-slot" data-ad-slot="bawah" aria-label="Iklan"></aside>
+        </div>
+
+        <noscript>
+          <div class="panel ocr__noscript">
+            <h2>Ambil teks dari gambar & PDF</h2>
+            <p>Alat ini mengambil teks cetak dari gambar dan dokumen PDF secara otomatis. Untuk dapat memilih berkas dan menjalankan pembacaan langsung di browser, aktifkan JavaScript pada peramban Anda.</p>
+            <p>Batas penggunaan: ukuran berkas maksimal 20 MB, PDF maksimal 15 halaman, bahasa Indonesia dan Inggris. Berkas diproses di server secara langsung lalu dibuang dari memori.</p>
+          </div>
+        </noscript>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner container">
+      <div class="footer__brand">
+        <svg class="wordmark wordmark--sm" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
+        <p class="footer__copy">© 2026 bahzi.fun</p>
+      </div>
+      <nav class="footer__nav" aria-label="Tautan footer">
+        <a class="footer__link" href="/">Beranda</a>
+        <a class="footer__link" href="/#alat">Daftar alat</a>
+        <a class="footer__link" href="/privasi.html">Kebijakan privasi</a>
+      </nav>
+      <a class="footer__top" href="#top" aria-label="Kembali ke atas">
+        <svg aria-hidden="true"><use href="#icon-arrow-up"></use></svg>
+        Kembali ke atas
+      </a>
+    </div>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, dan Ambil teks dari gambar sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.</p>
+  </footer>
+</body>
+</html>
