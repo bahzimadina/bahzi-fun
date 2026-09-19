@@ -19,6 +19,7 @@ import io
 import json
 import os
 import sys
+import time
 import traceback
 import urllib.error
 import urllib.request
@@ -37,6 +38,8 @@ from app.image_convert import (  # noqa: E402
     IMAGE_TOO_LARGE as IMG_IMAGE_TOO_LARGE,
     IMAGE_UNREADABLE as IMG_IMAGE_UNREADABLE,
     INVALID_QUALITY as IMG_INVALID_QUALITY,
+    INVALID_SVG as IMG_INVALID_SVG,
+    INVALID_WIDTH as IMG_INVALID_WIDTH,
     MAX_BYTES as IMG_MAX_BYTES,
     MAX_FILES as IMG_MAX_FILES,
     MAX_PIXELS as IMG_MAX_PIXELS,
@@ -46,8 +49,12 @@ from app.image_convert import (  # noqa: E402
     QUALITY_DEFAULT as IMG_QUALITY_DEFAULT,
     QUALITY_MAX as IMG_QUALITY_MAX,
     QUALITY_MIN as IMG_QUALITY_MIN,
+    SVG_DEFAULT_WIDTH as IMG_SVG_DEFAULT_WIDTH,
+    SVG_MAX_SIDE as IMG_SVG_MAX_SIDE,
+    SVG_MAX_WIDTH as IMG_SVG_MAX_WIDTH,
     TARGETS as IMG_TARGETS,
     TOO_MANY_FILES as IMG_TOO_MANY_FILES,
+    UNSAFE_SVG as IMG_UNSAFE_SVG,
     UNSUPPORTED_TARGET as IMG_UNSUPPORTED_TARGET,
     ImageConvertError,
     check_file_count as check_image_file_count,
@@ -142,6 +149,24 @@ def make_image(format: str = "PNG", size: tuple[int, int] = (60, 60), color: str
     save_fmt = "JPEG" if format.upper() in ("JPG", "JPEG") else format.upper()
     img.save(buf, format=save_fmt)
     return buf.getvalue()
+
+
+def make_svg(width: int | None = 200, height: int | None = 100) -> bytes:
+    """SVG uji dengan gradasi + teks. Tanpa width/height bila argumen None."""
+    dims = ""
+    if width is not None and height is not None:
+        dims = f' width="{width}" height="{height}"'
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"{dims} viewBox="0 0 200 100">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="red"/>
+      <stop offset="100%" stop-color="blue"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="100" fill="url(#g)"/>
+  <text x="10" y="50" font-size="20" fill="white">Hi</text>
+</svg>""".encode("utf-8")
 
 
 def expect_image_error(func, code: str, status: int) -> ImageConvertError:
@@ -405,6 +430,92 @@ def test_image_convert_menolak_ukuran_lewat_batas() -> None:
     expect_image_error(lambda: check_image_total_size(IMG_MAX_BYTES + 1), IMG_PAYLOAD_TOO_LARGE, 413)
 
 
+def test_image_convert_svg_20000x20000_diperkecil() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="20000" height="20000">'
+        b'<rect width="20000" height="20000" fill="blue"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png")
+    assert res.scaled_down is True
+    assert res.width * res.height <= IMG_MAX_PIXELS
+    assert max(res.width, res.height) <= IMG_SVG_MAX_SIDE
+
+
+def test_image_convert_svg_ekstrem_400000x1_diperkecil() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="400000" height="1">'
+        b'<rect width="400000" height="1" fill="red"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png")
+    assert res.scaled_down is True
+    assert max(res.width, res.height) <= IMG_SVG_MAX_SIDE
+    assert res.width * res.height <= IMG_MAX_PIXELS
+
+
+def test_image_convert_svg_viewbox_200x100_tanpa_width() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">'
+        b'<rect width="200" height="100" fill="green"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png")
+    assert res.scaled_down is False
+    assert (res.width, res.height) == (1024, 512)
+
+
+def test_image_convert_svg_1500x800_tanpa_width() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="800">'
+        b'<rect width="1500" height="800" fill="blue"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png")
+    assert res.scaled_down is False
+    assert (res.width, res.height) == (1500, 800)
+
+
+def test_image_convert_svg_24x24_viewbox_saja() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        b'<circle cx="12" cy="12" r="10" fill="red"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png")
+    assert res.scaled_down is False
+    assert (res.width, res.height) == (1024, 1024)
+
+
+def test_image_convert_svg_600x300_tanpa_width() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300">'
+        b'<rect width="600" height="300" fill="green"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png")
+    assert res.scaled_down is False
+    assert (res.width, res.height) == (1024, 512)
+
+
+def test_image_convert_svg_600x300_width_400() -> None:
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300">'
+        b'<rect width="600" height="300" fill="green"/>'
+        b'</svg>'
+    )
+    res = convert_image(svg, target="png", width=400)
+    assert res.scaled_down is False
+    assert (res.width, res.height) == (400, 200)
+
+
 # --- Uji logika Word Counter ------------------------------------------------
 def test_word_count_logika_teks_normal() -> None:
     res = count_text("Halo dunia. Ini uji coba!")
@@ -643,6 +754,9 @@ def test_http_image_convert_limits() -> None:
     assert body["quality_min"] == 10
     assert body["quality_max"] == 100
     assert body["quality_default"] == 85
+    assert "svg" in body["inputs"]
+    assert body["svgMaxWidth"] == IMG_SVG_MAX_WIDTH
+    assert body["svgDefaultWidth"] == IMG_SVG_DEFAULT_WIDTH
     assert response.headers["cache-control"] == "no-store"
 
 
@@ -713,6 +827,347 @@ def test_http_image_convert_kualitas_tidak_valid_ditolak_400() -> None:
     )
     assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == IMG_INVALID_QUALITY
+
+
+def test_http_image_convert_svg_ke_png_ukuran_asli() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = make_svg(width=1500, height=800)
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-input-format"] == "svg"
+    assert response.headers["x-output-format"] == "png"
+    assert response.headers["x-pixels"] == str(1500 * 800)
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (1500, 800)
+
+
+def test_http_image_convert_svg_dengan_width_kustom() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = make_svg(width=200, height=100)
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.svg", svg, "image/svg+xml"))],
+        data={"format": "png", "width": "400"},
+    )
+    assert response.status_code == 200, response.text
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (400, 200)
+
+
+def test_http_image_convert_svg_ke_jpg_dan_webp() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = make_svg(width=60, height=60)
+
+    resp_jpg = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.svg", svg, "image/svg+xml"))],
+        data={"format": "jpeg"},
+    )
+    assert resp_jpg.status_code == 200, resp_jpg.text
+    assert resp_jpg.headers["content-type"].startswith("image/jpeg")
+    out_jpg = Image.open(io.BytesIO(resp_jpg.content))
+    assert out_jpg.mode == "RGB"
+
+    resp_jpg2 = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.svg", svg, "image/svg+xml"))],
+        data={"format": "jpg"},
+    )
+    assert resp_jpg2.status_code == 200, resp_jpg2.text
+    assert resp_jpg2.headers["content-type"].startswith("image/jpeg")
+
+    resp_webp = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.svg", svg, "image/svg+xml"))],
+        data={"format": "webp"},
+    )
+    assert resp_webp.status_code == 200, resp_webp.text
+    assert resp_webp.headers["content-type"].startswith("image/webp")
+    assert detect_format(resp_webp.content) == "webp"
+
+
+def test_http_image_convert_svg_berbahaya_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg_doctype = (
+        b'<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" '
+        b'"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("evil.svg", svg_doctype, "image/svg+xml"))],
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_UNSAFE_SVG
+
+    svg_script = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+        b"<script>alert(1)</script></svg>"
+    )
+    response2 = client.post(
+        "/api/image/convert",
+        files=[("files", ("evil2.svg", svg_script, "image/svg+xml"))],
+    )
+    assert response2.status_code == 400, response2.text
+    assert response2.json()["error"]["code"] == IMG_UNSAFE_SVG
+
+
+def test_http_image_convert_svg_xlink_href_eksternal_ditolak() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg_href = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+        b'width="50" height="50"><image xlink:href="http://example.com/x.png" '
+        b'width="50" height="50"/></svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("href.svg", svg_href, "image/svg+xml"))],
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_UNSAFE_SVG
+
+
+def test_http_image_convert_svg_rusak_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg_rusak = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">terpotong'
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("rusak.svg", svg_rusak, "image/svg+xml"))],
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_INVALID_SVG
+
+
+def test_http_image_convert_width_tidak_valid_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = make_svg(width=100, height=100)
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("test.svg", svg, "image/svg+xml"))],
+        data={"format": "png", "width": "99999"},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == IMG_INVALID_WIDTH
+
+
+def test_http_image_convert_svg_20000x20000_diperkecil_waktu_wajar() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="20000" height="20000">\n'
+        b'  <rect width="20000" height="20000" fill="blue"/>\n'
+        b'</svg>'
+    )
+    t0 = time.perf_counter()
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("besar.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    elapsed = time.perf_counter() - t0
+    assert response.status_code == 200, response.text
+    assert elapsed < 5.0, f"Waktu render terlalu lama: {elapsed:.2f} detik"
+    assert response.headers["x-scaled-down"] == "true"
+    out_img = Image.open(io.BytesIO(response.content))
+    total_pixels = out_img.width * out_img.height
+    assert total_pixels <= IMG_MAX_PIXELS, f"Piksel melebihi batas: {total_pixels}"
+    assert max(out_img.width, out_img.height) <= IMG_SVG_MAX_SIDE
+
+
+def test_http_image_convert_svg_ekstrem_400000x1_diperkecil() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="400000" height="1">\n'
+        b'  <rect width="400000" height="1" fill="red"/>\n'
+        b'</svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("gepeng.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scaled-down"] == "true"
+    out_img = Image.open(io.BytesIO(response.content))
+    assert max(out_img.width, out_img.height) <= IMG_SVG_MAX_SIDE
+    assert out_img.width * out_img.height <= IMG_MAX_PIXELS
+
+
+def test_http_image_convert_svg_viewbox_200x100_tanpa_width() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">\n'
+        b'  <rect width="200" height="100" fill="green"/>\n'
+        b'</svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("viewbox.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scaled-down"] == "false"
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (1024, 512)
+
+
+def test_http_image_convert_svg_1500x800_tanpa_width() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="800">\n'
+        b'  <rect width="1500" height="800" fill="blue"/>\n'
+        b'</svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("large.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scaled-down"] == "false"
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (1500, 800)
+
+
+def test_http_image_convert_svg_24x24_viewbox_saja() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n'
+        b'  <circle cx="12" cy="12" r="10" fill="red"/>\n'
+        b'</svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("icon.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scaled-down"] == "false"
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (1024, 1024)
+
+
+def test_http_image_convert_svg_600x300_tanpa_width_diperbesar() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300">\n'
+        b'  <rect width="600" height="300" fill="green"/>\n'
+        b'</svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("normal.svg", svg, "image/svg+xml"))],
+        data={"format": "png"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scaled-down"] == "false"
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (1024, 512)
+
+
+def test_http_image_convert_svg_600x300_dengan_width_400_proporsional() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300">\n'
+        b'  <rect width="600" height="300" fill="green"/>\n'
+        b'</svg>'
+    )
+    response = client.post(
+        "/api/image/convert",
+        files=[("files", ("normal.svg", svg, "image/svg+xml"))],
+        data={"format": "png", "width": "400"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scaled-down"] == "false"
+    out_img = Image.open(io.BytesIO(response.content))
+    assert out_img.size == (400, 200)
+
+
+def test_http_image_convert_regresi_format_lama_tetap_jalan() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    png_data = make_image("PNG", size=(40, 30), color="teal")
+    resp_png_jpg = client.post(
+        "/api/image/convert",
+        files=[("files", ("a.png", png_data, "image/png"))],
+        data={"format": "jpeg"},
+    )
+    assert resp_png_jpg.status_code == 200, resp_png_jpg.text
+    assert Image.open(io.BytesIO(resp_png_jpg.content)).size == (40, 30)
+
+    resp_png_jpg2 = client.post(
+        "/api/image/convert",
+        files=[("files", ("a2.png", png_data, "image/png"))],
+        data={"format": "jpg"},
+    )
+    assert resp_png_jpg2.status_code == 200, resp_png_jpg2.text
+    assert Image.open(io.BytesIO(resp_png_jpg2.content)).size == (40, 30)
+
+    resp_png_webp = client.post(
+        "/api/image/convert",
+        files=[("files", ("b.png", png_data, "image/png"))],
+        data={"format": "webp"},
+    )
+    assert resp_png_webp.status_code == 200, resp_png_webp.text
+    assert Image.open(io.BytesIO(resp_png_webp.content)).size == (40, 30)
+
+    jpeg_data = make_image("JPEG", size=(25, 45), color="orange")
+    resp_jpeg_png = client.post(
+        "/api/image/convert",
+        files=[("files", ("c.jpg", jpeg_data, "image/jpeg"))],
+        data={"format": "png"},
+    )
+    assert resp_jpeg_png.status_code == 200, resp_jpeg_png.text
+    assert Image.open(io.BytesIO(resp_jpeg_png.content)).size == (25, 45)
+
+    webp_data = make_image("WEBP", size=(33, 22), color="purple")
+    resp_webp_png = client.post(
+        "/api/image/convert",
+        files=[("files", ("d.webp", webp_data, "image/webp"))],
+        data={"format": "png"},
+    )
+    assert resp_webp_png.status_code == 200, resp_webp_png.text
+    assert Image.open(io.BytesIO(resp_webp_png.content)).size == (33, 22)
 
 
 def test_http_word_count_limits() -> None:

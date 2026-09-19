@@ -327,7 +327,7 @@
           <div class="tool-panel__head">
             <div>
               <h2 class="tool-panel__title" id="image-converter-title">Konversi gambar</h2>
-              <p class="tool-panel__sub" id="image-converter-limits">Maks 1 berkas, total 15 MB (PNG, JPG, WebP)</p>
+              <p class="tool-panel__sub" id="image-converter-limits">Maks 1 berkas, total 15 MB (PNG, JPG, WebP, atau SVG)</p>
             </div>
             <button class="tool-panel__close" id="image-converter-close" type="button" aria-label="Tutup panel konversi gambar">Tutup</button>
           </div>
@@ -337,8 +337,8 @@
           <label class="drop" id="image-converter-drop" for="image-converter-input">
             <svg class="drop__icon" aria-hidden="true"><use href="#icon-media"></use></svg>
             <span class="drop__text">Tarik dan lepas gambar di sini, atau <span class="drop__browse">pilih berkas</span></span>
-            <span class="drop__hint">PNG, JPG, atau WebP. Satu gambar per proses.</span>
-            <input class="sr-only" type="file" id="image-converter-input" accept="image/png,image/jpeg,image/webp">
+            <span class="drop__hint">PNG, JPG, WebP, atau SVG. Satu berkas per proses.</span>
+            <input class="sr-only" type="file" id="image-converter-input" accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg">
           </label>
 
           <p class="filelist__empty" id="image-converter-empty">Belum ada gambar dipilih.</p>
@@ -366,7 +366,7 @@
           </div>
 
           <div class="tool-panel__foot">
-            <p class="status" id="image-converter-status" role="status" aria-live="polite">Pilih berkas gambar PNG, JPG, atau WebP untuk mulai konversi.</p>
+            <p class="status" id="image-converter-status" role="status" aria-live="polite">Pilih berkas gambar PNG, JPG, WebP, atau SVG untuk mulai konversi.</p>
             <div class="tool-panel__actions">
               <button class="btn btn--ghost" id="image-converter-clear" type="button" disabled>Kosongkan</button>
               <button class="btn btn--primary" id="image-converter-submit" type="button" disabled>Konversi gambar</button>

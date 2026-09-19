@@ -32,6 +32,8 @@ from .image_convert import (
     QUALITY_DEFAULT as IMG_QUALITY_DEFAULT,
     QUALITY_MAX as IMG_QUALITY_MAX,
     QUALITY_MIN as IMG_QUALITY_MIN,
+    SVG_DEFAULT_WIDTH as IMG_SVG_DEFAULT_WIDTH,
+    SVG_MAX_WIDTH as IMG_SVG_MAX_WIDTH,
     TARGET_LABELS as IMG_TARGET_LABELS,
     TARGETS as IMG_TARGETS,
     ImageConvertError,
@@ -117,6 +119,7 @@ if _cors_origins:
             "X-Input-Format",
             "X-Output-Format",
             "X-Pixels",
+            "X-Scaled-Down",
             "X-Char-Count",
             "X-Word-Count",
             "X-Case-Mode",
@@ -301,7 +304,10 @@ def _image_convert_limits_payload() -> dict:
         "quality_max": IMG_QUALITY_MAX,
         "quality_default": IMG_QUALITY_DEFAULT,
         "quality_applies_to": ["jpeg", "webp"],
-        "accept": "image/png,image/jpeg,image/webp",
+        "inputs": ["png", "jpeg", "webp", "svg"],
+        "svgMaxWidth": IMG_SVG_MAX_WIDTH,
+        "svgDefaultWidth": IMG_SVG_DEFAULT_WIDTH,
+        "accept": "image/png,image/jpeg,image/webp,image/svg+xml",
         "result_filename": "hasil",
         "processed_on": "server",
         "note": (
@@ -447,8 +453,11 @@ async def image_convert(
     files: list[UploadFile] = File(default=[]),
     format: str = Form(default="jpeg"),
     quality: str | None = Form(default=None),
+    width: str | None = Form(default=None),
 ):
-    """Konversi satu gambar antar format (PNG ⇄ JPEG ⇄ WebP).
+    """Konversi satu gambar antar format (PNG/JPEG/WebP/SVG ⇒ PNG/JPEG/WebP).
+
+    Field `width` (px) opsional dan hanya berlaku untuk masukan SVG.
 
     Respons: binary gambar, Content-Type sesuai format output,
     Content-Disposition: attachment; filename="hasil.<ext>".
@@ -465,7 +474,7 @@ async def image_convert(
     norm_target = normalize_target(format)
     norm_quality = normalize_quality(quality)
 
-    result = convert_image(payload, target=norm_target, quality=norm_quality)
+    result = convert_image(payload, target=norm_target, quality=norm_quality, width=width)
     duration_ms = (time.perf_counter() - started) * 1000
 
     logger.info(
@@ -489,6 +498,7 @@ async def image_convert(
         "X-Pixels": str(result.width * result.height),
         "X-Total-Bytes": str(len(result.data)),
         "X-Processing-Ms": f"{duration_ms:.0f}",
+        "X-Scaled-Down": "true" if result.scaled_down else "false",
     }
     return Response(content=result.data, media_type=media_type, headers=headers)
 
