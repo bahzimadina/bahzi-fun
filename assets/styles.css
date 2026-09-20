@@ -880,6 +880,143 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Base64: panel alat inline ================= */
+.base64__input-wrap {
+  display: flex; flex-direction: column; gap: .35rem; width: 100%;
+}
+.base64__label {
+  font-size: .82rem; color: var(--text-muted); font-weight: 500;
+}
+.base64__textarea {
+  width: 100%; min-height: 120px; padding: .65rem .8rem;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--code); color: var(--text);
+  font-family: var(--font-sans); font-size: .9rem; line-height: 1.5;
+  resize: vertical; box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.base64__textarea:focus {
+  border-color: var(--brand); outline: none;
+}
+
+.base64__fieldset {
+  margin: 0; padding: 0; border: none; width: 100%;
+}
+.base64__fieldset--inline {
+  width: auto;
+}
+.base64__legend {
+  font-size: .82rem; color: var(--text-muted); font-weight: 500; margin-bottom: .4rem;
+}
+.base64__modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: .4rem;
+  width: 100%;
+}
+.base64__mode-label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .84rem;
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color var(--transition), background-color var(--transition);
+  user-select: none;
+}
+.base64__mode-label:hover {
+  border-color: var(--brand);
+}
+.base64__mode-label:has(input:checked) {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .15);
+  color: #fff;
+  font-weight: 500;
+}
+.base64__mode-label input[type="radio"] {
+  accent-color: var(--brand);
+  margin: 0;
+  cursor: pointer;
+}
+.base64__mode-label input[type="radio"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.base64__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem 1.5rem;
+  width: 100%;
+}
+.base64__options[hidden] {
+  display: none;
+}
+.base64__variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.base64__wrap-field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  min-width: 180px;
+}
+.base64__select {
+  padding: .5rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: .84rem;
+  font-family: inherit;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.base64__select:focus {
+  border-color: var(--brand);
+  outline: none;
+}
+
+.base64__results {
+  display: flex; flex-direction: column; gap: .8rem; margin-top: .3rem;
+}
+.base64__hint {
+  margin: 0; padding: .65rem .8rem; font-size: .82rem; color: var(--text-muted);
+  background: var(--surface); border: 1px dashed var(--border);
+  border-radius: var(--radius); text-align: center;
+}
+.base64__hint[hidden] { display: none; }
+.base64__output-wrap {
+  display: flex; flex-direction: column; gap: .5rem; width: 100%;
+}
+.base64__output-wrap[hidden] { display: none; }
+.base64__output {
+  width: 100%; min-height: 120px; padding: .65rem .8rem;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--code); color: var(--text);
+  font-family: var(--font-mono); font-size: .88rem; line-height: 1.5;
+  resize: vertical; box-sizing: border-box;
+  word-break: break-word; overflow-wrap: break-word;
+}
+.base64__output:focus {
+  border-color: var(--brand); outline: none;
+}
+.base64__meta {
+  margin: 0; font-size: .82rem; color: var(--text-muted); font-family: var(--font-mono);
+}
+.base64__output-actions {
+  display: flex; gap: .5rem; margin-top: .2rem;
+}
+
 /* ================= OCR: Halaman ambil teks dari gambar & PDF ================= */
 .ocr__page {
   max-width: 820px;
@@ -1190,5 +1327,24 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
     min-width: 44px;
   }
 }
+
+/* ================= Base64: target sentuh di perangkat sentuh ================= */
+@media (pointer: coarse) {
+  #base64-input,
+  #base64-output,
+  #base64-wrap,
+  #base64-close,
+  #base64-submit,
+  #base64-clear,
+  #base64-copy,
+  #base64-download,
+  #base64-panel .base64__mode-label,
+  #base64-panel .base64__mode-label input,
+  #base64-panel label {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 
 

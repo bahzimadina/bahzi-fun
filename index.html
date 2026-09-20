@@ -13,7 +13,7 @@
   <meta name="omnitools-server-base" content="">
 
   <title>OmniTools: 33 alat harian | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, dan Ambil teks dari gambar sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.">
+  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, dan Base64 sudah bisa dipakai. Sisa 26 alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
   <!-- Google tag (gtag.js) + Consent Mode v2.
@@ -43,13 +43,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
   <meta property="og:title" content="OmniTools: 33 alat harian">
-  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, dan Ambil teks dari gambar sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, dan Base64 sudah bisa dipakai. Sisa 26 alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OmniTools: 33 alat harian">
-  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, dan Ambil teks dari gambar sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, dan Base64 sudah bisa dipakai. Sisa 26 alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -167,7 +167,7 @@
 
         <div class="tools__head">
           <h1 class="tools__title" id="alat-title">33 alat buat kerja harian</h1>
-          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, dan Ambil teks dari gambar sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.</p>
+          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, dan Base64 sudah bisa dipakai. Sisa 26 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
@@ -516,6 +516,87 @@
           </div>
         </section>
 
+        <!-- Panel alat: Ubah Base64. Tampil inline di alur halaman: dibuka lewat
+             tombol "Buka alat" pada kartu Base64 Encoder/Decoder, ditutup lewat tombol
+             Tutup atau Esc. Teks dikirim ke server untuk diproses di memori,
+             lalu dibuang setelah selesai. -->
+        <section class="tool-panel" id="base64-panel" hidden tabindex="-1" aria-labelledby="base64-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="base64-title">Ubah Base64</h2>
+              <p class="tool-panel__sub" id="base64-limits">Maks 200.000 karakter, aturan bawaan</p>
+            </div>
+            <button class="tool-panel__close" id="base64-close" type="button" aria-label="Tutup panel ubah base64">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="base64-note">Teks dikirim ke server, dibaca di memori, lalu dibuang; tidak ada yang disimpan di disk.</p>
+
+          <fieldset class="base64__fieldset">
+            <legend class="base64__legend">Mau ke arah mana?</legend>
+            <div class="base64__modes" id="base64-modes">
+              <label class="base64__mode-label">
+                <input type="radio" name="base64-mode" value="encode" checked>
+                <span>Teks jadi Base64</span>
+              </label>
+              <label class="base64__mode-label">
+                <input type="radio" name="base64-mode" value="decode">
+                <span>Base64 jadi teks</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="base64__input-wrap">
+            <label class="base64__label" for="base64-input">Teks masukan</label>
+            <textarea class="base64__textarea" id="base64-input" rows="6" placeholder="Tempel teks atau Base64 di sini…"></textarea>
+          </div>
+
+          <div class="base64__options" id="base64-encode-options">
+            <fieldset class="base64__fieldset base64__fieldset--inline">
+              <legend class="base64__legend">Varian alfabet</legend>
+              <div class="base64__variants">
+                <label class="base64__mode-label" for="base64-variant-standard">
+                  <input type="radio" name="base64-variant" id="base64-variant-standard" value="standard" checked>
+                  <span>Standar (+/)</span>
+                </label>
+                <label class="base64__mode-label" for="base64-variant-urlsafe">
+                  <input type="radio" name="base64-variant" id="base64-variant-urlsafe" value="urlsafe">
+                  <span>Aman tautan (-_)</span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div class="base64__wrap-field">
+              <label class="base64__label" for="base64-wrap">Pembungkusan baris</label>
+              <select class="base64__select" id="base64-wrap">
+                <option value="0">Tanpa pembungkusan</option>
+                <option value="64">64 karakter per baris</option>
+                <option value="76">76 karakter per baris</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="base64-status" role="status" aria-live="polite">Tempel teks atau Base64, pilih arah, lalu tekan tombolnya.</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="base64-clear" type="button" disabled>Bersihkan</button>
+              <button class="btn btn--primary" id="base64-submit" type="button" disabled>Ubah</button>
+            </div>
+          </div>
+
+          <div class="base64__results" id="base64-results" aria-live="polite">
+            <p class="base64__hint" id="base64-hint">Hasil akan muncul di sini.</p>
+            <div class="base64__output-wrap" id="base64-output-wrap" hidden>
+              <label class="base64__label" for="base64-output">Hasil</label>
+              <textarea class="base64__output" id="base64-output" rows="6" readonly></textarea>
+              <p class="base64__meta" id="base64-meta"></p>
+              <div class="tool-panel__actions base64__output-actions">
+                <button class="btn btn--ghost" id="base64-copy" type="button">Salin hasil</button>
+                <button class="btn btn--primary" id="base64-download" type="button">Unduh .txt</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="tools__grid" id="tools-grid"></div>
         <p class="tools__empty" id="tools-empty" hidden aria-live="polite">
           Tidak ada alat yang cocok dengan pencarianmu.
@@ -708,7 +789,7 @@
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, dan Ambil teks dari gambar sudah bisa dipakai. Sisa 27 alat lain masih disiapkan.</p>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, dan Base64 sudah bisa dipakai. Sisa 26 alat lain masih disiapkan.</p>
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
@@ -725,5 +806,6 @@
   <script src="assets/tool-image-converter.js?v=__V__" defer></script>
   <script src="assets/tool-word-counter.js?v=__V__" defer></script>
   <script src="assets/tool-case-converter.js?v=__V__" defer></script>
+  <script src="assets/tool-base64.js?v=__V__" defer></script>
 </body>
 </html>

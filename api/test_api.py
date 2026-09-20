@@ -132,6 +132,29 @@ from app.ocr import (  # noqa: E402
     OcrResult,
     run_ocr,
 )
+from app.base64_tool import (  # noqa: E402
+    CHUNK_SIZE as B64_CHUNK_SIZE,
+    INVALID_BASE64 as B64_INVALID_BASE64,
+    INVALID_REQUEST as B64_INVALID_REQUEST,
+    INVALID_VARIANT as B64_INVALID_VARIANT,
+    INVALID_WRAP as B64_INVALID_WRAP,
+    MAX_BYTES as B64_MAX_BYTES,
+    MAX_CHARS as B64_MAX_CHARS,
+    MODES as B64_MODES,
+    NO_TEXT as B64_NO_TEXT,
+    NOT_TEXT as B64_NOT_TEXT,
+    TOO_LONG as B64_TOO_LONG,
+    UNSUPPORTED_MODE as B64_UNSUPPORTED_MODE,
+    VARIANTS as B64_VARIANTS,
+    WRAP_OPTIONS as B64_WRAP_OPTIONS,
+    Base64Result,
+    Base64ToolError,
+    convert_base64,
+    normalize_mode as normalize_base64_mode,
+    normalize_variant as normalize_base64_variant,
+    normalize_wrap as normalize_base64_wrap,
+    validate_text as validate_base64_text,
+)
 
 SKIPPED: list[str] = []
 
@@ -279,6 +302,21 @@ def expect_case_convert_error(func, code: str, status: int) -> CaseConvertError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar CaseConvertError {code}")
+
+
+def expect_base64_error(func, code: str, status: int) -> Base64ToolError:
+    """Pastikan func() melempar Base64ToolError dengan kode dan status yang tepat."""
+    try:
+        func()
+    except Base64ToolError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar Base64ToolError {code}")
+
 
 
 
@@ -704,6 +742,152 @@ def test_case_convert_logika_mode_tidak_valid() -> None:
     expect_case_convert_error(lambda: convert_case("halo", None), CC_INVALID_REQUEST, 400)
     expect_case_convert_error(lambda: convert_case("halo", ""), CC_INVALID_REQUEST, 400)
     expect_case_convert_error(lambda: convert_case("halo", "mode_palsu"), CC_UNSUPPORTED_MODE, 400)
+
+
+def test_base64_logika_encode_biasa() -> None:
+    import base64
+    text = "Halo, dunia!"
+    res = convert_base64(text, "encode")
+    expected = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    assert res.text == expected
+    assert res.mode == "encode"
+    assert res.variant == "standard"
+    assert res.wrap == 0
+    assert res.chars_in == len(text)
+    assert res.bytes_in == len(text.encode("utf-8"))
+    assert res.chars_out == len(expected)
+    assert res.bytes_out == len(expected.encode("utf-8"))
+    assert res.changed is True
+
+
+def test_base64_logika_encode_aksen_dan_emoji() -> None:
+    import base64
+    text = "Halo dunia! 🌟 café & résumé ☕"
+    res = convert_base64(text, "encode")
+    expected = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    assert res.text == expected
+
+
+def test_base64_logika_urlsafe_encode() -> None:
+    import base64
+    text = ">>> ??? ~~~"
+    res_std = convert_base64(text, "encode", variant="standard")
+    res_url = convert_base64(text, "encode", variant="urlsafe")
+    expected_url = base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii")
+    assert res_url.text == expected_url
+    assert "+" in res_std.text or "/" in res_std.text
+    assert "-" in res_url.text or "_" in res_url.text
+    assert "+" not in res_url.text and "/" not in res_url.text
+
+
+def test_base64_logika_wrap_76() -> None:
+    import base64
+    text = "Kalimat panjang yang menghasilkan Base64 lebih dari 76 karakter untuk memastikan pemotongan baris tepat."
+    res = convert_base64(text, "encode", wrap=76)
+    lines = res.text.split("\n")
+    assert len(lines) > 1
+    for line in lines:
+        assert len(line) <= 76
+    expected_full = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    assert "".join(lines) == expected_full
+
+
+def test_base64_logika_wrap_64() -> None:
+    text = "Kalimat panjang yang menghasilkan Base64 lebih dari 64 karakter untuk verifikasi."
+    res = convert_base64(text, "encode", wrap=64)
+    lines = res.text.split("\n")
+    assert len(lines) > 1
+    for line in lines:
+        assert len(line) <= 64
+
+
+def test_base64_logika_decode_bolak_balik() -> None:
+    samples = [
+        "Halo, dunia!",
+        "Selamat pagi, apa kabar?",
+        "Teks berbaris satu\nbaris dua\nbaris tiga",
+        "Emoji test 🚀🔥🌈",
+    ]
+    for sample in samples:
+        enc = convert_base64(sample, "encode")
+        dec = convert_base64(enc.text, "decode")
+        assert dec.text == sample
+        assert dec.mode == "decode"
+        assert dec.chars_out == len(sample)
+
+
+def test_base64_logika_decode_toleran() -> None:
+    import base64
+    text = "Halo, dunia!"
+    raw_b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+    # Data URI prefix
+    data_uri = f"data:text/plain;base64,{raw_b64}"
+    assert convert_base64(data_uri, "decode").text == text
+
+    # Whitespace dan baris baru
+    with_spaces = f" \n\t {raw_b64[:4]} \n {raw_b64[4:]} \t\n "
+    assert convert_base64(with_spaces, "decode").text == text
+
+    # Padding hilang
+    unpadded = raw_b64.rstrip("=")
+    assert convert_base64(unpadded, "decode").text == text
+
+    # Kombinasi data URI, spasi, dan tanpa padding
+    combo = f" data:text/plain;base64, \n {unpadded} \t\n "
+    assert convert_base64(combo, "decode").text == text
+
+
+def test_base64_logika_decode_urlsafe_alfabet() -> None:
+    text = ">>> ??? ~~~"
+    enc_url = convert_base64(text, "encode", variant="urlsafe")
+    assert ("-" in enc_url.text) or ("_" in enc_url.text)
+    dec = convert_base64(enc_url.text, "decode")
+    assert dec.text == text
+
+
+def test_base64_logika_menolak_teks_kosong_dan_spasi() -> None:
+    expect_base64_error(lambda: convert_base64("", "encode"), B64_NO_TEXT, 400)
+    expect_base64_error(lambda: convert_base64("   \n\t  ", "encode"), B64_NO_TEXT, 400)
+    expect_base64_error(lambda: convert_base64("", "decode"), B64_NO_TEXT, 400)
+    expect_base64_error(lambda: convert_base64("data:text/plain;base64,", "decode"), B64_NO_TEXT, 400)
+
+
+def test_base64_logika_menolak_none_text() -> None:
+    expect_base64_error(lambda: convert_base64(None, "encode"), B64_INVALID_REQUEST, 400)
+    expect_base64_error(lambda: convert_base64(None, "decode"), B64_INVALID_REQUEST, 400)
+
+
+def test_base64_logika_menolak_invalid_base64() -> None:
+    # Karakter di luar alfabet Base64
+    expect_base64_error(lambda: convert_base64("Halo Dunia!", "decode"), B64_INVALID_BASE64, 400)
+    # Panjang mustahil (sisa 1 karakter)
+    expect_base64_error(lambda: convert_base64("A", "decode"), B64_INVALID_BASE64, 400)
+    expect_base64_error(lambda: convert_base64("AAAAA", "decode"), B64_INVALID_BASE64, 400)
+    # Samadengan di tengah atau salah posisi
+    expect_base64_error(lambda: convert_base64("AA=A", "decode"), B64_INVALID_BASE64, 400)
+    expect_base64_error(lambda: convert_base64("AAAA=", "decode"), B64_INVALID_BASE64, 400)
+
+
+def test_base64_logika_mode_dan_opsi_tidak_valid() -> None:
+    expect_base64_error(lambda: convert_base64("halo", None), B64_INVALID_REQUEST, 400)
+    expect_base64_error(lambda: convert_base64("halo", ""), B64_INVALID_REQUEST, 400)
+    expect_base64_error(lambda: convert_base64("halo", "mode_palsu"), B64_UNSUPPORTED_MODE, 400)
+    expect_base64_error(lambda: convert_base64("halo", "encode", variant="invalid_var"), B64_INVALID_VARIANT, 400)
+    expect_base64_error(lambda: convert_base64("halo", "encode", wrap=50), B64_INVALID_WRAP, 400)
+
+
+def test_base64_logika_menolak_terlalu_panjang() -> None:
+    long_text = "a" * (B64_MAX_CHARS + 1)
+    expect_base64_error(lambda: convert_base64(long_text, "encode"), B64_TOO_LONG, 413)
+
+
+def test_base64_logika_menolak_data_biner_bukan_teks() -> None:
+    import base64
+    binary_bytes = bytes(range(256))
+    binary_b64 = base64.b64encode(binary_bytes).decode("ascii")
+    expect_base64_error(lambda: convert_base64(binary_b64, "decode"), B64_NOT_TEXT, 400)
+
 
 
 
@@ -1457,6 +1641,150 @@ def test_http_case_convert_teks_terlalu_panjang_ditolak_413() -> None:
     response = client.post("/api/case", data={"text": long_text, "mode": "upper"})
     assert response.status_code == 413, response.text
     assert response.json()["error"]["code"] == CC_TOO_LONG
+
+
+def test_http_base64_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/base64/limits")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["processed_on"] == "server"
+    assert body["max_chars"] == B64_MAX_CHARS
+    assert body["max_bytes"] == B64_MAX_BYTES
+    assert isinstance(body["modes"], list)
+    assert isinstance(body["variants"], list)
+    assert isinstance(body["wrap_options"], list)
+    assert isinstance(body["decode_accepts"], list)
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_http_base64_encode_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/base64", data={"text": "Halo, dunia!", "mode": "encode"})
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/json")
+
+    cache = response.headers.get("cache-control", "")
+    assert "no-store" in cache
+    assert "no-cache" in cache
+    assert response.headers.get("pragma") == "no-cache"
+
+    assert response.headers.get("x-base64-mode") == "encode"
+    assert "x-output-length" in response.headers
+    assert "x-processing-ms" in response.headers
+
+    body = response.json()
+    assert body["mode"] == "encode"
+    assert body["text"] == "SGFsbywgZHVuaWEh"
+    assert body["chars_in"] == 12
+    assert body["chars_out"] == 16
+    assert body["changed"] is True
+
+
+def test_http_base64_encode_urlsafe_dan_wrap() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    text = "Kalimat panjang untuk menguji opsi urlsafe dan pembungkusan baris 76 karakter pada endpoint HTTP."
+    response = client.post(
+        "/api/base64",
+        data={"text": text, "mode": "encode", "variant": "urlsafe", "wrap": "76"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["variant"] == "urlsafe"
+    assert body["wrap"] == 76
+    lines = body["text"].split("\n")
+    assert len(lines) > 1
+    for line in lines:
+        assert len(line) <= 76
+
+
+def test_http_base64_decode_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    b64_input = "  data:text/plain;base64,\n SGFsbywgZHVuaWEh \n "
+    response = client.post("/api/base64", data={"text": b64_input, "mode": "decode"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "decode"
+    assert body["text"] == "Halo, dunia!"
+    assert response.headers.get("x-base64-mode") == "decode"
+
+
+def test_http_base64_teks_kosong_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/base64", data={"text": "", "mode": "encode"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == B64_NO_TEXT
+
+
+def test_http_base64_teks_hanya_spasi_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/base64", data={"text": "   \n\t  ", "mode": "encode"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == B64_NO_TEXT
+
+
+def test_http_base64_mode_tidak_valid_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/base64", data={"text": "halo", "mode": "tidak_ada"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == B64_UNSUPPORTED_MODE
+
+    response2 = client.post("/api/base64", data={"text": "halo"})
+    assert response2.status_code == 400, response2.text
+    assert response2.json()["error"]["code"] == B64_INVALID_REQUEST
+
+
+def test_http_base64_bukan_multipart_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/base64", json={"text": "halo", "mode": "encode"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == B64_INVALID_REQUEST
+
+
+def test_http_base64_teks_terlalu_panjang_ditolak_413() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    long_text = "x" * (B64_MAX_CHARS + 10)
+    response = client.post("/api/base64", data={"text": long_text, "mode": "encode"})
+    assert response.status_code == 413, response.text
+    assert response.json()["error"]["code"] == B64_TOO_LONG
+
+
+def test_http_base64_invalid_base64_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/base64", data={"text": "Bukan base64 valid! @#$", "mode": "decode"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == B64_INVALID_BASE64
+
+
+def test_http_base64_data_biner_ditolak_400() -> None:
+    import base64
+    client = _test_client()
+    if client is None:
+        return
+    binary_b64 = base64.b64encode(bytes(range(256))).decode("ascii")
+    response = client.post("/api/base64", data={"text": binary_b64, "mode": "decode"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == B64_NOT_TEXT
 
 
 # --- Uji OCR (Ambil teks dari gambar & PDF) ---------------------------------

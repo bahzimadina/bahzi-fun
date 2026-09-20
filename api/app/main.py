@@ -91,6 +91,25 @@ from .ocr import (
     OcrError,
     run_ocr,
 )
+from .base64_tool import (
+    CHUNK_SIZE as B64_CHUNK_SIZE,
+    MAX_BYTES as B64_MAX_BYTES,
+    MAX_CHARS as B64_MAX_CHARS,
+    MODES as B64_MODES,
+    VARIANTS as B64_VARIANTS,
+    WRAP_OPTIONS as B64_WRAP_OPTIONS,
+    INVALID_BASE64 as B64_INVALID_BASE64,
+    INVALID_REQUEST as B64_INVALID_REQUEST,
+    INVALID_VARIANT as B64_INVALID_VARIANT,
+    INVALID_WRAP as B64_INVALID_WRAP,
+    NO_TEXT as B64_NO_TEXT,
+    NOT_TEXT as B64_NOT_TEXT,
+    TOO_LONG as B64_TOO_LONG,
+    UNSUPPORTED_MODE as B64_UNSUPPORTED_MODE,
+    Base64Result,
+    Base64ToolError,
+    convert_base64,
+)
 
 SERVICE_NAME = "omnitools-api"
 OUTPUT_FILENAME = "gabungan.pdf"
@@ -137,6 +156,8 @@ if _cors_origins:
             "X-Word-Count",
             "X-Case-Mode",
             "X-Ocr-Lang",
+            "X-Base64-Mode",
+            "X-Output-Length",
         ],
     )
 
@@ -180,12 +201,21 @@ async def handle_ocr_error(request: Request, exc: OcrError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
+@app.exception_handler(Base64ToolError)
+async def handle_base64_error(request: Request, exc: Base64ToolError) -> JSONResponse:
+    """Error base64 yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("ubah base64 ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) → 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
     if request.url.path.startswith("/api/ocr"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi gambar atau PDF."
+    elif request.url.path.startswith("/api/base64"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/word-count"):
@@ -403,6 +433,50 @@ def _case_convert_limits_payload() -> dict:
             "selesai. Tidak ada teks yang disimpan di disk."
         ),
     }
+
+
+def _reject_oversized_base64_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas teks."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > B64_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise Base64ToolError(
+            B64_TOO_LONG,
+            "Ukuran permintaan melebihi batas 1 MB.",
+            413,
+        )
+
+
+def _base64_limits_payload() -> dict:
+    return {
+        "max_chars": B64_MAX_CHARS,
+        "max_bytes": B64_MAX_BYTES,
+        "max_mb": B64_MAX_BYTES // (1024 * 1024),
+        "modes": [{"value": k, "label": v} for k, v in B64_MODES.items()],
+        "variants": [{"value": k, "label": v} for k, v in B64_VARIANTS.items()],
+        "wrap_options": [
+            {"value": 0, "label": "Tanpa pembungkusan"},
+            {"value": 64, "label": "64 karakter per baris"},
+            {"value": 76, "label": "76 karakter per baris"},
+        ],
+        "decode_accepts": [
+            "spasi dan baris baru diabaikan",
+            "tanda samadengan di akhir boleh tidak ada",
+            "awalan data:...;base64, diabaikan",
+            "alfabet aman tautan (- dan _) ikut diterima",
+        ],
+        "processed_on": "server",
+        "note": (
+            "Teks dikirim ke server untuk diproses di memori, lalu dibuang setelah "
+            "selesai. Tidak ada teks yang disimpan di disk."
+        ),
+    }
+
 
 
 
@@ -707,6 +781,61 @@ async def ocr_endpoint(
     return JSONResponse(content=result.to_dict(), headers=headers)
 
 
+@app.get("/api/base64/limits")
+async def base64_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Base64."""
+    return JSONResponse(content=_base64_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/base64")
+async def base64_endpoint(
+    request: Request,
+    text: str = Form(default=None),
+    mode: str = Form(default=None),
+    variant: str | None = Form(default=None),
+    wrap: str | None = Form(default=None),
+):
+    """Ubah teks jadi Base64 atau sebaliknya di memori.
+
+    Menerima multipart/form-data dengan field `text`, `mode`, serta opsional `variant` dan `wrap`.
+    Respons: JSON application/json.
+    Header: Cache-Control: no-store, no-cache, must-revalidate + Pragma: no-cache,
+            X-Base64-Mode, X-Output-Length, X-Processing-Ms.
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_base64_content_length(request)
+
+    if text is None or mode is None:
+        form = await request.form()
+        if text is None and "text" in form:
+            text = ""
+        if mode is None and "mode" in form:
+            mode = ""
+
+    result = convert_base64(text, mode, variant=variant, wrap=wrap)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "base64 selesai: mode=%s variant=%s wrap=%d chars_in=%d chars_out=%d durasi=%.0fms",
+        result.mode,
+        result.variant,
+        result.wrap,
+        result.chars_in,
+        result.chars_out,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Base64-Mode": result.mode,
+        "X-Output-Length": str(result.chars_out),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result.to_dict(), headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -714,8 +843,9 @@ async def root() -> dict:
         "service": SERVICE_NAME,
         "version": __version__,
         "docs": "/docs",
-        "tools": ["pdf-merge", "image-convert", "word-count", "case-convert", "ocr"],
+        "tools": ["pdf-merge", "image-convert", "word-count", "case-convert", "ocr", "base64"],
     }
+
 
 
 
