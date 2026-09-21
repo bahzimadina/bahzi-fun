@@ -155,6 +155,24 @@ from app.base64_tool import (  # noqa: E402
     normalize_wrap as normalize_base64_wrap,
     validate_text as validate_base64_text,
 )
+from app.remove_duplicates import (  # noqa: E402
+    CHUNK_SIZE as RD_CHUNK_SIZE,
+    INVALID_BOOLEAN as RD_INVALID_BOOLEAN,
+    INVALID_REQUEST as RD_INVALID_REQUEST,
+    KEEP_MODES as RD_KEEP_MODES,
+    MAX_BYTES as RD_MAX_BYTES,
+    MAX_CHARS as RD_MAX_CHARS,
+    NO_TEXT as RD_NO_TEXT,
+    TOO_LONG as RD_TOO_LONG,
+    UNSUPPORTED_KEEP as RD_UNSUPPORTED_KEEP,
+    DedupeResult,
+    RemoveDuplicatesError,
+    check_size as check_remove_duplicates_size,
+    dedupe_text,
+    normalize_keep as normalize_remove_duplicates_keep,
+    parse_bool as parse_remove_duplicates_bool,
+    validate_text as validate_remove_duplicates_text,
+)
 
 SKIPPED: list[str] = []
 
@@ -1987,6 +2005,270 @@ def test_http_ocr_pdf_rusak_ditolak_422() -> None:
     assert body["error"]["code"] == OCR_DAMAGED_FILE
     assert body["error"]["code"] != "INTERNAL_ERROR"
     assert "tidak bisa dibaca" in body["error"]["message"].lower()
+
+
+
+
+# --- Uji Hapus Baris Duplikat (Remove Duplicates) ----------------------------
+def test_remove_duplicates_logika_dasar() -> None:
+    text = "apel\njeruk\napel\nmangga\njeruk"
+    result = dedupe_text(text)
+    assert result.text == "apel\njeruk\nmangga"
+    assert result.lines_in == 5
+    assert result.lines_out == 3
+    assert result.duplicates_removed == 2
+    assert result.empty_removed == 0
+    assert result.chars_in == len(text)
+    assert result.chars_out == len(result.text)
+    assert result.to_dict()["lines_out"] == 3
+
+
+def test_remove_duplicates_logika_keep_first_vs_last() -> None:
+    text = "A\nB\nA\nC\nB"
+    res_first = dedupe_text(text, keep="first")
+    assert res_first.text == "A\nB\nC"
+    assert res_first.lines_out == 3
+    assert res_first.duplicates_removed == 2
+
+    res_last = dedupe_text(text, keep="last")
+    assert res_last.text == "A\nC\nB"
+    assert res_last.lines_out == 3
+    assert res_last.duplicates_removed == 2
+
+    # Menjaga isi teks asli kemunculan terakhir
+    text_case = "apple\nbanana\nAPPLE\ncherry"
+    res_last_case = dedupe_text(text_case, keep="last", case_sensitive=False)
+    assert res_last_case.text == "banana\nAPPLE\ncherry"
+    assert res_last_case.lines_out == 3
+    assert res_last_case.duplicates_removed == 1
+
+
+def test_remove_duplicates_logika_trim() -> None:
+    text = "  apel  \napel\njeruk\n  jeruk"
+    # trim=True -> spasi di ujung dibersihkan untuk pembanding, teks asli tidak diubah
+    res_trimmed = dedupe_text(text, trim=True)
+    assert res_trimmed.text == "  apel  \njeruk"
+    assert res_trimmed.lines_out == 2
+    assert res_trimmed.duplicates_removed == 2
+
+    # trim=False -> spasi membuat baris berbeda
+    res_untrimmed = dedupe_text(text, trim=False)
+    assert res_untrimmed.text == "  apel  \napel\njeruk\n  jeruk"
+    assert res_untrimmed.lines_out == 4
+    assert res_untrimmed.duplicates_removed == 0
+
+
+def test_remove_duplicates_logika_case_sensitive() -> None:
+    text = "Halo\nhalo\nHALO"
+    res_sensitive = dedupe_text(text, case_sensitive=True)
+    assert res_sensitive.text == "Halo\nhalo\nHALO"
+    assert res_sensitive.lines_out == 3
+    assert res_sensitive.duplicates_removed == 0
+
+    res_insensitive = dedupe_text(text, case_sensitive=False)
+    assert res_insensitive.text == "Halo"
+    assert res_insensitive.lines_out == 1
+    assert res_insensitive.duplicates_removed == 2
+
+
+def test_remove_duplicates_logika_drop_empty() -> None:
+    text = "apel\n\njeruk\n   \nmangga"
+    # drop_empty=True -> baris kosong setelah trim dibuang ke empty_removed
+    res_drop = dedupe_text(text, drop_empty=True)
+    assert res_drop.text == "apel\njeruk\nmangga"
+    assert res_drop.lines_out == 3
+    assert res_drop.empty_removed == 2
+    assert res_drop.duplicates_removed == 0
+
+    # drop_empty=False -> baris kosong dipertahankan, duplikat baris kosong dibuang
+    text2 = "apel\n\njeruk\n\nmangga"
+    res_keep_empty = dedupe_text(text2, drop_empty=False)
+    assert res_keep_empty.text == "apel\n\njeruk\nmangga"
+    assert res_keep_empty.lines_out == 4
+    assert res_keep_empty.empty_removed == 0
+    assert res_keep_empty.duplicates_removed == 1
+
+
+def test_remove_duplicates_logika_galat_no_text() -> None:
+    try:
+        dedupe_text("")
+        assert False, "Harusnya melempar RemoveDuplicatesError"
+    except RemoveDuplicatesError as exc:
+        assert exc.code == RD_NO_TEXT
+        assert exc.status_code == 400
+        assert "Masukkan dulu daftar baris" in exc.message
+
+    try:
+        dedupe_text(None)
+        assert False, "Harusnya melempar RemoveDuplicatesError"
+    except RemoveDuplicatesError as exc:
+        assert exc.code == RD_NO_TEXT
+        assert exc.status_code == 400
+
+    try:
+        dedupe_text("   \n\t  \n  ")
+        assert False, "Harusnya melempar RemoveDuplicatesError"
+    except RemoveDuplicatesError as exc:
+        assert exc.code == RD_NO_TEXT
+        assert exc.status_code == 400
+
+
+def test_remove_duplicates_logika_galat_too_long() -> None:
+    long_text = "x" * (RD_MAX_CHARS + 1)
+    try:
+        dedupe_text(long_text)
+        assert False, "Harusnya melempar RemoveDuplicatesError"
+    except RemoveDuplicatesError as exc:
+        assert exc.code == RD_TOO_LONG
+        assert exc.status_code == 413
+
+    # Uji batas byte UTF-8 via check_size
+    multi_byte = "€" * (RD_MAX_BYTES // 3 + 10)
+    try:
+        check_remove_duplicates_size(multi_byte)
+        assert False, "Harusnya melempar RemoveDuplicatesError"
+    except RemoveDuplicatesError as exc:
+        assert exc.code == RD_TOO_LONG
+        assert exc.status_code == 413
+
+
+def test_remove_duplicates_logika_galat_unsupported_keep() -> None:
+    try:
+        dedupe_text("a\nb", keep="tengah")
+        assert False, "Harusnya melempar RemoveDuplicatesError"
+    except RemoveDuplicatesError as exc:
+        assert exc.code == RD_UNSUPPORTED_KEEP
+        assert exc.status_code == 400
+
+
+def test_remove_duplicates_logika_galat_invalid_boolean() -> None:
+    # Nilai boolean yang sah
+    assert parse_remove_duplicates_bool("true") is True
+    assert parse_remove_duplicates_bool("ya") is True
+    assert parse_remove_duplicates_bool("1") is True
+    assert parse_remove_duplicates_bool("false") is False
+    assert parse_remove_duplicates_bool("tidak") is False
+    assert parse_remove_duplicates_bool("0") is False
+
+    # Nilai boolean tidak dikenal
+    for invalid in ["bukan", "maybe", "2", "-1"]:
+        try:
+            parse_remove_duplicates_bool(invalid, "trim")
+            assert False, f"Harusnya melempar RemoveDuplicatesError untuk {invalid}"
+        except RemoveDuplicatesError as exc:
+            assert exc.code == RD_INVALID_BOOLEAN
+            assert exc.status_code == 400
+
+
+def test_http_remove_duplicates_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/remove-duplicates/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_chars"] == RD_MAX_CHARS
+    assert body["max_bytes"] == RD_MAX_BYTES
+    assert body["max_mb"] == 1
+    assert isinstance(body["keep_options"], list)
+    assert len(body["keep_options"]) == 2
+    assert body["processed_on"] == "server"
+    assert "note" in body
+    assert body["defaults"]["keep"] == "first"
+    assert body["defaults"]["case_sensitive"] is False
+    assert body["defaults"]["trim"] is True
+    assert body["defaults"]["drop_empty"] is True
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_remove_duplicates_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "apel\njeruk\napel\nmangga\njeruk"
+    response = client.post("/api/remove-duplicates", data={"text": raw})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["text"] == "apel\njeruk\nmangga"
+    assert body["lines_in"] == 5
+    assert body["lines_out"] == 3
+    assert body["duplicates_removed"] == 2
+    assert body["empty_removed"] == 0
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_remove_duplicates_opsi_kustom() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "  apel  \nAPEL\njeruk\n\n  jeruk  "
+    response = client.post(
+        "/api/remove-duplicates",
+        data={
+            "text": raw,
+            "keep": "last",
+            "case_sensitive": "false",
+            "trim": "true",
+            "drop_empty": "true",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["text"] == "APEL\n  jeruk  "
+    assert body["lines_in"] == 5
+    assert body["lines_out"] == 2
+    assert body["empty_removed"] == 1
+    assert body["duplicates_removed"] == 2
+
+
+def test_http_remove_duplicates_teks_kosong_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/remove-duplicates", data={"text": ""})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == RD_NO_TEXT
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_remove_duplicates_teks_terlalu_panjang_ditolak_413() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    long_text = "x" * (RD_MAX_CHARS + 10)
+    response = client.post("/api/remove-duplicates", data={"text": long_text})
+    assert response.status_code == 413, response.text
+    assert response.json()["error"]["code"] == RD_TOO_LONG
+
+
+def test_http_remove_duplicates_keep_tidak_valid_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/remove-duplicates", data={"text": "a\nb", "keep": "tengah"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == RD_UNSUPPORTED_KEEP
+
+
+def test_http_remove_duplicates_boolean_tidak_valid_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/remove-duplicates", data={"text": "a\nb", "trim": "ngawur"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == RD_INVALID_BOOLEAN
+
+
+def test_http_remove_duplicates_bukan_multipart_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/remove-duplicates", json={"text": "a\nb"})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == RD_INVALID_REQUEST
 
 
 

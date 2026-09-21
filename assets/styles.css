@@ -1346,5 +1346,237 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Hapus baris duplikat (Remove Duplicates): panel alat inline ================= */
+.dedupe__input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  width: 100%;
+}
+.dedupe__label {
+  font-size: .82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.dedupe__hint-text {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+.dedupe__textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .88rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.dedupe__textarea:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
 
+.dedupe__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  width: 100%;
+}
+.dedupe__control-group {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  width: 100%;
+}
+.dedupe__group-title {
+  font-size: .82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.dedupe__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: .4rem;
+  width: 100%;
+}
+.dedupe__control-label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .84rem;
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color var(--transition), background-color var(--transition);
+  user-select: none;
+}
+.dedupe__control-label:hover {
+  border-color: var(--brand);
+}
+.dedupe__control-label:has(input:checked) {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .15);
+  color: #fff;
+  font-weight: 500;
+}
+.dedupe__control-label input[type="radio"] {
+  accent-color: var(--brand);
+  margin: 0;
+  cursor: pointer;
+}
+.dedupe__control-label input[type="radio"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
 
+.dedupe__switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+  width: 100%;
+}
+.dedupe__switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .84rem;
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color var(--transition), background-color var(--transition);
+  user-select: none;
+}
+.dedupe__switch-label:hover {
+  border-color: var(--brand);
+}
+.dedupe__switch-label:has(input:checked) {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .15);
+  color: #fff;
+  font-weight: 500;
+}
+.dedupe__switch-label input[type="checkbox"] {
+  accent-color: var(--brand);
+  margin: 0;
+  cursor: pointer;
+}
+.dedupe__switch-label input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.dedupe__results {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  margin-top: .3rem;
+}
+.dedupe__hint {
+  margin: 0;
+  padding: .65rem .8rem;
+  font-size: .82rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.dedupe__hint[hidden] {
+  display: none;
+}
+.dedupe__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  width: 100%;
+}
+.dedupe__output-wrap[hidden] {
+  display: none;
+}
+.dedupe__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: .5rem;
+  width: 100%;
+}
+.dedupe__stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  padding: .55rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.dedupe__stat-label {
+  font-size: .74rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.dedupe__stat-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+}
+.dedupe__output {
+  width: 100%;
+  min-height: 140px;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .88rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.dedupe__output:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.dedupe__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
+/* ================= Hapus baris duplikat: target sentuh di perangkat sentuh ================= */
+@media (pointer: coarse) {
+  #remove-duplicates-input,
+  #remove-duplicates-output,
+  #remove-duplicates-close,
+  #remove-duplicates-submit,
+  #remove-duplicates-clear,
+  #remove-duplicates-copy,
+  #remove-duplicates-download,
+  #remove-duplicates-panel .dedupe__control-label,
+  #remove-duplicates-panel .dedupe__control-label input,
+  #remove-duplicates-panel .dedupe__switch-label,
+  #remove-duplicates-panel .dedupe__switch-label input,
+  #remove-duplicates-panel label {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

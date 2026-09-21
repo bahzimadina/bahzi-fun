@@ -56,7 +56,7 @@
         { name: 'List Shuffler', desc: 'Acak urutan baris dalam sebuah daftar.', status: 'soon' },
         { name: 'Text Formatter', desc: 'Bereskan spasi, baris, dan format teks.', status: 'soon' },
         { name: 'Word Counter', desc: 'Hitung kata, karakter, kalimat, dan perkiraan waktu baca.', status: 'available', action: 'word-count' },
-        { name: 'Remove Duplicates', desc: 'Hapus baris duplikat dari sebuah daftar.', status: 'soon' }
+        { name: 'Remove Duplicates', desc: 'Hapus baris duplikat dari sebuah daftar.', status: 'available', action: 'remove-duplicates' }
       ]
     },
     {
