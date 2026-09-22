@@ -128,6 +128,26 @@ from .remove_duplicates import (
     parse_bool,
     validate_text as validate_remove_duplicates_text,
 )
+from .list_shuffler import (
+    CHUNK_SIZE as LS_CHUNK_SIZE,
+    INVALID_BOOLEAN as LS_INVALID_BOOLEAN,
+    INVALID_REQUEST as LS_INVALID_REQUEST,
+    INVALID_SEED as LS_INVALID_SEED,
+    INVALID_TAKE as LS_INVALID_TAKE,
+    MAX_BYTES as LS_MAX_BYTES,
+    MAX_CHARS as LS_MAX_CHARS,
+    MAX_SEED as LS_MAX_SEED,
+    MAX_TAKE as LS_MAX_TAKE,
+    MIN_SEED as LS_MIN_SEED,
+    NO_TEXT as LS_NO_TEXT,
+    TOO_LONG as LS_TOO_LONG,
+    ListShufflerError,
+    ShuffleResult,
+    check_size as check_list_shuffler_size,
+    parse_bool as parse_list_shuffler_bool,
+    shuffle_lines,
+    validate_text as validate_list_shuffler_text,
+)
 
 SERVICE_NAME = "omnitools-api"
 OUTPUT_FILENAME = "gabungan.pdf"
@@ -237,15 +257,28 @@ async def handle_remove_duplicates_error(request: Request, exc: RemoveDuplicates
     )
 
 
+@app.exception_handler(ListShufflerError)
+async def handle_list_shuffler_error(request: Request, exc: ListShufflerError) -> JSONResponse:
+    """Error acak daftar yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("acak daftar ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """Request malformed (mis. body bukan multipart) → 400 dengan format sama."""
+    """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
     if request.url.path.startswith("/api/ocr"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi gambar atau PDF."
     elif request.url.path.startswith("/api/base64"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/remove-duplicates"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
+    elif request.url.path.startswith("/api/list-shuffler"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
@@ -540,6 +573,48 @@ def _remove_duplicates_limits_payload() -> dict:
             "trim": True,
             "drop_empty": True,
         },
+    }
+
+
+def _reject_oversized_list_shuffler_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas teks."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > LS_MAX_BYTES + 64 * 1024:
+        raise ListShufflerError(
+            LS_TOO_LONG,
+            "Ukuran permintaan melebihi batas 1 MB.",
+            413,
+        )
+
+
+def _list_shuffler_limits_payload() -> dict:
+    return {
+        "max_chars": LS_MAX_CHARS,
+        "max_bytes": LS_MAX_BYTES,
+        "max_mb": LS_MAX_BYTES // (1024 * 1024),
+        "max_take": LS_MAX_TAKE,
+        "min_seed": LS_MIN_SEED,
+        "max_seed": LS_MAX_SEED,
+        "options": [
+            {"name": "take", "type": "integer", "min": 0, "max": LS_MAX_TAKE, "description": "Jumlah baris diambil (0 untuk semua)"},
+            {"name": "seed", "type": "integer", "min": LS_MIN_SEED, "max": LS_MAX_SEED, "description": "Kunci acak untuk mengulang urutan"},
+            {"name": "trim", "type": "boolean", "default": True, "description": "Rapikan spasi di ujung baris"},
+            {"name": "drop_empty", "type": "boolean", "default": True, "description": "Buang baris kosong"},
+        ],
+        "defaults": {
+            "take": 0,
+            "seed": None,
+            "trim": True,
+            "drop_empty": True,
+        },
+        "processed_on": "server",
+        "note": "Daftar diproses di memori server lalu dibuang, tidak disimpan di disk.",
     }
 
 
@@ -976,6 +1051,81 @@ async def remove_duplicates_endpoint(
     return JSONResponse(content=result.to_dict(), headers=headers)
 
 
+@app.get("/api/list-shuffler/limits")
+async def list_shuffler_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Acak Urutan Daftar."""
+    return JSONResponse(content=_list_shuffler_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/list-shuffler")
+async def list_shuffler_endpoint(
+    request: Request,
+    text: str = Form(default=None),
+    take: str = Form(default=None),
+    seed: str = Form(default=None),
+    trim: str = Form(default=None),
+    drop_empty: str = Form(default=None),
+):
+    """Acak urutan daftar teks di memori.
+
+    Menerima multipart/form-data dengan field `text`, serta opsional `take`,
+    `seed`, `trim`, dan `drop_empty`.
+    Respons: JSON application/json.
+    Header: Cache-Control: no-store, no-cache, must-revalidate + Pragma: no-cache,
+            X-Processing-Ms.
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_list_shuffler_content_length(request)
+
+    if (
+        text is None
+        or take is None
+        or seed is None
+        or trim is None
+        or drop_empty is None
+    ):
+        form = await request.form()
+        if text is None:
+            if "text" in form:
+                text = form.get("text")
+            else:
+                raise ListShufflerError(LS_INVALID_REQUEST, "Field teks 'text' wajib disertakan.", 400)
+        if take is None and "take" in form:
+            take = form.get("take")
+        if seed is None and "seed" in form:
+            seed = form.get("seed")
+        if trim is None and "trim" in form:
+            trim = form.get("trim")
+        if drop_empty is None and "drop_empty" in form:
+            drop_empty = form.get("drop_empty")
+
+    result = shuffle_lines(
+        text=text,
+        take=take,
+        seed=seed,
+        trim=trim,
+        drop_empty=drop_empty,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "acak daftar selesai: lines_in=%d lines_out=%d take=%d seed=%d durasi=%.0fms",
+        result.lines_in,
+        result.lines_out,
+        result.take,
+        result.seed,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result.to_dict(), headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -991,6 +1141,7 @@ async def root() -> dict:
             "ocr",
             "base64",
             "remove-duplicates",
+            "list-shuffler",
         ],
     }
 

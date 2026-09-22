@@ -1562,7 +1562,204 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .2rem;
 }
 
-/* ================= Hapus baris duplikat: target sentuh di perangkat sentuh ================= */
+/* ================= Acak urutan daftar (List Shuffler) ================= */
+.shuffle__input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  width: 100%;
+}
+.shuffle__label {
+  font-size: .82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.shuffle__hint-text {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+.shuffle__textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .88rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.shuffle__textarea:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.shuffle__row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: .75rem;
+  width: 100%;
+}
+@media (max-width: 600px) {
+  .shuffle__row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shuffle__field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  width: 100%;
+}
+
+.shuffle__input {
+  width: 100%;
+  min-height: 40px;
+  padding: .5rem .75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: .88rem;
+  box-sizing: border-box;
+  transition: border-color var(--transition);
+}
+.shuffle__input:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.shuffle__switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+  width: 100%;
+}
+.shuffle__switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .84rem;
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color var(--transition), background-color var(--transition);
+  user-select: none;
+}
+.shuffle__switch-label:hover {
+  border-color: var(--brand);
+}
+.shuffle__switch-label:has(input:checked) {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .15);
+  color: #fff;
+  font-weight: 500;
+}
+.shuffle__switch-label input[type="checkbox"] {
+  accent-color: var(--brand);
+  margin: 0;
+  cursor: pointer;
+}
+.shuffle__switch-label input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.shuffle__results {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  margin-top: .3rem;
+}
+.shuffle__hint {
+  margin: 0;
+  padding: .65rem .8rem;
+  font-size: .82rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.shuffle__hint[hidden] {
+  display: none;
+}
+.shuffle__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  width: 100%;
+}
+.shuffle__output-wrap[hidden] {
+  display: none;
+}
+.shuffle__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: .5rem;
+  width: 100%;
+}
+.shuffle__stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  padding: .55rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.shuffle__stat-label {
+  font-size: .74rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.shuffle__stat-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+}
+.shuffle__output {
+  width: 100%;
+  min-height: 140px;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .88rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.shuffle__output:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.shuffle__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
+/* ================= Target sentuh di perangkat sentuh ================= */
 @media (pointer: coarse) {
   #remove-duplicates-input,
   #remove-duplicates-output,
@@ -1575,7 +1772,20 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #remove-duplicates-panel .dedupe__control-label input,
   #remove-duplicates-panel .dedupe__switch-label,
   #remove-duplicates-panel .dedupe__switch-label input,
-  #remove-duplicates-panel label {
+  #remove-duplicates-panel label,
+  #list-shuffler-input,
+  #list-shuffler-output,
+  #list-shuffler-close,
+  #list-shuffler-submit,
+  #list-shuffler-clear,
+  #list-shuffler-copy,
+  #list-shuffler-again,
+  #list-shuffler-download,
+  #list-shuffler-take,
+  #list-shuffler-seed,
+  #list-shuffler-panel .shuffle__switch-label,
+  #list-shuffler-panel .shuffle__switch-label input,
+  #list-shuffler-panel label {
     min-height: 44px;
     min-width: 44px;
   }

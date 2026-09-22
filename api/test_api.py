@@ -173,6 +173,28 @@ from app.remove_duplicates import (  # noqa: E402
     parse_bool as parse_remove_duplicates_bool,
     validate_text as validate_remove_duplicates_text,
 )
+from app.list_shuffler import (  # noqa: E402
+    CHUNK_SIZE as LS_CHUNK_SIZE,
+    INVALID_BOOLEAN as LS_INVALID_BOOLEAN,
+    INVALID_REQUEST as LS_INVALID_REQUEST,
+    INVALID_SEED as LS_INVALID_SEED,
+    INVALID_TAKE as LS_INVALID_TAKE,
+    MAX_BYTES as LS_MAX_BYTES,
+    MAX_CHARS as LS_MAX_CHARS,
+    MAX_SEED as LS_MAX_SEED,
+    MAX_TAKE as LS_MAX_TAKE,
+    MIN_SEED as LS_MIN_SEED,
+    NO_TEXT as LS_NO_TEXT,
+    TOO_LONG as LS_TOO_LONG,
+    ListShufflerError,
+    ShuffleResult,
+    check_size as check_list_shuffler_size,
+    parse_bool as parse_list_shuffler_bool,
+    parse_seed as parse_list_shuffler_seed,
+    parse_take as parse_list_shuffler_take,
+    shuffle_lines,
+    validate_text as validate_list_shuffler_text,
+)
 
 SKIPPED: list[str] = []
 
@@ -2269,6 +2291,340 @@ def test_http_remove_duplicates_bukan_multipart_ditolak_400() -> None:
     response = client.post("/api/remove-duplicates", json={"text": "a\nb"})
     assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == RD_INVALID_REQUEST
+
+
+# --- Uji List Shuffler (Acak Urutan Daftar) ----------------------------------
+def test_list_shuffler_logika_dasar() -> None:
+    text = "satu\ndua\ntiga\nempat\nlima"
+    result = shuffle_lines(text)
+    assert result.lines_in == 5
+    assert result.lines_out == 5
+    assert set(result.text.splitlines()) == {"satu", "dua", "tiga", "empat", "lima"}
+    assert result.take == 0
+    assert isinstance(result.seed, int)
+    assert result.seed_given is False
+    assert result.trim is True
+    assert result.drop_empty is True
+    assert result.empty_removed == 0
+    assert result.chars_in == len(text)
+    assert result.chars_out == len(result.text)
+    d = result.to_dict()
+    assert d["lines_in"] == 5
+    assert d["lines_out"] == 5
+    assert "seed" in d
+
+
+def test_list_shuffler_logika_seed() -> None:
+    text = "alpha\nbravo\ncharlie\ndelta\necho"
+    res1 = shuffle_lines(text, seed=42)
+    res2 = shuffle_lines(text, seed=42)
+    assert res1.seed == 42
+    assert res1.seed_given is True
+    assert res1.text == res2.text
+
+    res3 = shuffle_lines(text, seed=999)
+    assert res3.seed == 999
+    assert res3.seed_given is True
+
+
+def test_list_shuffler_logika_take() -> None:
+    lines = [f"baris_{i}" for i in range(10)]
+    text = "\n".join(lines)
+
+    res_take3 = shuffle_lines(text, take=3, seed=123)
+    assert res_take3.lines_in == 10
+    assert res_take3.lines_out == 3
+    assert res_take3.take == 3
+    out3 = res_take3.text.splitlines()
+    assert len(out3) == 3
+    assert set(out3).issubset(set(lines))
+
+    # take lebih besar dari jumlah baris -> ambil semua baris
+    res_take20 = shuffle_lines(text, take=20, seed=123)
+    assert res_take20.lines_in == 10
+    assert res_take20.lines_out == 10
+    assert set(res_take20.text.splitlines()) == set(lines)
+
+    # take = 0 -> ambil semua baris
+    res_take0 = shuffle_lines(text, take=0, seed=123)
+    assert res_take0.lines_out == 10
+
+
+def test_list_shuffler_logika_trim_dan_drop_empty() -> None:
+    text = "  satu  \n\n  dua  \n   \ntiga"
+    # trim=True, drop_empty=True (bawaan)
+    res_default = shuffle_lines(text, trim=True, drop_empty=True, seed=1)
+    assert res_default.lines_in == 5
+    assert res_default.lines_out == 3
+    assert res_default.empty_removed == 2
+    assert set(res_default.text.splitlines()) == {"satu", "dua", "tiga"}
+
+    # trim=False, drop_empty=False
+    res_raw = shuffle_lines(text, trim=False, drop_empty=False, seed=1)
+    assert res_raw.lines_in == 5
+    assert res_raw.lines_out == 5
+    assert res_raw.empty_removed == 0
+    baris_raw = res_raw.text.split("\n")
+    assert len(baris_raw) == 5
+    assert "" in baris_raw
+    assert "  satu  " in baris_raw
+    assert "   " in baris_raw
+
+    # trim=False, drop_empty=True
+    res_no_trim_drop = shuffle_lines(text, trim=False, drop_empty=True, seed=1)
+    assert res_no_trim_drop.lines_in == 5
+    assert res_no_trim_drop.lines_out == 3
+    assert res_no_trim_drop.empty_removed == 2
+    assert "  satu  " in res_no_trim_drop.text.splitlines()
+
+
+def test_list_shuffler_logika_galat() -> None:
+    try:
+        shuffle_lines("")
+        assert False, "Harusnya melempar ListShufflerError"
+    except ListShufflerError as exc:
+        assert exc.code == LS_NO_TEXT
+        assert exc.status_code == 400
+
+    try:
+        shuffle_lines(None)
+        assert False, "Harusnya melempar ListShufflerError"
+    except ListShufflerError as exc:
+        assert exc.code == LS_NO_TEXT
+        assert exc.status_code == 400
+
+    try:
+        shuffle_lines("   \n\t  \n  ")
+        assert False, "Harusnya melempar ListShufflerError"
+    except ListShufflerError as exc:
+        assert exc.code == LS_NO_TEXT
+        assert exc.status_code == 400
+
+    long_text = "x" * (LS_MAX_CHARS + 1)
+    try:
+        shuffle_lines(long_text)
+        assert False, "Harusnya melempar ListShufflerError"
+    except ListShufflerError as exc:
+        assert exc.code == LS_TOO_LONG
+        assert exc.status_code == 413
+
+    multi_byte = "€" * (LS_MAX_BYTES // 3 + 10)
+    try:
+        check_list_shuffler_size(multi_byte)
+        assert False, "Harusnya melempar ListShufflerError"
+    except ListShufflerError as exc:
+        assert exc.code == LS_TOO_LONG
+        assert exc.status_code == 413
+
+    # seed tidak valid
+    for inv_seed in ["abc", "-1", "4294967296", True]:
+        try:
+            parse_list_shuffler_seed(inv_seed)
+            assert False, f"Harusnya melempar ListShufflerError untuk seed {inv_seed}"
+        except ListShufflerError as exc:
+            assert exc.code == LS_INVALID_SEED
+            assert exc.status_code == 400
+
+    # take tidak valid
+    for inv_take in ["dua", "-1", "200001", True]:
+        try:
+            parse_list_shuffler_take(inv_take)
+            assert False, f"Harusnya melempar ListShufflerError untuk take {inv_take}"
+        except ListShufflerError as exc:
+            assert exc.code == LS_INVALID_TAKE
+            assert exc.status_code == 400
+
+    # boolean tidak valid
+    try:
+        parse_list_shuffler_bool("mungkin", "trim")
+        assert False, "Harusnya melempar ListShufflerError untuk boolean tidak valid"
+    except ListShufflerError as exc:
+        assert exc.code == LS_INVALID_BOOLEAN
+        assert exc.status_code == 400
+
+
+def test_http_list_shuffler_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/list-shuffler/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_chars"] == LS_MAX_CHARS
+    assert body["max_bytes"] == LS_MAX_BYTES
+    assert body["max_mb"] == 1
+    assert body["max_take"] == LS_MAX_TAKE
+    assert body["min_seed"] == LS_MIN_SEED
+    assert body["max_seed"] == LS_MAX_SEED
+    assert isinstance(body["options"], list)
+    assert body["defaults"]["take"] == 0
+    assert body["defaults"]["seed"] is None
+    assert body["defaults"]["trim"] is True
+    assert body["defaults"]["drop_empty"] is True
+    assert body["processed_on"] == "server"
+    assert "note" in body
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_list_shuffler_acak_5_baris() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "Andi\nBudi\nCitra\nDewi\nEko"
+    response = client.post("/api/list-shuffler", data={"text": raw})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lines_in"] == 5
+    assert body["lines_out"] == 5
+    assert set(body["text"].splitlines()) == {"Andi", "Budi", "Citra", "Dewi", "Eko"}
+    assert isinstance(body["seed"], int)
+    assert body["seed_given"] is False
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_list_shuffler_seed_sama_dan_berbeda() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "satu\ndua\ntiga\nempat\nlima\nenam\ntujuh\ndelapan"
+    resp1 = client.post("/api/list-shuffler", data={"text": raw, "seed": "54321"})
+    assert resp1.status_code == 200, resp1.text
+    body1 = resp1.json()
+
+    resp2 = client.post("/api/list-shuffler", data={"text": raw, "seed": "54321"})
+    assert resp2.status_code == 200, resp2.text
+    body2 = resp2.json()
+
+    # Kunci sama menghasilkan urutan persis sama
+    assert body1["seed"] == 54321
+    assert body1["seed_given"] is True
+    assert body1["text"] == body2["text"]
+
+    resp3 = client.post("/api/list-shuffler", data={"text": raw, "seed": "98765"})
+    assert resp3.status_code == 200, resp3.text
+    body3 = resp3.json()
+    assert body3["seed"] == 98765
+    assert body3["seed_given"] is True
+
+
+def test_http_list_shuffler_take() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    lines = [f"nama_{i}" for i in range(10)]
+    raw = "\n".join(lines)
+
+    # take=3 dari 10 baris
+    resp = client.post("/api/list-shuffler", data={"text": raw, "take": "3", "seed": "77"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["lines_in"] == 10
+    assert body["lines_out"] == 3
+    out_lines = body["text"].splitlines()
+    assert len(out_lines) == 3
+    assert set(out_lines).issubset(set(lines))
+
+    # take lebih besar dari jumlah baris -> ambil semua baris tanpa galat
+    resp_large = client.post("/api/list-shuffler", data={"text": raw, "take": "50", "seed": "77"})
+    assert resp_large.status_code == 200, resp_large.text
+    body_large = resp_large.json()
+    assert body_large["lines_in"] == 10
+    assert body_large["lines_out"] == 10
+    assert set(body_large["text"].splitlines()) == set(lines)
+
+
+def test_http_list_shuffler_trim() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "  Andi  \n  Budi  \n  Citra  "
+    resp_trim = client.post("/api/list-shuffler", data={"text": raw, "trim": "true", "seed": "1"})
+    assert resp_trim.status_code == 200, resp_trim.text
+    body_trim = resp_trim.json()
+    for line in body_trim["text"].splitlines():
+        assert line == line.strip()
+
+    resp_notrim = client.post("/api/list-shuffler", data={"text": raw, "trim": "false", "seed": "1"})
+    assert resp_notrim.status_code == 200, resp_notrim.text
+    body_notrim = resp_notrim.json()
+    for line in body_notrim["text"].splitlines():
+        assert line.startswith("  ") and line.endswith("  ")
+
+
+def test_http_list_shuffler_drop_empty() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "Andi\n\nBudi\n   \nCitra"
+    resp_drop = client.post("/api/list-shuffler", data={"text": raw, "drop_empty": "true", "seed": "1"})
+    assert resp_drop.status_code == 200, resp_drop.text
+    body_drop = resp_drop.json()
+    assert body_drop["lines_in"] == 5
+    assert body_drop["lines_out"] == 3
+    assert body_drop["empty_removed"] == 2
+
+    resp_keep = client.post("/api/list-shuffler", data={"text": raw, "drop_empty": "false", "seed": "1"})
+    assert resp_keep.status_code == 200, resp_keep.text
+    body_keep = resp_keep.json()
+    assert body_keep["lines_in"] == 5
+    assert body_keep["lines_out"] == 5
+    assert body_keep["empty_removed"] == 0
+
+
+def test_http_list_shuffler_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Teks kosong
+    resp_empty = client.post("/api/list-shuffler", data={"text": ""})
+    assert resp_empty.status_code == 400, resp_empty.text
+    body_empty = resp_empty.json()
+    assert body_empty["error"]["code"] == LS_NO_TEXT
+    assert "error" in body_empty and "message" in body_empty["error"]
+
+    # Teks spasi saja
+    resp_spaces = client.post("/api/list-shuffler", data={"text": "   \n\t  "})
+    assert resp_spaces.status_code == 400, resp_spaces.text
+    assert resp_spaces.json()["error"]["code"] == LS_NO_TEXT
+
+    # Field text tidak dikirim sama sekali
+    resp_notext = client.post("/api/list-shuffler", data={})
+    assert resp_notext.status_code == 400, resp_notext.text
+    assert resp_notext.json()["error"]["code"] in (LS_NO_TEXT, LS_INVALID_REQUEST)
+
+    # Teks melebihi batas 200.000 karakter
+    long_text = "x" * (LS_MAX_CHARS + 1)
+    resp_long = client.post("/api/list-shuffler", data={"text": long_text})
+    assert resp_long.status_code == 413, resp_long.text
+    assert resp_long.json()["error"]["code"] == LS_TOO_LONG
+
+    # seed bukan angka
+    resp_seed_str = client.post("/api/list-shuffler", data={"text": "a\nb", "seed": "abc"})
+    assert resp_seed_str.status_code == 400, resp_seed_str.text
+    assert resp_seed_str.json()["error"]["code"] == LS_INVALID_SEED
+
+    # seed negatif
+    resp_seed_neg = client.post("/api/list-shuffler", data={"text": "a\nb", "seed": "-1"})
+    assert resp_seed_neg.status_code == 400, resp_seed_neg.text
+    assert resp_seed_neg.json()["error"]["code"] == LS_INVALID_SEED
+
+    # take bukan angka
+    resp_take_str = client.post("/api/list-shuffler", data={"text": "a\nb", "take": "dua"})
+    assert resp_take_str.status_code == 400, resp_take_str.text
+    assert resp_take_str.json()["error"]["code"] == LS_INVALID_TAKE
+
+    # trim tidak valid
+    resp_trim_inv = client.post("/api/list-shuffler", data={"text": "a\nb", "trim": "mungkin"})
+    assert resp_trim_inv.status_code == 400, resp_trim_inv.text
+    assert resp_trim_inv.json()["error"]["code"] == LS_INVALID_BOOLEAN
+
+    # Bukan multipart/form-data
+    resp_json = client.post("/api/list-shuffler", json={"text": "a\nb"})
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == LS_INVALID_REQUEST
 
 
 
