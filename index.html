@@ -13,7 +13,7 @@
   <meta name="omnitools-server-base" content="">
 
   <title>OmniTools: 33 alat harian | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, dan Acak urutan daftar sudah bisa dipakai. Sisa 24 alat lain masih disiapkan.">
+  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, dan Rapikan teks sudah bisa dipakai. Sisa 23 alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
   <!-- Google tag (gtag.js) + Consent Mode v2.
@@ -43,13 +43,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
   <meta property="og:title" content="OmniTools: 33 alat harian">
-  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, dan Acak urutan daftar sudah bisa dipakai. Sisa 24 alat lain masih disiapkan.">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, dan Rapikan teks sudah bisa dipakai. Sisa 23 alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OmniTools: 33 alat harian">
-  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, dan Acak urutan daftar sudah bisa dipakai. Sisa 24 alat lain masih disiapkan.">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, dan Rapikan teks sudah bisa dipakai. Sisa 23 alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -167,7 +167,7 @@
 
         <div class="tools__head">
           <h1 class="tools__title" id="alat-title">33 alat buat kerja harian</h1>
-          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, dan Acak urutan daftar sudah bisa dipakai. Sisa 24 alat lain masih disiapkan.</p>
+          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, dan Rapikan teks sudah bisa dipakai. Sisa 23 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
@@ -769,6 +769,150 @@
           </div>
         </section>
 
+        <!-- Panel alat: Rapikan teks. Tampil inline di alur halaman: dibuka lewat
+             tombol "Buka alat" pada kartu Text Formatter, ditutup lewat tombol
+             Tutup atau Esc. Teks diproses di memori lalu dibuang, tidak disimpan di disk. -->
+        <section class="tool-panel" id="text-formatter-panel" hidden tabindex="-1" aria-labelledby="text-formatter-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="text-formatter-title">Rapikan teks</h2>
+              <p class="tool-panel__sub" id="text-formatter-limits">Batas bawaan</p>
+            </div>
+            <button class="tool-panel__close" id="text-formatter-close" type="button" aria-label="Tutup panel rapikan teks">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="text-formatter-note">Teks diproses di memori server lalu dibuang, tidak disimpan di disk.</p>
+
+          <div class="fmt__input-wrap">
+            <label class="fmt__label" for="text-formatter-input">Teks masukan</label>
+            <textarea class="fmt__textarea" id="text-formatter-input" rows="7" placeholder="Tempel teks di sini, mis. dari PDF, dokumen, surel, atau obrolan..." aria-describedby="text-formatter-input-hint"></textarea>
+            <span class="fmt__hint-text" id="text-formatter-input-hint">Ketik atau tempel teks yang ingin dirapikan dari PDF, dokumen, surel, atau obrolan.</span>
+          </div>
+
+          <div class="fmt__switches">
+            <label class="fmt__switch-label" for="text-formatter-collapse-spaces">
+              <input type="checkbox" id="text-formatter-collapse-spaces" checked>
+              <span>Rapikan spasi ganda</span>
+            </label>
+            <label class="fmt__switch-label" for="text-formatter-trim-lines">
+              <input type="checkbox" id="text-formatter-trim-lines" checked>
+              <span>Buang spasi di ujung baris</span>
+            </label>
+            <label class="fmt__switch-label" for="text-formatter-tabs-to-spaces">
+              <input type="checkbox" id="text-formatter-tabs-to-spaces" checked>
+              <span>Ubah tab jadi spasi</span>
+            </label>
+            <label class="fmt__switch-label" for="text-formatter-space-before-punctuation">
+              <input type="checkbox" id="text-formatter-space-before-punctuation" checked>
+              <span>Buang spasi sebelum tanda baca</span>
+            </label>
+            <label class="fmt__switch-label" for="text-formatter-unify-characters">
+              <input type="checkbox" id="text-formatter-unify-characters" checked>
+              <span>Samakan tanda baca istimewa</span>
+            </label>
+          </div>
+
+          <div class="fmt__options-group">
+            <span class="fmt__group-title">Lebar tab (hanya berpengaruh kalau rapikan spasi ganda dimatikan)</span>
+            <div class="fmt__radios" role="radiogroup" aria-label="Lebar tab">
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-tab-width" value="2">
+                <span>2 spasi</span>
+              </label>
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-tab-width" value="4" checked>
+                <span>4 spasi</span>
+              </label>
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-tab-width" value="8">
+                <span>8 spasi</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="fmt__options-group">
+            <span class="fmt__group-title">Baris kosong</span>
+            <div class="fmt__radios" role="radiogroup" aria-label="Pilihan baris kosong">
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-blank-mode" value="keep">
+                <span>Biarkan</span>
+              </label>
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-blank-mode" value="collapse" checked>
+                <span>Rapatkan jadi satu</span>
+              </label>
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-blank-mode" value="remove">
+                <span>Buang semua</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="fmt__options-group">
+            <span class="fmt__group-title">Susunan baris</span>
+            <div class="fmt__radios" role="radiogroup" aria-label="Pilihan susunan baris">
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-line-mode" value="keep" checked>
+                <span>Biarkan</span>
+              </label>
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-line-mode" value="paragraph">
+                <span>Gabung jadi paragraf</span>
+              </label>
+              <label class="fmt__radio-label">
+                <input type="radio" name="text-formatter-line-mode" value="single">
+                <span>Jadikan satu baris</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="text-formatter-status" role="status" aria-live="polite">Masukkan teks, atur pilihan, lalu tekan "Rapikan teks".</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="text-formatter-clear" type="button" disabled>Kosongkan</button>
+              <button class="btn btn--primary" id="text-formatter-submit" type="button" disabled>Rapikan teks</button>
+            </div>
+          </div>
+
+          <div class="fmt__results" id="text-formatter-results" aria-live="polite">
+            <p class="fmt__hint" id="text-formatter-hint">Hasil perapian teks akan muncul di sini.</p>
+            <div class="fmt__output-wrap" id="text-formatter-output-wrap" hidden>
+              <div class="fmt__stats">
+                <div class="fmt__stat-card">
+                  <span class="fmt__stat-label">Karakter masuk</span>
+                  <span class="fmt__stat-value" id="text-formatter-chars-in">0</span>
+                </div>
+                <div class="fmt__stat-card">
+                  <span class="fmt__stat-label">Karakter keluar</span>
+                  <span class="fmt__stat-value" id="text-formatter-chars-out">0</span>
+                </div>
+                <div class="fmt__stat-card">
+                  <span class="fmt__stat-label">Baris masuk</span>
+                  <span class="fmt__stat-value" id="text-formatter-lines-in">0</span>
+                </div>
+                <div class="fmt__stat-card">
+                  <span class="fmt__stat-label">Baris keluar</span>
+                  <span class="fmt__stat-value" id="text-formatter-lines-out">0</span>
+                </div>
+                <div class="fmt__stat-card">
+                  <span class="fmt__stat-label">Baris kosong dibuang</span>
+                  <span class="fmt__stat-value" id="text-formatter-blank-removed">0</span>
+                </div>
+                <div class="fmt__stat-card">
+                  <span class="fmt__stat-label">Karakter dihemat</span>
+                  <span class="fmt__stat-value" id="text-formatter-chars-saved">0</span>
+                </div>
+              </div>
+              <label class="fmt__label" for="text-formatter-output">Hasil teks rapi</label>
+              <textarea class="fmt__output" id="text-formatter-output" rows="7" readonly></textarea>
+              <div class="tool-panel__actions fmt__output-actions">
+                <button class="btn btn--ghost" id="text-formatter-copy" type="button">Salin</button>
+                <button class="btn btn--primary" id="text-formatter-download" type="button">Unduh hasil.txt</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="tools__grid" id="tools-grid"></div>
         <p class="tools__empty" id="tools-empty" hidden aria-live="polite">
           Tidak ada alat yang cocok dengan pencarianmu.
@@ -961,7 +1105,7 @@
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, dan Acak urutan daftar sudah bisa dipakai. Sisa 24 alat lain masih disiapkan.</p>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, dan Rapikan teks sudah bisa dipakai. Sisa 23 alat lain masih disiapkan.</p>
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
@@ -981,5 +1125,6 @@
   <script src="assets/tool-base64.js?v=__V__" defer></script>
   <script src="assets/tool-remove-duplicates.js?v=__V__" defer></script>
   <script src="assets/tool-list-shuffler.js?v=__V__" defer></script>
+  <script src="assets/tool-text-formatter.js?v=__V__" defer></script>
 </body>
 </html>

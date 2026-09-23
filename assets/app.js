@@ -54,7 +54,7 @@
       tools: [
         { name: 'Case Converter', desc: 'Ubah huruf besar/kecil dan format kalimat.', status: 'available', action: 'case-convert' },
         { name: 'List Shuffler', desc: 'Acak urutan baris dalam sebuah daftar.', status: 'available', action: 'list-shuffler' },
-        { name: 'Text Formatter', desc: 'Bereskan spasi, baris, dan format teks.', status: 'soon' },
+        { name: 'Text Formatter', desc: 'Rapikan spasi ganda, baris kosong, tab, dan tanda baca istimewa.', status: 'available', action: 'text-formatter' },
         { name: 'Word Counter', desc: 'Hitung kata, karakter, kalimat, dan perkiraan waktu baca.', status: 'available', action: 'word-count' },
         { name: 'Remove Duplicates', desc: 'Hapus baris duplikat dari sebuah daftar.', status: 'available', action: 'remove-duplicates' }
       ]

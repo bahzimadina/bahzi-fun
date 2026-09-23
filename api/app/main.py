@@ -148,6 +148,20 @@ from .list_shuffler import (
     shuffle_lines,
     validate_text as validate_list_shuffler_text,
 )
+from .text_formatter import (
+    CHUNK_SIZE as TF_CHUNK_SIZE,
+    INVALID_BOOLEAN as TF_INVALID_BOOLEAN,
+    INVALID_REQUEST as TF_INVALID_REQUEST,
+    INVALID_TAB_WIDTH as TF_INVALID_TAB_WIDTH,
+    MAX_BYTES as TF_MAX_BYTES,
+    MAX_CHARS as TF_MAX_CHARS,
+    NOT_TEXT as TF_NOT_TEXT,
+    TOO_LONG as TF_TOO_LONG,
+    UNSUPPORTED_BLANK_MODE as TF_UNSUPPORTED_BLANK_MODE,
+    UNSUPPORTED_LINE_MODE as TF_UNSUPPORTED_LINE_MODE,
+    TextFormatterError,
+    format_text,
+)
 
 SERVICE_NAME = "omnitools-api"
 OUTPUT_FILENAME = "gabungan.pdf"
@@ -268,6 +282,17 @@ async def handle_list_shuffler_error(request: Request, exc: ListShufflerError) -
     )
 
 
+@app.exception_handler(TextFormatterError)
+async def handle_text_formatter_error(request: Request, exc: TextFormatterError) -> JSONResponse:
+    """Error rapikan teks yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("rapikan teks ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
@@ -279,6 +304,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/remove-duplicates"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/list-shuffler"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
+    elif request.url.path.startswith("/api/text-formatter"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
@@ -615,6 +642,54 @@ def _list_shuffler_limits_payload() -> dict:
         },
         "processed_on": "server",
         "note": "Daftar diproses di memori server lalu dibuang, tidak disimpan di disk.",
+    }
+
+
+def _reject_oversized_text_formatter_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas teks."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > TF_MAX_BYTES + 64 * 1024:
+        raise TextFormatterError(
+            TF_TOO_LONG,
+            "Ukuran permintaan melebihi batas 1 MB.",
+            413,
+        )
+
+
+def _text_formatter_limits_payload() -> dict:
+    return {
+        "max_chars": TF_MAX_CHARS,
+        "max_bytes": TF_MAX_BYTES,
+        "max_mb": TF_MAX_BYTES // 1_000_000,
+        "blank_modes": [
+            {"value": "keep", "label": "Biarkan baris kosong"},
+            {"value": "collapse", "label": "Rapatkan baris kosong jadi maksimal satu"},
+            {"value": "remove", "label": "Buang semua baris kosong"},
+        ],
+        "line_modes": [
+            {"value": "keep", "label": "Biarkan susunan baris"},
+            {"value": "paragraph", "label": "Gabung baris berdampingan jadi paragraf"},
+            {"value": "single", "label": "Jadikan satu baris"},
+        ],
+        "tab_widths": [2, 4, 8],
+        "defaults": {
+            "collapse_spaces": True,
+            "trim_lines": True,
+            "tabs_to_spaces": True,
+            "tab_width": 4,
+            "space_before_punctuation": True,
+            "unify_characters": True,
+            "blank_mode": "collapse",
+            "line_mode": "keep",
+        },
+        "processed_on": "server",
+        "note": "Teks diproses di memori server lalu dibuang, tidak disimpan di disk.",
     }
 
 
@@ -1126,6 +1201,93 @@ async def list_shuffler_endpoint(
     return JSONResponse(content=result.to_dict(), headers=headers)
 
 
+@app.get("/api/text-formatter/limits")
+async def text_formatter_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Rapikan Teks."""
+    return JSONResponse(content=_text_formatter_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/text-formatter")
+async def text_formatter_endpoint(
+    request: Request,
+    text: str = Form(default=None),
+    collapse_spaces: str = Form(default=None),
+    trim_lines: str = Form(default=None),
+    tabs_to_spaces: str = Form(default=None),
+    tab_width: str = Form(default=None),
+    space_before_punctuation: str = Form(default=None),
+    unify_characters: str = Form(default=None),
+    blank_mode: str = Form(default=None),
+    line_mode: str = Form(default=None),
+):
+    """Rapikan teks di memori sesuai urutan kerja standar."""
+    started = time.perf_counter()
+
+    _reject_oversized_text_formatter_content_length(request)
+
+    form = await request.form()
+    if text is None:
+        if "text" in form:
+            val = form.get("text")
+            if isinstance(val, UploadFile):
+                raise TextFormatterError(TF_NOT_TEXT, "Field 'text' harus berupa teks string.", 400)
+            text = val
+        else:
+            raise TextFormatterError(
+                TF_INVALID_REQUEST,
+                "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'.",
+                400,
+            )
+    elif isinstance(text, UploadFile):
+        raise TextFormatterError(TF_NOT_TEXT, "Field 'text' harus berupa teks string.", 400)
+
+    if collapse_spaces is None and "collapse_spaces" in form:
+        collapse_spaces = form.get("collapse_spaces")
+    if trim_lines is None and "trim_lines" in form:
+        trim_lines = form.get("trim_lines")
+    if tabs_to_spaces is None and "tabs_to_spaces" in form:
+        tabs_to_spaces = form.get("tabs_to_spaces")
+    if tab_width is None and "tab_width" in form:
+        tab_width = form.get("tab_width")
+    if space_before_punctuation is None and "space_before_punctuation" in form:
+        space_before_punctuation = form.get("space_before_punctuation")
+    if unify_characters is None and "unify_characters" in form:
+        unify_characters = form.get("unify_characters")
+    if blank_mode is None and "blank_mode" in form:
+        blank_mode = form.get("blank_mode")
+    if line_mode is None and "line_mode" in form:
+        line_mode = form.get("line_mode")
+
+    result = format_text(
+        text=text,
+        collapse_spaces=collapse_spaces,
+        trim_lines=trim_lines,
+        tabs_to_spaces=tabs_to_spaces,
+        tab_width=tab_width,
+        space_before_punctuation=space_before_punctuation,
+        unify_characters=unify_characters,
+        blank_mode=blank_mode,
+        line_mode=line_mode,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "rapikan teks selesai: chars_in=%d chars_out=%d lines_in=%d lines_out=%d durasi=%.0fms",
+        result["masukan"]["chars"],
+        result["keluaran"]["chars"],
+        result["masukan"]["lines"],
+        result["keluaran"]["lines"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1142,6 +1304,7 @@ async def root() -> dict:
             "base64",
             "remove-duplicates",
             "list-shuffler",
+            "text-formatter",
         ],
     }
 

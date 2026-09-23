@@ -195,6 +195,27 @@ from app.list_shuffler import (  # noqa: E402
     shuffle_lines,
     validate_text as validate_list_shuffler_text,
 )
+from app.text_formatter import (  # noqa: E402
+    CHUNK_SIZE as TF_CHUNK_SIZE,
+    INVALID_BOOLEAN as TF_INVALID_BOOLEAN,
+    INVALID_REQUEST as TF_INVALID_REQUEST,
+    INVALID_TAB_WIDTH as TF_INVALID_TAB_WIDTH,
+    MAX_BYTES as TF_MAX_BYTES,
+    MAX_CHARS as TF_MAX_CHARS,
+    NO_TEXT as TF_NO_TEXT,
+    NOT_TEXT as TF_NOT_TEXT,
+    TOO_LONG as TF_TOO_LONG,
+    UNSUPPORTED_BLANK_MODE as TF_UNSUPPORTED_BLANK_MODE,
+    UNSUPPORTED_LINE_MODE as TF_UNSUPPORTED_LINE_MODE,
+    TextFormatterError,
+    check_size as check_text_formatter_size,
+    format_text,
+    normalize_blank_mode as normalize_text_formatter_blank_mode,
+    normalize_line_mode as normalize_text_formatter_line_mode,
+    parse_bool as parse_text_formatter_bool,
+    parse_tab_width as parse_text_formatter_tab_width,
+    validate_text as validate_text_formatter_text,
+)
 
 SKIPPED: list[str] = []
 
@@ -2625,6 +2646,307 @@ def test_http_list_shuffler_galat() -> None:
     resp_json = client.post("/api/list-shuffler", json={"text": "a\nb"})
     assert resp_json.status_code == 400, resp_json.text
     assert resp_json.json()["error"]["code"] == LS_INVALID_REQUEST
+
+
+# --- Uji Text Formatter: Logika murni ---------------------------------------
+def test_text_formatter_logika_spasi_dan_tab() -> None:
+    # collapse_spaces
+    res = format_text("Halo   dunia   lagi", collapse_spaces=True)
+    assert res["text"] == "Halo dunia lagi"
+
+    # collapse_spaces dimatikan
+    res_no_collapse = format_text("Halo   dunia", collapse_spaces=False, trim_lines=False)
+    assert res_no_collapse["text"] == "Halo   dunia"
+
+    # trim_lines
+    res_trim = format_text("   baris satu   \n   baris dua   ", trim_lines=True)
+    assert res_trim["text"] == "baris satu\nbaris dua"
+
+    # tabs_to_spaces dengan berbagai tab_width
+    res_tab4 = format_text("kolom1\tkolom2", collapse_spaces=False, tab_width=4)
+    assert res_tab4["text"] == "kolom1    kolom2"
+
+    res_tab2 = format_text("kolom1\tkolom2", collapse_spaces=False, tab_width=2)
+    assert res_tab2["text"] == "kolom1  kolom2"
+
+    res_tab8 = format_text("kolom1\tkolom2", collapse_spaces=False, tab_width=8)
+    assert res_tab8["text"] == "kolom1        kolom2"
+
+
+def test_text_formatter_tanda_baca_dan_karakter_istimewa() -> None:
+    # space_before_punctuation
+    raw_punct = "Halo , dunia ! Apakah ini ; contoh ? Ya ( benar ) dan [ ini ] ."
+    res_punct = format_text(raw_punct, space_before_punctuation=True)
+    assert res_punct["text"] == "Halo, dunia! Apakah ini; contoh? Ya ( benar) dan [ ini]."
+
+    # unify_characters: kutip melengkung, tanda pisah panjang, elipsis, spasi khusus
+    raw_chars = (
+        "\u201ckutip ganda\u201d dan \u201ebawah\u201f "
+        "\u2018tunggal\u2019 dan \u201abawah\u201b "
+        "panjang\u2014tengah\u2013garis\u2015strip "
+        "tunggu\u2026 "
+        "angka\u00a0satu\u202fdua\u2007tiga"
+    )
+    res_chars = format_text(raw_chars, unify_characters=True)
+    expected = (
+        '"kutip ganda" dan "bawah" '
+        "'tunggal' dan 'bawah' "
+        "panjang-tengah-garis-strip "
+        "tunggu... "
+        "angka satu dua tiga"
+    )
+    assert res_chars["text"] == expected
+
+
+def test_text_formatter_akhir_baris_crlf() -> None:
+    raw = "baris 1\r\nbaris 2\rbaris 3\nbaris 4"
+    res = format_text(raw)
+    assert res["text"] == "baris 1\nbaris 2\nbaris 3\nbaris 4"
+    assert res["masukan"]["lines"] == 4
+    assert res["keluaran"]["lines"] == 4
+
+
+def test_text_formatter_crlf_masukan_dan_dihemat_chars() -> None:
+    raw = "a  b\r\nc  d\r\n"
+    res = format_text(raw)
+    assert res["masukan"]["chars"] == len("a  b\nc  d\n")
+    assert res["dihemat"]["chars"] == res["masukan"]["chars"] - res["keluaran"]["chars"]
+
+
+def test_text_formatter_blank_modes() -> None:
+    raw = "baris 1\n\n\nbaris 2\n\nbaris 3"
+
+    # keep: baris kosong dibiarkan
+    res_keep = format_text(raw, blank_mode="keep", line_mode="keep")
+    assert res_keep["text"] == "baris 1\n\n\nbaris 2\n\nbaris 3"
+
+    # collapse: baris kosong berurutan dirapatkan jadi maksimal satu
+    res_collapse = format_text(raw, blank_mode="collapse", line_mode="keep")
+    assert res_collapse["text"] == "baris 1\n\nbaris 2\n\nbaris 3"
+
+    # remove: semua baris kosong dibuang
+    res_remove = format_text(raw, blank_mode="remove", line_mode="keep")
+    assert res_remove["text"] == "baris 1\nbaris 2\nbaris 3"
+
+
+def test_text_formatter_line_modes() -> None:
+    raw = "Paragraf 1 baris a\nParagraf 1 baris b\n\n\nParagraf 2 baris a\nParagraf 2 baris b"
+
+    # keep
+    res_keep = format_text(raw, blank_mode="collapse", line_mode="keep")
+    assert res_keep["text"] == "Paragraf 1 baris a\nParagraf 1 baris b\n\nParagraf 2 baris a\nParagraf 2 baris b"
+
+    # paragraph dengan blank_mode=collapse
+    res_para_col = format_text(raw, blank_mode="collapse", line_mode="paragraph")
+    assert res_para_col["text"] == "Paragraf 1 baris a Paragraf 1 baris b\n\nParagraf 2 baris a Paragraf 2 baris b"
+
+    # paragraph dengan blank_mode=remove (dipisah satu baris baru saja)
+    res_para_rem = format_text(raw, blank_mode="remove", line_mode="paragraph")
+    assert res_para_rem["text"] == "Paragraf 1 baris a Paragraf 1 baris b\nParagraf 2 baris a Paragraf 2 baris b"
+
+    # single: semua digabung jadi satu baris dipisah satu spasi
+    res_single = format_text(raw, line_mode="single")
+    assert res_single["text"] == "Paragraf 1 baris a Paragraf 1 baris b Paragraf 2 baris a Paragraf 2 baris b"
+
+
+def test_text_formatter_hanya_spasi_dan_kosong() -> None:
+    # Teks hanya spasi -> hasil kosong, angka keluaran 0, bukan galat
+    res_spasi = format_text("   \n   \t   \n  ")
+    assert res_spasi["text"] == ""
+    assert res_spasi["keluaran"]["chars"] == 0
+    assert res_spasi["keluaran"]["lines"] == 0
+    assert res_spasi["keluaran"]["blank_lines"] == 0
+
+    # Teks kosong
+    res_kosong = format_text("")
+    assert res_kosong["text"] == ""
+    assert res_kosong["keluaran"]["chars"] == 0
+    assert res_kosong["keluaran"]["lines"] == 0
+    assert res_kosong["keluaran"]["blank_lines"] == 0
+    assert res_kosong["masukan"]["chars"] == 0
+
+
+def test_text_formatter_validasi_galat() -> None:
+    # Field text None
+    try:
+        format_text(None)
+        assert False, "Harusnya melempar TextFormatterError"
+    except TextFormatterError as exc:
+        assert exc.code == TF_NO_TEXT
+        assert exc.status_code == 400
+
+    # Field text bukan string
+    try:
+        format_text(12345)
+        assert False, "Harusnya melempar TextFormatterError"
+    except TextFormatterError as exc:
+        assert exc.code == TF_NOT_TEXT
+        assert exc.status_code == 400
+
+    # Lebih dari 200.000 karakter
+    long_text = "a" * (TF_MAX_CHARS + 1)
+    try:
+        format_text(long_text)
+        assert False, "Harusnya melempar TextFormatterError"
+    except TextFormatterError as exc:
+        assert exc.code == TF_TOO_LONG
+        assert exc.status_code == 413
+
+    # tab_width tidak dikenal
+    for inv_tab in [1, 3, 5, 10, "tujuh"]:
+        try:
+            parse_text_formatter_tab_width(inv_tab)
+            assert False, f"Harusnya melempar galat untuk tab_width {inv_tab}"
+        except TextFormatterError as exc:
+            assert exc.code == TF_INVALID_TAB_WIDTH
+            assert exc.status_code == 400
+
+    # blank_mode tidak dikenal
+    try:
+        normalize_text_formatter_blank_mode("acak")
+        assert False, "Harusnya melempar galat untuk blank_mode tidak dikenal"
+    except TextFormatterError as exc:
+        assert exc.code == TF_UNSUPPORTED_BLANK_MODE
+        assert exc.status_code == 400
+
+    # line_mode tidak dikenal
+    try:
+        normalize_text_formatter_line_mode("ngawur")
+        assert False, "Harusnya melempar galat untuk line_mode tidak dikenal"
+    except TextFormatterError as exc:
+        assert exc.code == TF_UNSUPPORTED_LINE_MODE
+        assert exc.status_code == 400
+
+    # boolean tidak dikenal
+    try:
+        parse_text_formatter_bool("mungkin", "collapse_spaces")
+        assert False, "Harusnya melempar galat untuk boolean tidak dikenal"
+    except TextFormatterError as exc:
+        assert exc.code == TF_INVALID_BOOLEAN
+        assert exc.status_code == 400
+
+
+# --- Uji HTTP TestClient untuk Text Formatter ---------------------------------
+def test_http_text_formatter_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/text-formatter/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_chars"] == TF_MAX_CHARS
+    assert body["max_bytes"] == TF_MAX_BYTES
+    assert body["max_mb"] == 1
+    assert isinstance(body["blank_modes"], list)
+    assert isinstance(body["line_modes"], list)
+    assert body["tab_widths"] == [2, 4, 8]
+    assert body["defaults"]["tab_width"] == 4
+    assert body["defaults"]["blank_mode"] == "collapse"
+    assert body["defaults"]["line_mode"] == "keep"
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_text_formatter_sukses_dan_cache_control() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    raw = "Halo   dunia !\nIni baris kedua   .\n\n\nIni paragraf   baru ."
+    response = client.post(
+        "/api/text-formatter",
+        data={
+            "text": raw,
+            "collapse_spaces": "true",
+            "trim_lines": "true",
+            "space_before_punctuation": "true",
+            "blank_mode": "collapse",
+            "line_mode": "paragraph",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["text"] == "Halo dunia! Ini baris kedua.\n\nIni paragraf baru."
+    assert body["keluaran"]["lines"] == 3
+    assert body["keluaran"]["chars"] > 0
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_text_formatter_hanya_spasi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/text-formatter", data={"text": "   \n  \t  \n  "})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["text"] == ""
+    assert body["keluaran"]["chars"] == 0
+    assert body["keluaran"]["lines"] == 0
+    assert body["keluaran"]["blank_lines"] == 0
+
+
+def test_http_text_formatter_galat_dan_validasi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # text absen -> INVALID_REQUEST 400
+    resp_no_text = client.post("/api/text-formatter", data={})
+    assert resp_no_text.status_code == 400, resp_no_text.text
+    assert resp_no_text.json()["error"]["code"] == TF_INVALID_REQUEST
+
+    # text terlalu panjang -> TOO_LONG 413
+    long_text = "x" * (TF_MAX_CHARS + 1)
+    resp_long = client.post("/api/text-formatter", data={"text": long_text})
+    assert resp_long.status_code == 413, resp_long.text
+    assert resp_long.json()["error"]["code"] == TF_TOO_LONG
+
+    # tab_width tidak dikenal -> 400
+    resp_tab = client.post("/api/text-formatter", data={"text": "a\tb", "tab_width": "5"})
+    assert resp_tab.status_code == 400, resp_tab.text
+    assert resp_tab.json()["error"]["code"] == TF_INVALID_TAB_WIDTH
+
+    # blank_mode tidak dikenal -> 400
+    resp_bm = client.post("/api/text-formatter", data={"text": "a\nb", "blank_mode": "aneh"})
+    assert resp_bm.status_code == 400, resp_bm.text
+    assert resp_bm.json()["error"]["code"] == TF_UNSUPPORTED_BLANK_MODE
+
+    # line_mode tidak dikenal -> 400
+    resp_lm = client.post("/api/text-formatter", data={"text": "a\nb", "line_mode": "ngawur"})
+    assert resp_lm.status_code == 400, resp_lm.text
+    assert resp_lm.json()["error"]["code"] == TF_UNSUPPORTED_LINE_MODE
+
+    # boolean tidak dikenal -> 400
+    resp_bool = client.post("/api/text-formatter", data={"text": "a\nb", "collapse_spaces": "mungkin"})
+    assert resp_bool.status_code == 400, resp_bool.text
+    assert resp_bool.json()["error"]["code"] == TF_INVALID_BOOLEAN
+
+    # Bukan multipart/form-data -> 400
+    resp_json = client.post("/api/text-formatter", json={"text": "a\nb"})
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == TF_INVALID_REQUEST
+
+
+def test_http_text_formatter_regresi_endpoint_lama() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Endpoint lama tetap 200
+    assert client.get("/health").status_code == 200
+    assert client.get("/api/pdf/merge/limits").status_code == 200
+    assert client.get("/api/image/convert/limits").status_code == 200
+    assert client.get("/api/word-count/limits").status_code == 200
+    assert client.get("/api/case/limits").status_code == 200
+    assert client.get("/api/base64/limits").status_code == 200
+    assert client.get("/api/remove-duplicates/limits").status_code == 200
+    assert client.get("/api/list-shuffler/limits").status_code == 200
+
+    # Root service info harus memuat text-formatter
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "text-formatter" in root_data["tools"]
 
 
 
