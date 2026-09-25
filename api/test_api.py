@@ -216,6 +216,24 @@ from app.text_formatter import (  # noqa: E402
     parse_tab_width as parse_text_formatter_tab_width,
     validate_text as validate_text_formatter_text,
 )
+from app.unit_convert import (  # noqa: E402
+    CATEGORIES as UC_CATEGORIES,
+    INVALID_REQUEST as UC_INVALID_REQUEST,
+    MAX_DIGITS as UC_MAX_DIGITS,
+    MAX_INPUT_CHARS as UC_MAX_INPUT_CHARS,
+    MAX_VALUE as UC_MAX_VALUE,
+    NO_VALUE as UC_NO_VALUE,
+    NOT_A_NUMBER as UC_NOT_A_NUMBER,
+    OUT_OF_RANGE as UC_OUT_OF_RANGE,
+    UNSUPPORTED_CATEGORY as UC_UNSUPPORTED_CATEGORY,
+    UNSUPPORTED_UNIT as UC_UNSUPPORTED_UNIT,
+    UnitConvertError,
+    convert as convert_units,
+    format_angka,
+    format_angka as format_unit_number,
+    parse_value as parse_unit_value,
+)
+
 
 SKIPPED: list[str] = []
 
@@ -2949,6 +2967,330 @@ def test_http_text_formatter_regresi_endpoint_lama() -> None:
     assert "text-formatter" in root_data["tools"]
 
 
+# --- Uji Konverter Satuan: Logika murni ---------------------------------------
+def test_unit_convert_categories_dan_limits() -> None:
+    # Minimal memuat 8 kategori
+    assert len(UC_CATEGORIES) == 8
+    expected_categories = ["panjang", "massa", "suhu", "luas", "volume", "kecepatan", "waktu", "data"]
+    for cat_id in expected_categories:
+        assert cat_id in UC_CATEGORIES
+        cat = UC_CATEGORIES[cat_id]
+        assert "id" in cat and "nama" in cat and "units" in cat
+        assert len(cat["units"]) > 0
+        for u in cat["units"]:
+            assert "kode" in u and "label" in u and "simbol" in u
+
+
+def test_unit_convert_panjang() -> None:
+    # 2 m -> 200 cm
+    res_m = convert_units("2", "panjang", "m", "cm")
+    assert res_m["hasil"] == 200.0
+    assert res_m["hasil_teks"] == "200"
+    assert res_m["laju"] == 100.0
+    assert res_m["laju_teks"] == "100"
+
+    # 1 km -> 1000 m
+    res_km = convert_units("1", "panjang", "km", "m")
+    assert res_km["hasil"] == 1000.0
+    assert res_km["hasil_teks"] == "1.000"
+
+    # 1 mil -> 1,609344 km
+    res_mil = convert_units("1", "panjang", "mil", "km")
+    assert res_mil["hasil_teks"] == "1,609344"
+
+
+def test_unit_convert_berat() -> None:
+    # 1 pon -> 453,59237 g
+    res_pon = convert_units("1", "massa", "pon", "g")
+    assert res_pon["hasil_teks"] == "453,59237"
+
+    # 1 ton -> 1000 kg
+    res_ton = convert_units("1", "massa", "ton", "kg")
+    assert res_ton["hasil"] == 1000.0
+    assert res_ton["hasil_teks"] == "1.000"
+
+
+def test_unit_convert_suhu() -> None:
+    # 100 C -> 212 F
+    res_f = convert_units("100", "suhu", "celsius", "fahrenheit")
+    assert res_f["hasil_teks"] == "212"
+
+    # 0 C -> 273,15 K
+    res_k = convert_units("0", "suhu", "celsius", "kelvin")
+    assert res_k["hasil_teks"] == "273,15"
+
+    # 37 C -> 98,6 F
+    res_body = convert_units("37", "suhu", "celsius", "fahrenheit")
+    assert res_body["hasil_teks"] == "98,6"
+
+    # -40 C -> -40 F
+    res_minus = convert_units("-40", "suhu", "celsius", "fahrenheit")
+    assert res_minus["hasil_teks"] == "-40"
+
+    # 100 reamur -> 125 C
+    res_re = convert_units("100", "suhu", "reamur", "celsius")
+    assert res_re["hasil_teks"] == "125"
+
+    # Catatan suhu berisi penjelasan rumus
+    assert res_f["catatan"] != ""
+
+
+def test_unit_convert_luas_kecepatan() -> None:
+    # 1 hektar -> 10000 m2
+    res_luas = convert_units("1", "luas", "hektar", "m2")
+    assert res_luas["hasil"] == 10000.0
+    assert res_luas["hasil_teks"] == "10.000"
+
+    # 36 kmjam -> 10 ms
+    res_speed = convert_units("36", "kecepatan", "kmjam", "ms")
+    assert res_speed["hasil_teks"] == "10"
+
+
+def test_unit_convert_waktu_data() -> None:
+    # 1 tahun -> 365 hari
+    res_time = convert_units("1", "waktu", "tahun", "hari")
+    assert res_time["hasil_teks"] == "365"
+
+    # 1 mib -> 1048576 byte
+    res_mib = convert_units("1", "data", "mib", "byte")
+    assert res_mib["hasil"] == 1048576.0
+    assert res_mib["hasil_teks"] == "1.048.576"
+
+    # 1 mb -> 1000000 byte
+    res_mb = convert_units("1", "data", "mb", "byte")
+    assert res_mb["hasil"] == 1000000.0
+    assert res_mb["hasil_teks"] == "1.000.000"
+
+
+def test_unit_convert_parsing_variasi_angka() -> None:
+    # masukan "1.234,5" dan "1 234.5" menghasilkan nilai yang sama
+    r1 = convert_units("1.234,5", "panjang", "m", "cm")
+    r2 = convert_units("1 234.5", "panjang", "m", "cm")
+    assert r1["hasil"] == r2["hasil"] == 123450.0
+    assert r1["hasil_teks"] == r2["hasil_teks"]
+
+    # Format lain juga valid
+    r3 = convert_units("1234.5", "panjang", "m", "cm")
+    r4 = convert_units("1234,5", "panjang", "m", "cm")
+    assert r3["hasil"] == r4["hasil"] == 123450.0
+
+
+def test_unit_convert_semua_satuan_konsisten() -> None:
+    # semua berisi semua satuan kategori dan nilai yang konsisten dengan hasil
+    res = convert_units("2", "panjang", "m", "cm")
+    cat = UC_CATEGORIES["panjang"]
+    assert len(res["semua"]) == len(cat["units"])
+    for u in res["semua"]:
+        assert "kode" in u and "label" in u and "simbol" in u and "nilai" in u and "teks" in u
+        if u["kode"] == "cm":
+            assert u["nilai"] == res["hasil"]
+            assert u["teks"] == res["hasil_teks"]
+
+
+def test_unit_convert_galat_kode_dan_status() -> None:
+    # NO_VALUE
+    try:
+        convert_units("   ", "panjang", "m", "cm")
+        assert False, "Harusnya melempar UnitConvertError NO_VALUE"
+    except UnitConvertError as exc:
+        assert exc.code == UC_NO_VALUE
+        assert exc.status_code == 400
+
+    # NOT_A_NUMBER
+    try:
+        convert_units("seribu", "panjang", "m", "cm")
+        assert False, "Harusnya melempar UnitConvertError NOT_A_NUMBER"
+    except UnitConvertError as exc:
+        assert exc.code == UC_NOT_A_NUMBER
+        assert exc.status_code == 400
+
+    # OUT_OF_RANGE (nilai 1e20)
+    try:
+        convert_units("1e20", "panjang", "m", "cm")
+        assert False, "Harusnya melempar UnitConvertError OUT_OF_RANGE"
+    except UnitConvertError as exc:
+        assert exc.code == UC_OUT_OF_RANGE
+        assert exc.status_code == 413
+
+    # OUT_OF_RANGE (karakter melebihi 40)
+    try:
+        convert_units("9" * 45, "panjang", "m", "cm")
+        assert False, "Harusnya melempar UnitConvertError OUT_OF_RANGE"
+    except UnitConvertError as exc:
+        assert exc.code == UC_OUT_OF_RANGE
+        assert exc.status_code == 413
+
+    # UNSUPPORTED_CATEGORY
+    try:
+        convert_units("10", "kategori_tidak_ada", "m", "cm")
+        assert False, "Harusnya melempar UnitConvertError UNSUPPORTED_CATEGORY"
+    except UnitConvertError as exc:
+        assert exc.code == UC_UNSUPPORTED_CATEGORY
+        assert exc.status_code == 400
+
+    # UNSUPPORTED_UNIT
+    try:
+        convert_units("10", "panjang", "m", "satuan_tidak_ada")
+        assert False, "Harusnya melempar UnitConvertError UNSUPPORTED_UNIT"
+    except UnitConvertError as exc:
+        assert exc.code == UC_UNSUPPORTED_UNIT
+        assert exc.status_code == 400
+
+    # INVALID_REQUEST (None values)
+    try:
+        convert_units(None, "panjang", "m", "cm")
+        assert False, "Harusnya melempar UnitConvertError INVALID_REQUEST"
+    except UnitConvertError as exc:
+        assert exc.code == UC_INVALID_REQUEST
+        assert exc.status_code == 400
+
+
+def test_unit_convert_nilai_bukan_nol_tidak_jadi_nol() -> None:
+    # 1 mg -> ton: hasil_teks == "1,00000e-09" dan laju_teks == "1,00000e-09"
+    res_mg = convert_units("1", "massa", "mg", "ton")
+    assert res_mg["hasil_teks"] == "1,00000e-09"
+    assert res_mg["laju_teks"] == "1,00000e-09"
+
+    # 1 g -> ton: hasil_teks == "0,000001"
+    res_g = convert_units("1", "massa", "g", "ton")
+    assert res_g["hasil_teks"] == "0,000001"
+
+    # 0 m -> km: hasil_teks == "0"
+    res_nol = convert_units("0", "panjang", "m", "km")
+    assert res_nol["hasil_teks"] == "0"
+
+    # 1 byte -> tib: hasil_teks == "9,09495e-13"
+    res_byte = convert_units("1", "data", "byte", "tib")
+    assert res_byte["hasil_teks"] == "9,09495e-13"
+
+    # -0.0 -> "0"
+    assert format_unit_number(-0.0) == "0"
+
+
+def test_unit_convert_format_angka_sembilan_contoh() -> None:
+    # Uji 9 contoh spesifikasi langsung memanggil format_angka
+    assert format_angka(9988371125.4096) == "9.988.371.125,4096"
+    assert format_angka(433035566999.99994) == "433.035.566.999,99994"
+    assert format_angka(1e-9) == "1,00000e-09"
+    assert format_angka(1e-6) == "0,000001"
+    assert format_angka(0.0) == "0"
+    assert format_angka(2.5) == "2,5"
+    assert format_angka(200.0) == "200"
+    assert format_angka(-0.0) == "0"
+    assert format_angka(1609.344) == "1.609,344"
+
+
+# --- Uji HTTP TestClient untuk Konverter Satuan ------------------------------
+def test_http_unit_convert_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/unit-convert/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body["categories"], list)
+    assert len(body["categories"]) == 8
+    assert body["max_value"] == UC_MAX_VALUE
+    assert body["max_input_chars"] == UC_MAX_INPUT_CHARS
+    assert body["defaults"]["category"] == "panjang"
+    assert body["defaults"]["from"] == "m"
+    assert body["defaults"]["to"] == "cm"
+    assert body["processed_on"] == "server"
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_unit_convert_sukses_dan_headers() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/unit-convert",
+        data={
+            "value": "2",
+            "category": "panjang",
+            "from": "m",
+            "to": "cm",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["hasil"] == 200.0
+    assert body["hasil_teks"] == "200"
+    assert body["kategori"]["id"] == "panjang"
+    assert body["dari"]["kode"] == "m"
+    assert body["ke"]["kode"] == "cm"
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_unit_convert_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Field kurang -> 400 INVALID_REQUEST
+    resp_missing = client.post("/api/unit-convert", data={"value": "2"})
+    assert resp_missing.status_code == 400, resp_missing.text
+    assert resp_missing.json()["error"]["code"] == UC_INVALID_REQUEST
+
+    # NO_VALUE -> 400
+    resp_no_val = client.post(
+        "/api/unit-convert",
+        data={"value": "   ", "category": "panjang", "from": "m", "to": "cm"},
+    )
+    assert resp_no_val.status_code == 400, resp_no_val.text
+    assert resp_no_val.json()["error"]["code"] == UC_NO_VALUE
+
+    # NOT_A_NUMBER -> 400
+    resp_nan = client.post(
+        "/api/unit-convert",
+        data={"value": "seribu", "category": "panjang", "from": "m", "to": "cm"},
+    )
+    assert resp_nan.status_code == 400, resp_nan.text
+    assert resp_nan.json()["error"]["code"] == UC_NOT_A_NUMBER
+
+    # OUT_OF_RANGE -> 413
+    resp_range = client.post(
+        "/api/unit-convert",
+        data={"value": "1e20", "category": "panjang", "from": "m", "to": "cm"},
+    )
+    assert resp_range.status_code == 413, resp_range.text
+    assert resp_range.json()["error"]["code"] == UC_OUT_OF_RANGE
+
+    # UNSUPPORTED_CATEGORY -> 400
+    resp_cat = client.post(
+        "/api/unit-convert",
+        data={"value": "10", "category": "ngawur", "from": "m", "to": "cm"},
+    )
+    assert resp_cat.status_code == 400, resp_cat.text
+    assert resp_cat.json()["error"]["code"] == UC_UNSUPPORTED_CATEGORY
+
+    # UNSUPPORTED_UNIT -> 400
+    resp_unit = client.post(
+        "/api/unit-convert",
+        data={"value": "10", "category": "panjang", "from": "m", "to": "ngawur"},
+    )
+    assert resp_unit.status_code == 400, resp_unit.text
+    assert resp_unit.json()["error"]["code"] == UC_UNSUPPORTED_UNIT
+
+    # Bukan multipart/form-data -> 400
+    resp_json = client.post(
+        "/api/unit-convert",
+        json={"value": "10", "category": "panjang", "from": "m", "to": "cm"},
+    )
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == UC_INVALID_REQUEST
+
+
+def test_http_unit_convert_root_endpoint() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "unit-convert" in root_data["tools"]
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

@@ -162,6 +162,20 @@ from .text_formatter import (
     TextFormatterError,
     format_text,
 )
+from .unit_convert import (
+    CATEGORIES as UC_CATEGORIES,
+    INVALID_REQUEST as UC_INVALID_REQUEST,
+    MAX_INPUT_CHARS as UC_MAX_INPUT_CHARS,
+    MAX_VALUE as UC_MAX_VALUE,
+    NO_VALUE as UC_NO_VALUE,
+    NOT_A_NUMBER as UC_NOT_A_NUMBER,
+    OUT_OF_RANGE as UC_OUT_OF_RANGE,
+    UNSUPPORTED_CATEGORY as UC_UNSUPPORTED_CATEGORY,
+    UNSUPPORTED_UNIT as UC_UNSUPPORTED_UNIT,
+    UnitConvertError,
+    convert as convert_units,
+)
+
 
 SERVICE_NAME = "omnitools-api"
 OUTPUT_FILENAME = "gabungan.pdf"
@@ -293,6 +307,17 @@ async def handle_text_formatter_error(request: Request, exc: TextFormatterError)
     )
 
 
+@app.exception_handler(UnitConvertError)
+async def handle_unit_convert_error(request: Request, exc: UnitConvertError) -> JSONResponse:
+    """Error konversi satuan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("konversi satuan ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
@@ -307,6 +332,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/text-formatter"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
+    elif request.url.path.startswith("/api/unit-convert"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/word-count"):
@@ -691,6 +718,54 @@ def _text_formatter_limits_payload() -> dict:
         "processed_on": "server",
         "note": "Teks diproses di memori server lalu dibuang, tidak disimpan di disk.",
     }
+
+
+def _reject_oversized_unit_convert_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas konversi satuan."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise UnitConvertError(
+            UC_OUT_OF_RANGE,
+            "Ukuran permintaan melebihi batas yang diizinkan.",
+            413,
+        )
+
+
+def _unit_convert_limits_payload() -> dict:
+    categories_list = []
+    for cat_id, cat_info in UC_CATEGORIES.items():
+        categories_list.append({
+            "id": cat_info["id"],
+            "nama": cat_info["nama"],
+            "units": [
+                {
+                    "value": u["value"],
+                    "kode": u["kode"],
+                    "label": u["label"],
+                    "simbol": u["simbol"],
+                }
+                for u in cat_info["units"]
+            ],
+        })
+    return {
+        "categories": categories_list,
+        "max_value": UC_MAX_VALUE,
+        "max_input_chars": UC_MAX_INPUT_CHARS,
+        "defaults": {
+            "category": "panjang",
+            "from": "m",
+            "to": "cm",
+        },
+        "processed_on": "server",
+        "note": "Nilai diproses di memori lalu dibuang, tidak disimpan di disk.",
+    }
+
 
 
 
@@ -1288,6 +1363,79 @@ async def text_formatter_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/unit-convert/limits")
+async def unit_convert_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Konverter Satuan."""
+    return JSONResponse(content=_unit_convert_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/unit-convert")
+async def unit_convert_endpoint(
+    request: Request,
+    value: str = Form(default=None),
+    category: str = Form(default=None),
+    from_unit: str = Form(default=None, alias="from"),
+    to_unit: str = Form(default=None, alias="to"),
+):
+    """Konversi nilai antar satuan dalam memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_unit_convert_content_length(request)
+
+    form = await request.form()
+    if value is None and "value" in form:
+        value = form.get("value")
+    if category is None and "category" in form:
+        category = form.get("category")
+    if from_unit is None and "from" in form:
+        from_unit = form.get("from")
+    if to_unit is None and "to" in form:
+        to_unit = form.get("to")
+
+    if value is None or category is None or from_unit is None or to_unit is None:
+        raise UnitConvertError(
+            UC_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'.",
+            400,
+        )
+
+    if (
+        isinstance(value, UploadFile)
+        or isinstance(category, UploadFile)
+        or isinstance(from_unit, UploadFile)
+        or isinstance(to_unit, UploadFile)
+    ):
+        raise UnitConvertError(
+            UC_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = convert_units(
+        value=value,
+        category=category,
+        from_unit=from_unit,
+        to_unit=to_unit,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup kategori, satuan, dan durasi.
+    logger.info(
+        "konversi satuan selesai: category=%s from=%s to=%s durasi=%.0fms",
+        result["kategori"]["id"],
+        result["dari"]["kode"],
+        result["ke"]["kode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1305,8 +1453,10 @@ async def root() -> dict:
             "remove-duplicates",
             "list-shuffler",
             "text-formatter",
+            "unit-convert",
         ],
     }
+
 
 
 
