@@ -175,6 +175,20 @@ from .unit_convert import (
     UnitConvertError,
     convert as convert_units,
 )
+from .percent_calc import (
+    DIVIDE_BY_ZERO as PC_DIVIDE_BY_ZERO,
+    INVALID_REQUEST as PC_INVALID_REQUEST,
+    MAX_ABS_VALUE as PC_MAX_ABS_VALUE,
+    MAX_INPUT_CHARS as PC_MAX_INPUT_CHARS,
+    NO_VALUE as PC_NO_VALUE,
+    NOT_A_NUMBER as PC_NOT_A_NUMBER,
+    OUT_OF_RANGE as PC_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as PC_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as PC_UNSUPPORTED_MODE,
+    PercentCalcError,
+    compute_percent,
+    limits_payload as percent_calc_limits_payload_func,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -318,6 +332,17 @@ async def handle_unit_convert_error(request: Request, exc: UnitConvertError) -> 
     )
 
 
+@app.exception_handler(PercentCalcError)
+async def handle_percent_calc_error(request: Request, exc: PercentCalcError) -> JSONResponse:
+    """Error kalkulator persen yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung persen ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
@@ -334,6 +359,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/unit-convert"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
+    elif request.url.path.startswith("/api/percent-calc"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/word-count"):
@@ -767,7 +794,25 @@ def _unit_convert_limits_payload() -> dict:
     }
 
 
+def _reject_oversized_percent_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator persen."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise PercentCalcError(
+            PC_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar.",
+            413,
+        )
 
+
+def _percent_calc_limits_payload() -> dict:
+    return percent_calc_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -1436,6 +1481,72 @@ async def unit_convert_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/percent-calc/limits")
+async def percent_calc_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Kalkulator Persen."""
+    return JSONResponse(content=_percent_calc_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/percent-calc")
+async def percent_calc_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    a: str = Form(default=None),
+    b: str = Form(default=None),
+):
+    """Hitung persentase di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_percent_content_length(request)
+
+    form = await request.form()
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if a is None and "a" in form:
+        a = form.get("a")
+    if b is None and "b" in form:
+        b = form.get("b")
+
+    if mode is None or a is None or b is None:
+        raise PercentCalcError(
+            PC_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'.",
+            400,
+        )
+
+    if (
+        isinstance(mode, UploadFile)
+        or isinstance(a, UploadFile)
+        or isinstance(b, UploadFile)
+    ):
+        raise PercentCalcError(
+            PC_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = compute_percent(
+        mode=mode,
+        a=a,
+        b=b,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode dan durasi.
+    logger.info(
+        "hitung persen selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1454,6 +1565,7 @@ async def root() -> dict:
             "list-shuffler",
             "text-formatter",
             "unit-convert",
+            "percent-calc",
         ],
     }
 

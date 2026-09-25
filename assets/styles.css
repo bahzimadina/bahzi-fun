@@ -2184,6 +2184,150 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .2rem;
 }
 
+/* ================= Panel: Kalkulator Persen ================= */
+.pc__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+.pc__field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-width: 0;
+  width: 100%;
+}
+.pc__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: .15rem;
+}
+.pc__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: .9rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 0;
+}
+.pc__select:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.pc__inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 480px) {
+  .pc__inputs-row {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+}
+.pc__input {
+  width: 100%;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  box-sizing: border-box;
+}
+.pc__input:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.pc__hint-text {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.pc__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+.pc__hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.pc__hint[hidden] {
+  display: none;
+}
+.pc__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.pc__output-wrap[hidden] {
+  display: none;
+}
+.pc__hero {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.pc__hero-main {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.pc__hero-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+  line-height: 1.15;
+  word-break: break-word;
+}
+.pc__hero-symbol {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--brand-text);
+}
+.pc__sentence {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+.pc__formula {
+  font-size: .88rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin: .15rem 0 0;
+}
+.pc__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
 /* ================= Target sentuh di perangkat sentuh ================= */
 @media (pointer: coarse) {
   #remove-duplicates-input,
@@ -2233,7 +2377,16 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #unit-convert-copy,
   #unit-convert-download,
   #unit-convert-close,
-  #unit-convert-panel label {
+  #unit-convert-panel label,
+  #percent-calc-mode,
+  #percent-calc-input-a,
+  #percent-calc-input-b,
+  #percent-calc-submit,
+  #percent-calc-clear,
+  #percent-calc-copy,
+  #percent-calc-download,
+  #percent-calc-close,
+  #percent-calc-panel label {
     min-height: 44px;
     min-width: 44px;
   }

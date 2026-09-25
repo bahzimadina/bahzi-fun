@@ -77,7 +77,7 @@
       tools: [
         { name: 'Prime Number Generator', desc: 'Hasilkan daftar bilangan prima dengan cepat.', status: 'soon' },
         { name: 'Kalkulator Listrik (V/I/R)', desc: 'Hitung tegangan, arus, dan resistansi.', status: 'soon' },
-        { name: 'Kalkulator Persen', desc: 'Hitung persentase, kenaikan, dan potongan.', status: 'soon' },
+        { name: 'Kalkulator Persen', desc: 'Hitung persentase, kenaikan, dan potongan.', status: 'available', action: 'percent-calc' },
         { name: 'Unit Converter', desc: 'Ubah nilai antar satuan panjang, berat, suhu, luas, volume, kecepatan, waktu, dan data.', status: 'available', action: 'unit-converter' }
       ]
     },

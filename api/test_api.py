@@ -232,6 +232,23 @@ from app.unit_convert import (  # noqa: E402
     format_angka,
     format_angka as format_unit_number,
     parse_value as parse_unit_value,
+    parse_value as unit_parse_value,
+)
+from app.percent_calc import (
+    DIVIDE_BY_ZERO as PC_DIVIDE_BY_ZERO,
+    INVALID_REQUEST as PC_INVALID_REQUEST,
+    MAX_ABS_VALUE as PC_MAX_ABS_VALUE,
+    MAX_INPUT_CHARS as PC_MAX_INPUT_CHARS,
+    NO_VALUE as PC_NO_VALUE,
+    NOT_A_NUMBER as PC_NOT_A_NUMBER,
+    OUT_OF_RANGE as PC_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as PC_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as PC_UNSUPPORTED_MODE,
+    PercentCalcError,
+    compute_percent,
+    format_angka as format_percent_number,
+    limits_payload as percent_calc_limits_payload_func,
+    parse_number as parse_percent_number,
 )
 
 
@@ -3291,6 +3308,362 @@ def test_http_unit_convert_root_endpoint() -> None:
     assert root_resp.status_code == 200
     root_data = root_resp.json()
     assert "unit-convert" in root_data["tools"]
+
+
+# --- Uji Logika Kalkulator Persen -------------------------------------------
+def test_percent_calc_lima_mode() -> None:
+    # 1. persen_dari: 20 & 150 -> 30
+    res1 = compute_percent("persen_dari", "20", "150")
+    assert res1["hasil"]["nilai"] == 30.0
+    assert res1["hasil"]["teks"] == "30"
+    assert res1["hasil"]["satuan"] == ""
+    assert res1["kalimat"] == "20% dari 150 adalah 30."
+    assert res1["rumus"] == "20 : 100 x 150 = 30"
+    assert res1["masukan"]["a"] == "20"
+    assert res1["masukan"]["b"] == "150"
+
+    # 2. berapa_persen: 45 & 180 -> 25
+    res2 = compute_percent("berapa_persen", "45", "180")
+    assert res2["hasil"]["nilai"] == 25.0
+    assert res2["hasil"]["teks"] == "25"
+    assert res2["hasil"]["satuan"] == "%"
+    assert res2["kalimat"] == "45 adalah 25% dari 180."
+    assert res2["rumus"] == "45 : 180 x 100 = 25%"
+
+    # 3. perubahan: 200 & 250 -> 25
+    res3 = compute_percent("perubahan", "200", "250")
+    assert res3["hasil"]["nilai"] == 25.0
+    assert res3["hasil"]["teks"] == "25"
+    assert res3["hasil"]["satuan"] == "%"
+    assert res3["kalimat"] == "Dari 200 ke 250 berarti naik 25%."
+    assert res3["rumus"] == "(250 - 200) : 200 x 100 = 25%"
+
+    # 4. tambah_persen: 10 & 150 -> 165
+    res4 = compute_percent("tambah_persen", "10", "150")
+    assert res4["hasil"]["nilai"] == 165.0
+    assert res4["hasil"]["teks"] == "165"
+    assert res4["hasil"]["satuan"] == ""
+    assert res4["kalimat"] == "150 ditambah 10% menjadi 165."
+    assert res4["rumus"] == "150 x (1 + 10 : 100) = 165"
+
+    # 5. kurang_persen: 15 & 200 -> 170
+    res5 = compute_percent("kurang_persen", "15", "200")
+    assert res5["hasil"]["nilai"] == 170.0
+    assert res5["hasil"]["teks"] == "170"
+    assert res5["hasil"]["satuan"] == ""
+    assert res5["kalimat"] == "200 dikurangi 15% menjadi 170."
+    assert res5["rumus"] == "200 x (1 - 15 : 100) = 170"
+
+
+def test_percent_calc_perubahan_arah_dan_nol() -> None:
+    # Naik
+    res_naik = compute_percent("perubahan", "200", "250")
+    assert res_naik["hasil"]["nilai"] == 25.0
+    assert res_naik["kalimat"] == "Dari 200 ke 250 berarti naik 25%."
+    assert res_naik["rumus"] == "(250 - 200) : 200 x 100 = 25%"
+
+    # Turun
+    res_turun = compute_percent("perubahan", "250", "200")
+    assert res_turun["hasil"]["nilai"] == -20.0
+    assert res_turun["hasil"]["teks"] == "-20"
+    assert res_turun["kalimat"] == "Dari 250 ke 200 berarti turun 20%."
+    assert res_turun["rumus"] == "(200 - 250) : 250 x 100 = -20%"
+
+    # Sama (0%)
+    res_sama = compute_percent("perubahan", "200", "200")
+    assert res_sama["hasil"]["nilai"] == 0.0
+    assert res_sama["hasil"]["teks"] == "0"
+    assert res_sama["kalimat"] == "Dari 200 ke 200 tidak ada perubahan (0%)."
+    assert res_sama["rumus"] == "(200 - 200) : 200 x 100 = 0%"
+
+
+def test_percent_calc_format_dan_parsing_angka() -> None:
+    # Masukan ribuan gaya Indonesia: "1.234,5"
+    res_indo = compute_percent("persen_dari", "10", "1.234,5")
+    assert res_indo["hasil"]["nilai"] == 123.45
+    assert res_indo["hasil"]["teks"] == "123,45"
+    assert res_indo["masukan"]["b"] == "1.234,5"
+
+    # Masukan ribuan gaya biasa: "1,234.5"
+    res_biasa = compute_percent("persen_dari", "10", "1,234.5")
+    assert res_biasa["hasil"]["nilai"] == 123.45
+
+    # Masukan berkoma desimal
+    res_koma = compute_percent("persen_dari", "2,5", "200")
+    assert res_koma["hasil"]["nilai"] == 5.0
+    assert res_koma["hasil"]["teks"] == "5"
+
+    # Masukan bertitik tunggal dibaca sebagai tanda desimal (sama seperti alat konversi satuan)
+    res_titik = compute_percent("persen_dari", "10", "1.500")
+    assert res_titik["hasil"]["nilai"] == 0.15
+    assert res_titik["hasil"]["teks"] == "0,15"
+
+    # Pembulatan desimal banyak (maksimum 6 angka)
+    res_des = compute_percent("berapa_persen", "10", "30")
+    assert res_des["hasil"]["teks"] == "33,333333"
+
+    # Angka negatif
+    res_neg = compute_percent("tambah_persen", "10", "-100")
+    assert res_neg["hasil"]["nilai"] == -110.0
+    assert res_neg["hasil"]["teks"] == "-110"
+
+    # 0 sebagai angka dasar tambah/kurang
+    res_nol_tambah = compute_percent("tambah_persen", "10", "0")
+    assert res_nol_tambah["hasil"]["nilai"] == 0.0
+    assert res_nol_tambah["hasil"]["teks"] == "0"
+
+    res_nol_kurang = compute_percent("kurang_persen", "10", "0")
+    assert res_nol_kurang["hasil"]["nilai"] == 0.0
+    assert res_nol_kurang["hasil"]["teks"] == "0"
+
+    # Eksponen gaya Indonesia
+    assert format_percent_number(5e-7) == "5e-07"
+    assert format_percent_number(1.25e18) == "1,25e+18"
+    assert format_percent_number(0.0) == "0"
+    assert format_percent_number(-0.0) == "0"
+
+
+def test_percent_calc_parser_sepakat_dengan_konversi_satuan() -> None:
+    """Uji parser kalkulator persen sepakat dengan parser alat konversi satuan.
+
+    Tujuannya supaya dua alat tidak pernah beda tafsir untuk masukan yang sama.
+    """
+    from app.unit_convert import parse_value as unit_parse_value, UnitConvertError
+
+    masukan_list = ["1.500", "1,234.5", "1.234,5", "2,5", "1,2,3", "0,001", "-45.7", "12"]
+    for item in masukan_list:
+        percent_err = None
+        unit_err = None
+        percent_val = None
+        unit_val = None
+
+        try:
+            percent_val = parse_percent_number(item)
+        except PercentCalcError as exc:
+            percent_err = exc
+
+        try:
+            unit_val = unit_parse_value(item)
+        except UnitConvertError as exc:
+            unit_err = exc
+
+        if percent_err is not None or unit_err is not None:
+            assert percent_err is not None and unit_err is not None, (
+                f"Perbedaan penanganan galat untuk masukan {item!r}: "
+                f"percent={percent_err!r}, unit={unit_err!r}"
+            )
+        else:
+            assert percent_val == unit_val, (
+                f"Hasil parsing berbeda untuk masukan {item!r}: "
+                f"percent={percent_val!r}, unit={unit_val!r}"
+            )
+
+
+def test_percent_calc_batas_dan_galat() -> None:
+    # Batas 1e15 yang boleh
+    res_max = compute_percent("persen_dari", "10", "1e15")
+    assert res_max["hasil"]["nilai"] == 1e14
+
+    # Batas 1e16 yang ditolak (OUT_OF_RANGE 413)
+    try:
+        compute_percent("persen_dari", "10", "1e16")
+        assert False, "Harusnya melempar PercentCalcError OUT_OF_RANGE"
+    except PercentCalcError as exc:
+        assert exc.code == PC_OUT_OF_RANGE
+        assert exc.status_code == 413
+
+    # DIVIDE_BY_ZERO pada mode 2 dengan b=0 (status 422)
+    try:
+        compute_percent("berapa_persen", "50", "0")
+        assert False, "Harusnya melempar PercentCalcError DIVIDE_BY_ZERO"
+    except PercentCalcError as exc:
+        assert exc.code == PC_DIVIDE_BY_ZERO
+        assert exc.status_code == 422
+        assert "Angka total tidak boleh 0" in exc.message
+
+    # DIVIDE_BY_ZERO pada mode 3 dengan a=0 (status 422)
+    try:
+        compute_percent("perubahan", "0", "100")
+        assert False, "Harusnya melempar PercentCalcError DIVIDE_BY_ZERO"
+    except PercentCalcError as exc:
+        assert exc.code == PC_DIVIDE_BY_ZERO
+        assert exc.status_code == 422
+        assert "Angka awal tidak boleh 0" in exc.message
+
+    # NOT_A_NUMBER
+    try:
+        compute_percent("persen_dari", "bukan_angka", "100")
+        assert False, "Harusnya melempar PercentCalcError NOT_A_NUMBER"
+    except PercentCalcError as exc:
+        assert exc.code == PC_NOT_A_NUMBER
+        assert exc.status_code == 400
+
+    # NO_VALUE
+    try:
+        compute_percent("persen_dari", "   ", "100")
+        assert False, "Harusnya melempar PercentCalcError NO_VALUE"
+    except PercentCalcError as exc:
+        assert exc.code == PC_NO_VALUE
+        assert exc.status_code == 400
+
+    # UNSUPPORTED_MODE
+    try:
+        compute_percent("mode_palsu", "10", "100")
+        assert False, "Harusnya melempar PercentCalcError UNSUPPORTED_MODE"
+    except PercentCalcError as exc:
+        assert exc.code == PC_UNSUPPORTED_MODE
+        assert exc.status_code == 400
+
+    # INVALID_REQUEST (None values)
+    try:
+        compute_percent(None, "10", "100")
+        assert False, "Harusnya melempar PercentCalcError INVALID_REQUEST"
+    except PercentCalcError as exc:
+        assert exc.code == PC_INVALID_REQUEST
+        assert exc.status_code == 400
+
+    # Panjang masukan 40 karakter diizinkan
+    val_40 = "1" + "0" * 13 + "." + "0" * 25
+    assert len(val_40) == 40
+    res_40 = compute_percent("persen_dari", "10", val_40)
+    assert res_40["hasil"]["nilai"] == 1000000000000.0
+
+    # Panjang masukan 41 karakter ditolak (413)
+    val_41 = "1" + "0" * 40
+    assert len(val_41) == 41
+    try:
+        compute_percent("persen_dari", "10", val_41)
+        assert False, "Harusnya melempar PercentCalcError OUT_OF_RANGE"
+    except PercentCalcError as exc:
+        assert exc.code == PC_OUT_OF_RANGE
+        assert exc.status_code == 413
+
+
+# --- Uji HTTP TestClient untuk Kalkulator Persen -----------------------------
+def test_http_percent_calc_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/percent-calc/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body["modes"], list)
+    assert len(body["modes"]) == 5
+    assert body["max_value"] == PC_MAX_ABS_VALUE
+    assert body["max_input_chars"] == PC_MAX_INPUT_CHARS
+    assert body["processed_on"] == "server"
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_percent_calc_sukses_dan_headers() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    cases = [
+        ("persen_dari", "20", "150", 30.0, "30", ""),
+        ("berapa_persen", "45", "180", 25.0, "25", "%"),
+        ("perubahan", "200", "250", 25.0, "25", "%"),
+        ("tambah_persen", "10", "150", 165.0, "165", ""),
+        ("kurang_persen", "15", "200", 170.0, "170", ""),
+    ]
+
+    for mode, a, b, exp_val, exp_teks, exp_satuan in cases:
+        response = client.post(
+            "/api/percent-calc",
+            data={"mode": mode, "a": a, "b": b},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["hasil"]["nilai"] == exp_val
+        assert body["hasil"]["teks"] == exp_teks
+        assert body["hasil"]["satuan"] == exp_satuan
+        assert "kalimat" in body
+        assert "rumus" in body
+        assert "no-store" in response.headers.get("Cache-Control", "")
+        assert response.headers.get("Pragma") == "no-cache"
+        assert "X-Processing-Ms" in response.headers
+
+
+def test_http_percent_calc_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Field kurang -> 400 INVALID_REQUEST
+    resp_missing = client.post("/api/percent-calc", data={"mode": "persen_dari", "a": "20"})
+    assert resp_missing.status_code == 400, resp_missing.text
+    assert resp_missing.json()["error"]["code"] == PC_INVALID_REQUEST
+
+    # NO_VALUE -> 400
+    resp_no_val = client.post(
+        "/api/percent-calc",
+        data={"mode": "persen_dari", "a": "   ", "b": "100"},
+    )
+    assert resp_no_val.status_code == 400, resp_no_val.text
+    assert resp_no_val.json()["error"]["code"] == PC_NO_VALUE
+
+    # NOT_A_NUMBER -> 400
+    resp_nan = client.post(
+        "/api/percent-calc",
+        data={"mode": "persen_dari", "a": "sepuluh", "b": "100"},
+    )
+    assert resp_nan.status_code == 400, resp_nan.text
+    assert resp_nan.json()["error"]["code"] == PC_NOT_A_NUMBER
+
+    # OUT_OF_RANGE -> 413
+    resp_range = client.post(
+        "/api/percent-calc",
+        data={"mode": "persen_dari", "a": "10", "b": "1e20"},
+    )
+    assert resp_range.status_code == 413, resp_range.text
+    assert resp_range.json()["error"]["code"] == PC_OUT_OF_RANGE
+
+    # DIVIDE_BY_ZERO -> 422
+    resp_zero = client.post(
+        "/api/percent-calc",
+        data={"mode": "berapa_persen", "a": "50", "b": "0"},
+    )
+    assert resp_zero.status_code == 422, resp_zero.text
+    assert resp_zero.json()["error"]["code"] == PC_DIVIDE_BY_ZERO
+
+    # UNSUPPORTED_MODE -> 400
+    resp_mode = client.post(
+        "/api/percent-calc",
+        data={"mode": "mode_ngawur", "a": "10", "b": "100"},
+    )
+    assert resp_mode.status_code == 400, resp_mode.text
+    assert resp_mode.json()["error"]["code"] == PC_UNSUPPORTED_MODE
+
+    # Bukan multipart/form-data -> 400
+    resp_json = client.post(
+        "/api/percent-calc",
+        json={"mode": "persen_dari", "a": "10", "b": "100"},
+    )
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == PC_INVALID_REQUEST
+
+
+def test_http_percent_calc_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root endpoint berisi percent-calc
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "percent-calc" in root_data["tools"]
+
+    # Regresi endpoint yang sudah ada
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200
+
+    uc_limits = client.get("/api/unit-convert/limits")
+    assert uc_limits.status_code == 200
+
+    wc_limits = client.get("/api/word-count/limits")
+    assert wc_limits.status_code == 200
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

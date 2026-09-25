@@ -140,7 +140,9 @@
           message = 'Server membalas HTTP ' + response.status + '. Silakan coba lagi.';
         }
       }
-      throw new Error(message);
+      var e = new Error(message);
+      e.pesanLayanan = true;
+      throw e;
     });
   }
 
@@ -232,8 +234,10 @@
         setStatus(msg, 'ok');
       })
       .catch(function (error) {
-        var errText = error && error.message ? error.message : 'Gagal menghitung kata.';
-        setStatus(errText, 'error');
+        var msg = (error && error.pesanLayanan === true && error.message)
+          ? error.message
+          : 'Koneksi ke layanan gagal. Coba lagi sebentar lagi.';
+        setStatus(msg, 'error');
       })
       .then(function () {
         state.busy = false;
