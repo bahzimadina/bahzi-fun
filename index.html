@@ -13,7 +13,7 @@
   <meta name="omnitools-server-base" content="">
 
   <title>OmniTools: 33 alat harian | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, dan Kalkulator persen sudah bisa dipakai. Sisa 21 alat lain masih disiapkan.">
+  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
   <!-- Google tag (gtag.js) + Consent Mode v2.
@@ -43,13 +43,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
   <meta property="og:title" content="OmniTools: 33 alat harian">
-  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, dan Kalkulator persen sudah bisa dipakai. Sisa 21 alat lain masih disiapkan.">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OmniTools: 33 alat harian">
-  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, dan Kalkulator persen sudah bisa dipakai. Sisa 21 alat lain masih disiapkan.">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -167,7 +167,7 @@
 
         <div class="tools__head">
           <h1 class="tools__title" id="alat-title">33 alat buat kerja harian</h1>
-          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, dan Kalkulator persen sudah bisa dipakai. Sisa 21 alat lain masih disiapkan.</p>
+          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
@@ -1071,6 +1071,111 @@
           </div>
         </section>
 
+        <!-- Panel alat: Rapikan & periksa JSON. Tampil inline di alur halaman: dibuka lewat
+             tombol "Buka alat" pada kartu Rapikan & periksa JSON, ditutup lewat tombol
+             Tutup atau Esc. Teks JSON diproses di memori lalu dibuang, tidak disimpan di disk. -->
+        <section class="tool-panel" id="json-panel" hidden tabindex="-1" aria-labelledby="json-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="json-title">Rapikan &amp; periksa JSON</h2>
+              <p class="tool-panel__sub" id="json-limits">Maks 400.000 karakter (1 MB), kedalaman 120</p>
+            </div>
+            <button class="tool-panel__close" id="json-close" type="button" aria-label="Tutup panel rapikan dan periksa JSON">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="json-note">Teks JSON diproses di memori server lalu dibuang, tidak disimpan di disk.</p>
+
+          <div class="js__controls">
+            <div class="js__field">
+              <label class="js__label" for="json-input">Teks JSON</label>
+              <textarea class="js__textarea" id="json-input" rows="8" placeholder='Tempel teks JSON di sini, mis. {"nama": "Budi", "skor": 100}...' spellcheck="false" autocomplete="off" aria-describedby="json-input-hint"></textarea>
+              <span class="js__hint-text" id="json-input-hint">Tempel teks JSON dari berkas, log, atau aplikasi lain untuk diperiksa dan dirapikan.</span>
+            </div>
+
+            <div class="js__row">
+              <div class="js__field">
+                <label class="js__label" for="json-mode">Mode pemrosesan</label>
+                <select class="js__select" id="json-mode">
+                  <option value="rapikan" selected>Rapikan (beri jarak &amp; baris baru)</option>
+                  <option value="padatkan">Padatkan jadi satu baris</option>
+                  <option value="periksa">Periksa saja (tidak diubah)</option>
+                </select>
+              </div>
+
+              <div class="js__field" id="json-indent-group">
+                <label class="js__label" for="json-indent">Indentasi (khusus mode rapikan)</label>
+                <select class="js__select" id="json-indent">
+                  <option value="2" selected>2 spasi</option>
+                  <option value="4">4 spasi</option>
+                  <option value="tab">Tab</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="js__switches">
+              <label class="js__switch-label" for="json-sort-keys">
+                <input type="checkbox" id="json-sort-keys">
+                <span>Urutkan kunci menurut abjad</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="json-status" role="status" aria-live="polite">Tempel teks JSON di atas, pilih mode yang diinginkan, lalu tekan "Proses".</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="json-clear" type="button" disabled>Kosongkan</button>
+              <button class="btn btn--primary" id="json-submit" type="button" disabled>Proses</button>
+            </div>
+          </div>
+
+          <div class="js__results" id="json-results" aria-live="polite">
+            <p class="js__hint" id="json-hint">Hasil pemrosesan JSON akan muncul di sini.</p>
+            <div class="js__output-wrap" id="json-output-wrap" hidden>
+              <div class="js__stats" id="json-stats" hidden>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Baris</span>
+                  <span class="js__stat-value" id="json-stat-lines">0 &rarr; 0</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Karakter</span>
+                  <span class="js__stat-value" id="json-stat-chars">0 &rarr; 0</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Ukuran</span>
+                  <span class="js__stat-value" id="json-stat-bytes">0 B</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Kedalaman</span>
+                  <span class="js__stat-value" id="json-stat-depth">0</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Jumlah kunci</span>
+                  <span class="js__stat-value" id="json-stat-keys">0</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Jumlah item</span>
+                  <span class="js__stat-value" id="json-stat-items">0</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Jumlah daun</span>
+                  <span class="js__stat-value" id="json-stat-leaves">0</span>
+                </div>
+                <div class="js__stat-card">
+                  <span class="js__stat-label">Tipe akar</span>
+                  <span class="js__stat-value" id="json-stat-root">-</span>
+                </div>
+              </div>
+              <label class="js__label" for="json-output">Hasil JSON</label>
+              <textarea class="js__textarea js__output" id="json-output" rows="10" readonly spellcheck="false"></textarea>
+              <p class="js__note-result" id="json-note-result" hidden></p>
+              <div class="tool-panel__actions js__output-actions">
+                <button class="btn btn--ghost" id="json-copy" type="button">Salin hasil</button>
+                <button class="btn btn--primary" id="json-download" type="button">Unduh .json</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="tools__grid" id="tools-grid"></div>
         <p class="tools__empty" id="tools-empty" hidden aria-live="polite">
           Tidak ada alat yang cocok dengan pencarianmu.
@@ -1263,7 +1368,7 @@
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, dan Kalkulator persen sudah bisa dipakai. Sisa 21 alat lain masih disiapkan.</p>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.</p>
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
@@ -1286,5 +1391,6 @@
   <script src="assets/tool-text-formatter.js?v=__V__" defer></script>
   <script src="assets/tool-unit-converter.js?v=__V__" defer></script>
   <script src="assets/tool-percent-calc.js?v=__V__" defer></script>
+  <script src="assets/tool-json.js?v=__V__" defer></script>
 </body>
 </html>

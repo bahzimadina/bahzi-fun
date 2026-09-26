@@ -2328,6 +2328,178 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .2rem;
 }
 
+/* ================= Panel: Rapikan & periksa JSON ================= */
+.js__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+.js__field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-width: 0;
+  width: 100%;
+}
+.js__field--disabled {
+  opacity: .5;
+}
+.js__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: .15rem;
+}
+.js__textarea {
+  width: 100%;
+  padding: .75rem .9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .95rem;
+  line-height: 1.5;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.js__textarea:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.js__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 480px) {
+  .js__row {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+}
+.js__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: .9rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 0;
+}
+.js__select:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.js__switches {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.js__switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  font-size: .88rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.js__switch-label input[type="checkbox"] {
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+.js__hint-text {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.js__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+.js__hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.js__hint[hidden] {
+  display: none;
+}
+.js__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.js__output-wrap[hidden] {
+  display: none;
+}
+.js__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: .6rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.js__stats[hidden] {
+  display: none;
+}
+.js__stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.js__stat-label {
+  font-size: .76rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  font-weight: 600;
+}
+.js__stat-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+.js__output {
+  min-height: 180px;
+}
+.js__note-result {
+  font-size: .88rem;
+  color: var(--brand-text);
+  margin: 0;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.js__note-result[hidden] {
+  display: none;
+}
+.js__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
 /* ================= Target sentuh di perangkat sentuh ================= */
 @media (pointer: coarse) {
   #remove-duplicates-input,
@@ -2386,7 +2558,19 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #percent-calc-copy,
   #percent-calc-download,
   #percent-calc-close,
-  #percent-calc-panel label {
+  #percent-calc-panel label,
+  #json-input,
+  #json-output,
+  #json-mode,
+  #json-indent,
+  #json-submit,
+  #json-clear,
+  #json-copy,
+  #json-download,
+  #json-close,
+  #json-panel label,
+  #json-panel .js__switch-label,
+  #json-panel .js__switch-label input {
     min-height: 44px;
     min-width: 44px;
   }

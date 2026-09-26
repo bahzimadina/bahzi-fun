@@ -250,6 +250,26 @@ from app.percent_calc import (
     limits_payload as percent_calc_limits_payload_func,
     parse_number as parse_percent_number,
 )
+from app.json_tool import (
+    CHUNK_SIZE as JT_CHUNK_SIZE,
+    INDENTS as JT_INDENTS,
+    INVALID_BOOLEAN as JT_INVALID_BOOLEAN,
+    INVALID_INDENT as JT_INVALID_INDENT,
+    INVALID_JSON as JT_INVALID_JSON,
+    INVALID_REQUEST as JT_INVALID_REQUEST,
+    MAX_BYTES as JT_MAX_BYTES,
+    MAX_CHARS as JT_MAX_CHARS,
+    MAX_DEPTH as JT_MAX_DEPTH,
+    MODES as JT_MODES,
+    NO_TEXT as JT_NO_TEXT,
+    PAYLOAD_TOO_LARGE as JT_PAYLOAD_TOO_LARGE,
+    TOO_DEEP as JT_TOO_DEEP,
+    TOO_LONG as JT_TOO_LONG,
+    UNSUPPORTED_MODE as JT_UNSUPPORTED_MODE,
+    JsonToolError,
+    limits_payload as json_limits_payload_func,
+    proses_json,
+)
 
 
 SKIPPED: list[str] = []
@@ -3664,6 +3684,287 @@ def test_http_percent_calc_root_endpoint_dan_regresi() -> None:
 
     wc_limits = client.get("/api/word-count/limits")
     assert wc_limits.status_code == 200
+
+
+# --- Uji logika dan HTTP alat JSON (Rapikan & periksa JSON) -------------------
+def test_json_tool_logika_murni() -> None:
+    # 1. rapikan: {"b":1,"a":[1,2]} indent 2 -> keluaran berisi baris baru; indent "tab" -> diawali tab
+    res_indent2 = proses_json('{"b":1,"a":[1,2]}', mode="rapikan", indent=2)
+    assert "\n" in res_indent2["keluaran"]["teks"]
+    assert res_indent2["sah"] is True
+    assert res_indent2["mode"] == "rapikan"
+    assert res_indent2["aturan"]["indentasi"] == 2
+    assert res_indent2["keluaran"]["banyak_baris_ditambah"] > 0
+
+    res_tab = proses_json('{"b":1,"a":[1,2]}', mode="rapikan", indent="tab")
+    lines_tab = res_tab["keluaran"]["teks"].splitlines()
+    assert any(line.startswith("\t") for line in lines_tab)
+    assert res_tab["aturan"]["indentasi"] == "tab"
+
+    # 2. urutkan_kunci=true -> kunci jadi urut (a sebelum b)
+    res_sorted = proses_json('{"b":1,"a":[1,2]}', mode="rapikan", indent=2, urutkan_kunci=True)
+    text_sorted = res_sorted["keluaran"]["teks"]
+    pos_a = text_sorted.find('"a"')
+    pos_b = text_sorted.find('"b"')
+    assert pos_a != -1 and pos_b != -1 and pos_a < pos_b
+
+    # 3. padatkan -> keluaran sama dengan json.dumps(..., separators=(",",":"), ensure_ascii=False)
+    sample_obj = {"nama": "Ayu", "angka": [1, 2, 3], "aktif": True}
+    sample_raw = json.dumps(sample_obj)
+    res_compact = proses_json(sample_raw, mode="padatkan")
+    expected_compact = json.dumps(sample_obj, separators=(",", ":"), ensure_ascii=False)
+    assert res_compact["keluaran"]["teks"] == expected_compact
+    assert res_compact["mode"] == "padatkan"
+
+    # 4. periksa -> keluaran identik dengan masukan walau isinya berantakan spasinya
+    messy_json = '  {   "b" :  1 ,  \n\n  "a" : [ 1 , 2 ] }  '
+    res_check = proses_json(messy_json, mode="periksa")
+    assert res_check["keluaran"]["teks"] == messy_json
+    assert res_check["sah"] is True
+
+    # 5. teks kosong -> 400 NO_TEXT
+    for empty in ["", "   ", "\n\t  \n"]:
+        try:
+            proses_json(empty)
+            assert False, "Harusnya melempar JsonToolError(NO_TEXT)"
+        except JsonToolError as exc:
+            assert exc.code == JT_NO_TEXT
+            assert exc.status_code == 400
+
+    # 6. bukan JSON ("halo dunia") -> 400 INVALID_JSON dan pesannya memuat "Baris"
+    try:
+        proses_json("halo dunia")
+        assert False, "Harusnya melempar JsonToolError(INVALID_JSON)"
+    except JsonToolError as exc:
+        assert exc.code == JT_INVALID_JSON
+        assert exc.status_code == 400
+        assert "Baris" in exc.message
+        assert exc.detail is not None
+        assert "baris" in exc.detail and "kolom" in exc.detail and "offset" in exc.detail
+
+    # 7. JSON terpotong (mis. '{"a": 1,') -> 400 INVALID_JSON
+    try:
+        proses_json('{"a": 1,')
+        assert False, "Harusnya melempar JsonToolError(INVALID_JSON)"
+    except JsonToolError as exc:
+        assert exc.code == JT_INVALID_JSON
+        assert exc.status_code == 400
+        assert "Baris" in exc.message
+
+    # 8. mode tidak dikenal -> 400 UNSUPPORTED_MODE; indent tidak dikenal -> 400 INVALID_INDENT
+    try:
+        proses_json('{"a": 1}', mode="acak")
+        assert False, "Harusnya melempar JsonToolError(UNSUPPORTED_MODE)"
+    except JsonToolError as exc:
+        assert exc.code == JT_UNSUPPORTED_MODE
+        assert exc.status_code == 400
+
+    for bad_indent in [3, 8, "8", "spasi"]:
+        try:
+            proses_json('{"a": 1}', indent=bad_indent)
+            assert False, f"Harusnya melempar JsonToolError(INVALID_INDENT) untuk {bad_indent}"
+        except JsonToolError as exc:
+            assert exc.code == JT_INVALID_INDENT
+            assert exc.status_code == 400
+
+    # 9. terlalu panjang (> MAX_CHARS) -> 413 TOO_LONG
+    long_json = "[" + "1," * JT_MAX_CHARS + "1]"
+    try:
+        proses_json(long_json)
+        assert False, "Harusnya melempar JsonToolError(TOO_LONG)"
+    except JsonToolError as exc:
+        assert exc.code == JT_TOO_LONG
+        assert exc.status_code == 413
+
+    # 10. JSON bersarang sangat dalam (> MAX_DEPTH) -> 400 TOO_DEEP (bukan 500)
+    deep_json = "[" * (JT_MAX_DEPTH + 5) + "1" + "]" * (JT_MAX_DEPTH + 5)
+    try:
+        proses_json(deep_json)
+        assert False, "Harusnya melempar JsonToolError(TOO_DEEP)"
+    except JsonToolError as exc:
+        assert exc.code == JT_TOO_DEEP
+        assert exc.status_code == 400
+
+    # 11. karakter non-ASCII (mis. {"nama":"Ayu — café"}) tetap utuh setelah rapikan (ensure_ascii=False)
+    unicode_json = '{"nama":"Ayu — café"}'
+    res_unicode = proses_json(unicode_json, mode="rapikan")
+    assert "Ayu — café" in res_unicode["keluaran"]["teks"]
+    assert r"\u" not in res_unicode["keluaran"]["teks"]
+
+    # 12. limits_payload() -> 200 format
+    limits = json_limits_payload_func()
+    assert limits["max_bytes"] == JT_MAX_BYTES
+    assert limits["max_chars"] == JT_MAX_CHARS
+    assert isinstance(limits["modes"], list)
+    assert len(limits["modes"]) == 3
+
+
+def test_http_json_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/json/limits")
+    assert resp.status_code == 200, resp.text
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert data["max_bytes"] == JT_MAX_BYTES
+    assert data["max_chars"] == JT_MAX_CHARS
+    assert "max_mb" in data
+    assert "max_depth" in data
+    assert "modes" in data
+    assert isinstance(data["modes"], list)
+    assert len(data["modes"]) == 3
+    assert data["processed_on"] == "server"
+
+
+def test_http_json_modes_dan_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # rapikan indent 2
+    resp_rapikan = client.post(
+        "/api/json",
+        data={"text": '{"b":1,"a":[1,2]}', "mode": "rapikan", "indent": "2"},
+    )
+    assert resp_rapikan.status_code == 200, resp_rapikan.text
+    data_r = resp_rapikan.json()
+    assert "\n" in data_r["keluaran"]["teks"]
+    assert data_r["sah"] is True
+    assert "no-store" in resp_rapikan.headers.get("Cache-Control", "")
+    assert resp_rapikan.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in resp_rapikan.headers
+
+    # rapikan indent tab
+    resp_tab = client.post(
+        "/api/json",
+        data={"text": '{"b":1,"a":[1,2]}', "mode": "rapikan", "indent": "tab"},
+    )
+    assert resp_tab.status_code == 200, resp_tab.text
+    data_tab = resp_tab.json()
+    lines_tab = data_tab["keluaran"]["teks"].splitlines()
+    assert any(line.startswith("\t") for line in lines_tab)
+
+    # urutkan_kunci=true
+    resp_sort = client.post(
+        "/api/json",
+        data={
+            "text": '{"b":1,"a":[1,2]}',
+            "mode": "rapikan",
+            "indent": "2",
+            "urutkan_kunci": "true",
+        },
+    )
+    assert resp_sort.status_code == 200, resp_sort.text
+    out_sort = resp_sort.json()["keluaran"]["teks"]
+    assert out_sort.find('"a"') < out_sort.find('"b"')
+
+    # padatkan
+    sample = '{\n  "b": 1,\n  "a": [1, 2]\n}'
+    resp_padat = client.post(
+        "/api/json",
+        data={"text": sample, "mode": "padatkan"},
+    )
+    assert resp_padat.status_code == 200, resp_padat.text
+    expected = json.dumps(json.loads(sample), separators=(",", ":"), ensure_ascii=False)
+    assert resp_padat.json()["keluaran"]["teks"] == expected
+
+    # periksa (teks tidak berubah)
+    messy = '  {  "x" : 123  }  '
+    resp_periksa = client.post(
+        "/api/json",
+        data={"text": messy, "mode": "periksa"},
+    )
+    assert resp_periksa.status_code == 200, resp_periksa.text
+    assert resp_periksa.json()["keluaran"]["teks"] == messy
+
+    # non-ASCII
+    non_ascii = '{"nama":"Ayu — café"}'
+    resp_na = client.post(
+        "/api/json",
+        data={"text": non_ascii, "mode": "rapikan"},
+    )
+    assert resp_na.status_code == 200, resp_na.text
+    assert "Ayu — café" in resp_na.json()["keluaran"]["teks"]
+
+
+def test_http_json_galat_dan_validasi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Field text kurang -> 400 INVALID_REQUEST
+    resp_missing = client.post("/api/json", data={"mode": "rapikan"})
+    assert resp_missing.status_code == 400, resp_missing.text
+    assert resp_missing.json()["error"]["code"] == JT_INVALID_REQUEST
+
+    # Teks kosong -> 400 NO_TEXT
+    resp_empty = client.post("/api/json", data={"text": "   ", "mode": "rapikan"})
+    assert resp_empty.status_code == 400, resp_empty.text
+    assert resp_empty.json()["error"]["code"] == JT_NO_TEXT
+
+    # Bukan JSON -> 400 INVALID_JSON dan pesan memuat "Baris"
+    resp_invalid = client.post("/api/json", data={"text": "halo dunia", "mode": "rapikan"})
+    assert resp_invalid.status_code == 400, resp_invalid.text
+    err_inv = resp_invalid.json()["error"]
+    assert err_inv["code"] == JT_INVALID_JSON
+    assert "Baris" in err_inv["message"]
+    assert "posisi" in err_inv
+    assert "baris" in err_inv["posisi"]
+    assert "kolom" in err_inv["posisi"]
+
+    # JSON terpotong -> 400 INVALID_JSON
+    resp_cut = client.post("/api/json", data={"text": '{"a": 1,', "mode": "rapikan"})
+    assert resp_cut.status_code == 400, resp_cut.text
+    assert resp_cut.json()["error"]["code"] == JT_INVALID_JSON
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    resp_bad_mode = client.post("/api/json", data={"text": '{"a": 1}', "mode": "aneh"})
+    assert resp_bad_mode.status_code == 400, resp_bad_mode.text
+    assert resp_bad_mode.json()["error"]["code"] == JT_UNSUPPORTED_MODE
+
+    # Indent tidak dikenal -> 400 INVALID_INDENT
+    resp_bad_indent = client.post("/api/json", data={"text": '{"a": 1}', "indent": "8"})
+    assert resp_bad_indent.status_code == 400, resp_bad_indent.text
+    assert resp_bad_indent.json()["error"]["code"] == JT_INVALID_INDENT
+
+    # Terlalu panjang -> 413 TOO_LONG
+    long_payload = "[" + "1," * JT_MAX_CHARS + "1]"
+    resp_long = client.post("/api/json", data={"text": long_payload})
+    assert resp_long.status_code == 413, resp_long.text
+    assert resp_long.json()["error"]["code"] == JT_TOO_LONG
+
+    # Bersarang sangat dalam -> 400 TOO_DEEP
+    deep_payload = "[" * (JT_MAX_DEPTH + 10) + "1" + "]" * (JT_MAX_DEPTH + 10)
+    resp_deep = client.post("/api/json", data={"text": deep_payload})
+    assert resp_deep.status_code == 400, resp_deep.text
+    assert resp_deep.json()["error"]["code"] == JT_TOO_DEEP
+
+    # Bukan multipart/form-data -> 400 INVALID_REQUEST
+    resp_bad_req = client.post("/api/json", json={"text": '{"a": 1}'})
+    assert resp_bad_req.status_code == 400, resp_bad_req.text
+    assert resp_bad_req.json()["error"]["code"] == JT_INVALID_REQUEST
+
+
+def test_http_json_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root endpoint berisi "json"
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "json" in root_data["tools"]
+    assert "percent-calc" in root_data["tools"]
+
+    # Regresi endpoint lain
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200
+
+    pc_limits = client.get("/api/percent-calc/limits")
+    assert pc_limits.status_code == 200
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

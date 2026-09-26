@@ -86,7 +86,7 @@
       name: 'Data',
       icon: 'icon-data',
       tools: [
-        { name: 'JSON Formatter & Validator', desc: 'Bereskan dan validasi struktur JSON.', status: 'soon' },
+        { name: 'Rapikan & periksa JSON', desc: 'Periksa, rapikan, atau padatkan JSON.', status: 'available', action: 'json' },
         { name: 'CSV Tools', desc: 'Lihat, sunting, dan konversi berkas CSV.', status: 'soon' },
         { name: 'XML Tools', desc: 'Format dan validasi dokumen XML.', status: 'soon' },
         { name: 'Base64 Encoder/Decoder', desc: 'Ubah teks jadi Base64 dan sebaliknya, termasuk varian aman tautan.', status: 'available', action: 'base64' },

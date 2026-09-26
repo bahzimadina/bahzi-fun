@@ -189,6 +189,26 @@ from .percent_calc import (
     compute_percent,
     limits_payload as percent_calc_limits_payload_func,
 )
+from .json_tool import (
+    CHUNK_SIZE as JT_CHUNK_SIZE,
+    INDENTS as JT_INDENTS,
+    INVALID_BOOLEAN as JT_INVALID_BOOLEAN,
+    INVALID_INDENT as JT_INVALID_INDENT,
+    INVALID_JSON as JT_INVALID_JSON,
+    INVALID_REQUEST as JT_INVALID_REQUEST,
+    MAX_BYTES as JT_MAX_BYTES,
+    MAX_CHARS as JT_MAX_CHARS,
+    MAX_DEPTH as JT_MAX_DEPTH,
+    MODES as JT_MODES,
+    NO_TEXT as JT_NO_TEXT,
+    PAYLOAD_TOO_LARGE as JT_PAYLOAD_TOO_LARGE,
+    TOO_DEEP as JT_TOO_DEEP,
+    TOO_LONG as JT_TOO_LONG,
+    UNSUPPORTED_MODE as JT_UNSUPPORTED_MODE,
+    JsonToolError,
+    limits_payload as JT_LIMITS_PAYLOAD,
+    proses_json,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -343,6 +363,20 @@ async def handle_percent_calc_error(request: Request, exc: PercentCalcError) -> 
     )
 
 
+@app.exception_handler(JsonToolError)
+async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONResponse:
+    """Error alat JSON yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("alat json ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    content = exc.to_dict()
+    if exc.detail and "posisi" not in content.get("error", {}):
+        content.setdefault("error", {})["posisi"] = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
@@ -361,6 +395,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
     elif request.url.path.startswith("/api/percent-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
+    elif request.url.path.startswith("/api/json"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/word-count"):
@@ -813,6 +849,27 @@ def _reject_oversized_percent_content_length(request: Request) -> None:
 
 def _percent_calc_limits_payload() -> dict:
     return percent_calc_limits_payload_func()
+
+
+def _reject_oversized_json_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat JSON."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > JT_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise JsonToolError(
+            JT_PAYLOAD_TOO_LARGE,
+            f"Ukuran permintaan melebihi batas {JT_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+def _json_limits_payload() -> dict:
+    return JT_LIMITS_PAYLOAD()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -1547,6 +1604,79 @@ async def percent_calc_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/json/limits")
+async def json_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Rapikan & periksa JSON."""
+    return JSONResponse(content=_json_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/json")
+async def json_endpoint(
+    request: Request,
+    text: str = Form(default=None),
+    mode: str = Form(default="rapikan"),
+    indent: str = Form(default="2"),
+    urutkan_kunci: str = Form(default="false"),
+):
+    """Rapikan, padatkan, atau periksa JSON di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_json_content_length(request)
+
+    form = await request.form()
+    if text is None and "text" in form:
+        text = form.get("text")
+    if "mode" in form:
+        mode = form.get("mode")
+    if "indent" in form:
+        indent = form.get("indent")
+    if "urutkan_kunci" in form:
+        urutkan_kunci = form.get("urutkan_kunci")
+
+    if text is None:
+        raise JsonToolError(
+            JT_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'.",
+            400,
+        )
+
+    if (
+        isinstance(text, UploadFile)
+        or isinstance(mode, UploadFile)
+        or isinstance(indent, UploadFile)
+        or isinstance(urutkan_kunci, UploadFile)
+    ):
+        raise JsonToolError(
+            JT_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = proses_json(
+        text=text,
+        mode=mode,
+        indent=indent,
+        urutkan_kunci=urutkan_kunci,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat isi teks pengguna ke log — cukup mode, chars masuk/keluar, dan durasi.
+    logger.info(
+        "proses json selesai: mode=%s chars_in=%d chars_out=%d durasi=%.0fms",
+        result["mode"],
+        result["masukan"]["chars"],
+        result["keluaran"]["chars"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1566,6 +1696,7 @@ async def root() -> dict:
             "text-formatter",
             "unit-convert",
             "percent-calc",
+            "json",
         ],
     }
 
