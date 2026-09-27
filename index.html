@@ -13,7 +13,7 @@
   <meta name="omnitools-server-base" content="">
 
   <title>OmniTools: 33 alat harian | bahzi.fun</title>
-  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.">
+  <meta name="description" content="OmniTools dari bahzi.fun: 33 alat harian untuk PDF, gambar/video/audio, teks, tanggal, matematika, data, dan AI. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan & periksa JSON, dan Kalkulator tanggal sudah bisa dipakai. Sisa 19 alat lain masih disiapkan.">
   <link rel="canonical" href="https://bahzi.fun/">
 
   <!-- Google tag (gtag.js) + Consent Mode v2.
@@ -43,13 +43,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="bahzi.fun">
   <meta property="og:title" content="OmniTools: 33 alat harian">
-  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.">
+  <meta property="og:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan & periksa JSON, dan Kalkulator tanggal sudah bisa dipakai. Sisa 19 alat lain masih disiapkan.">
   <meta property="og:url" content="https://bahzi.fun/">
   <meta property="og:locale" content="id_ID">
 
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="OmniTools: 33 alat harian">
-  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.">
+  <meta name="twitter:description" content="Kumpulan alat harian di satu halaman. Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan & periksa JSON, dan Kalkulator tanggal sudah bisa dipakai. Sisa 19 alat lain masih disiapkan.">
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
 
@@ -167,7 +167,7 @@
 
         <div class="tools__head">
           <h1 class="tools__title" id="alat-title">33 alat buat kerja harian</h1>
-          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.</p>
+          <p class="tools__lead">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan & periksa JSON, dan Kalkulator tanggal sudah bisa dipakai. Sisa 19 alat lain masih disiapkan.</p>
         </div>
 
         <!-- Toolbar sticky: pencarian + filter + counter -->
@@ -1176,6 +1176,95 @@
           </div>
         </section>
 
+        <!-- Panel alat: Kalkulator tanggal. Tampil inline di alur halaman: dibuka lewat
+             tombol "Buka alat" pada kartu Date Calculator, ditutup lewat tombol
+             Tutup atau Esc. Perhitungan diproses di memori lalu dibuang, tidak disimpan di disk. -->
+        <section class="tool-panel" id="date-calc-panel" hidden tabindex="-1" aria-labelledby="date-calc-title">
+          <div class="tool-panel__head">
+            <div>
+              <h2 class="tool-panel__title" id="date-calc-title">Kalkulator tanggal</h2>
+              <p class="tool-panel__sub" id="date-calc-limits">Rentang tahun 1900 sampai 2100</p>
+            </div>
+            <button class="tool-panel__close" id="date-calc-close" type="button" aria-label="Tutup panel kalkulator tanggal">Tutup</button>
+          </div>
+
+          <p class="tool-panel__note" id="date-calc-note">Perhitungan dilakukan di memori lalu dibuang, tidak disimpan di disk.</p>
+
+          <div class="dc__controls">
+            <div class="dc__field dc__field--mode">
+              <label class="dc__label" for="date-calc-mode">Mode perhitungan</label>
+              <select class="dc__select" id="date-calc-mode">
+                <!-- Diisi dari limits -->
+              </select>
+            </div>
+
+            <div class="dc__inputs-row" id="date-calc-dates-row">
+              <div class="dc__field dc__field--a" id="date-calc-field-a">
+                <label class="dc__label" id="date-calc-label-a" for="date-calc-input-a">Tanggal awal</label>
+                <input class="dc__input" type="date" id="date-calc-input-a" min="1900-01-01" max="2100-12-31">
+              </div>
+
+              <div class="dc__field dc__field--b" id="date-calc-field-b">
+                <div class="dc__label-row">
+                  <label class="dc__label" id="date-calc-label-b" for="date-calc-input-b">Tanggal akhir</label>
+                  <button class="btn btn--ghost dc__btn-today" id="date-calc-today" type="button" hidden>Pakai hari ini</button>
+                </div>
+                <input class="dc__input" type="date" id="date-calc-input-b" min="1900-01-01" max="2100-12-31">
+              </div>
+            </div>
+
+            <div class="dc__inputs-row dc__inputs-row--tambah-kurang" id="date-calc-tambah-kurang-row" hidden>
+              <div class="dc__field" id="date-calc-amount-group">
+                <label class="dc__label" id="date-calc-label-amount" for="date-calc-amount">Jumlah</label>
+                <input class="dc__input" type="number" id="date-calc-amount" min="0" max="100000" value="7">
+              </div>
+
+              <div class="dc__field" id="date-calc-unit-group">
+                <label class="dc__label" id="date-calc-label-unit" for="date-calc-unit">Satuan</label>
+                <select class="dc__select" id="date-calc-unit"></select>
+              </div>
+
+              <div class="dc__field" id="date-calc-direction-group">
+                <label class="dc__label" id="date-calc-label-direction" for="date-calc-direction">Arah</label>
+                <select class="dc__select" id="date-calc-direction"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-panel__foot">
+            <p class="status" id="date-calc-status" role="status" aria-live="polite">Pilih mode, masukkan tanggal, lalu tekan "Hitung".</p>
+            <div class="tool-panel__actions">
+              <button class="btn btn--ghost" id="date-calc-clear" type="button" disabled>Kosongkan</button>
+              <button class="btn btn--primary" id="date-calc-submit" type="button" disabled>Hitung</button>
+            </div>
+          </div>
+
+          <div class="dc__results" id="date-calc-results" aria-live="polite">
+            <p class="dc__hint" id="date-calc-result-hint">Hasil perhitungan akan muncul di sini.</p>
+            <div class="dc__output-wrap" id="date-calc-output-wrap" hidden>
+              <div class="dc__hero">
+                <div class="dc__hero-main">
+                  <span class="dc__hero-value" id="date-calc-hero-value"></span>
+                  <span class="dc__hero-symbol" id="date-calc-hero-symbol"></span>
+                </div>
+                <p class="dc__sentence" id="date-calc-sentence"></p>
+                <p class="dc__formula" id="date-calc-formula" hidden></p>
+                <p class="dc__note" id="date-calc-catatan" hidden></p>
+              </div>
+
+              <div class="dc__details-wrap">
+                <h3 class="dc__details-title">Rincian perhitungan</h3>
+                <div class="dc__details-grid" id="date-calc-details"></div>
+              </div>
+
+              <div class="tool-panel__actions dc__output-actions">
+                <button class="btn btn--ghost" id="date-calc-copy" type="button">Salin hasil</button>
+                <button class="btn btn--primary" id="date-calc-download" type="button">Unduh hasil .txt</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="tools__grid" id="tools-grid"></div>
         <p class="tools__empty" id="tools-empty" hidden aria-live="polite">
           Tidak ada alat yang cocok dengan pencarianmu.
@@ -1368,7 +1457,7 @@
         Kembali ke atas
       </a>
     </div>
-    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, dan Rapikan & periksa JSON sudah bisa dipakai. Sisa 20 alat lain masih disiapkan.</p>
+    <p class="footer__note container">Penggabung PDF, Ubah ukuran gambar, Konversi gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan & periksa JSON, dan Kalkulator tanggal sudah bisa dipakai. Sisa 19 alat lain masih disiapkan.</p>
   </footer>
 
   <div class="cookiebar" id="cookiebar" hidden>
@@ -1392,5 +1481,6 @@
   <script src="assets/tool-unit-converter.js?v=__V__" defer></script>
   <script src="assets/tool-percent-calc.js?v=__V__" defer></script>
   <script src="assets/tool-json.js?v=__V__" defer></script>
+  <script src="assets/tool-date-calc.js?v=__V__" defer></script>
 </body>
 </html>

@@ -209,6 +209,27 @@ from .json_tool import (
     limits_payload as JT_LIMITS_PAYLOAD,
     proses_json,
 )
+from .date_calc import (
+    DIRECTIONS as DC_DIRECTIONS,
+    INVALID_AMOUNT as DC_INVALID_AMOUNT,
+    INVALID_DATE as DC_INVALID_DATE,
+    INVALID_DIRECTION as DC_INVALID_DIRECTION,
+    INVALID_REQUEST as DC_INVALID_REQUEST,
+    INVALID_UNIT as DC_INVALID_UNIT,
+    MAX_AMOUNT as DC_MAX_AMOUNT,
+    MAX_INPUT_CHARS as DC_MAX_INPUT_CHARS,
+    MAX_YEAR as DC_MAX_YEAR,
+    MIN_YEAR as DC_MIN_YEAR,
+    MODES as DC_MODES,
+    NO_DATE as DC_NO_DATE,
+    OUT_OF_RANGE as DC_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as DC_PAYLOAD_TOO_LARGE,
+    UNITS as DC_UNITS,
+    UNSUPPORTED_MODE as DC_UNSUPPORTED_MODE,
+    DateCalcError,
+    compute_date,
+    limits_payload as date_calc_limits_payload_func,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -377,6 +398,17 @@ async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONRe
     )
 
 
+@app.exception_handler(DateCalcError)
+async def handle_date_calc_error(request: Request, exc: DateCalcError) -> JSONResponse:
+    """Error kalkulator tanggal yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung tanggal ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
@@ -395,6 +427,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
     elif request.url.path.startswith("/api/percent-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
+    elif request.url.path.startswith("/api/date-calc"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/json"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/case"):
@@ -870,6 +904,27 @@ def _reject_oversized_json_content_length(request: Request) -> None:
 
 def _json_limits_payload() -> dict:
     return JT_LIMITS_PAYLOAD()
+
+
+def _reject_oversized_date_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator tanggal."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise DateCalcError(
+            DC_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar.",
+            413,
+        )
+
+
+def _date_calc_limits_payload() -> dict:
+    return date_calc_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -1677,6 +1732,99 @@ async def json_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/date-calc/limits")
+async def date_calc_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Kalkulator Tanggal."""
+    return JSONResponse(content=_date_calc_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/date-calc")
+async def date_calc_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    a: str = Form(default=None),
+    b: str = Form(default=None),
+    amount: str = Form(default=None),
+    unit: str = Form(default=None),
+    direction: str = Form(default=None),
+):
+    """Hitung kalkulator tanggal di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_date_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise DateCalcError(
+            DC_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise DateCalcError(
+            DC_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if a is None and "a" in form:
+        a = form.get("a")
+    if b is None and "b" in form:
+        b = form.get("b")
+    if amount is None and "amount" in form:
+        amount = form.get("amount")
+    if unit is None and "unit" in form:
+        unit = form.get("unit")
+    if direction is None and "direction" in form:
+        direction = form.get("direction")
+
+    if mode is None:
+        raise DateCalcError(
+            DC_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'mode' wajib diisi.",
+            400,
+        )
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (mode, a, b, amount, unit, direction)
+    ):
+        raise DateCalcError(
+            DC_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = compute_date(
+        mode=mode,
+        a=a,
+        b=b,
+        amount=amount,
+        unit=unit,
+        direction=direction,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan tanggal pengguna ke log: cukup mode dan durasi.
+    logger.info(
+        "hitung tanggal selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1697,6 +1845,7 @@ async def root() -> dict:
             "unit-convert",
             "percent-calc",
             "json",
+            "date-calc",
         ],
     }
 

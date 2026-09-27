@@ -2500,6 +2500,210 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .2rem;
 }
 
+/* ================= Panel: Kalkulator Tanggal ================= */
+.dc__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+.dc__field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-width: 0;
+  width: 100%;
+}
+.dc__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+.dc__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: .15rem;
+}
+.dc__btn-today {
+  font-size: .75rem;
+  padding: .15rem .5rem;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--brand-text);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.dc__btn-today:hover {
+  border-color: var(--brand);
+  background: var(--surface);
+}
+.dc__input,
+.dc__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: .9rem;
+  box-sizing: border-box;
+}
+.dc__input[type="date"] {
+  color-scheme: dark;
+}
+.dc__input:focus,
+.dc__select:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.dc__inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.dc__inputs-row--tambah-kurang {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+@media (max-width: 600px) {
+  .dc__inputs-row,
+  .dc__inputs-row--tambah-kurang {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+}
+.dc__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+.dc__hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.dc__hint[hidden] {
+  display: none;
+}
+.dc__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.dc__output-wrap[hidden] {
+  display: none;
+}
+.dc__hero {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.dc__hero-main {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.dc__hero-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+  line-height: 1.15;
+  word-break: break-word;
+}
+.dc__hero-symbol {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--brand-text);
+}
+.dc__sentence {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+.dc__formula {
+  font-size: .88rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin: .15rem 0 0;
+}
+.dc__formula[hidden] {
+  display: none;
+}
+.dc__note {
+  font-size: .82rem;
+  color: var(--brand-text);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+.dc__note[hidden] {
+  display: none;
+}
+.dc__details-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  width: 100%;
+}
+.dc__details-title {
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.dc__details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: .6rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.dc__stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.dc__stat-label {
+  font-size: .76rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  font-weight: 600;
+}
+.dc__stat-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  word-break: break-word;
+}
+.dc__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
 /* ================= Target sentuh di perangkat sentuh ================= */
 @media (pointer: coarse) {
   #remove-duplicates-input,
@@ -2570,7 +2774,20 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #json-close,
   #json-panel label,
   #json-panel .js__switch-label,
-  #json-panel .js__switch-label input {
+  #json-panel .js__switch-label input,
+  #date-calc-mode,
+  #date-calc-input-a,
+  #date-calc-input-b,
+  #date-calc-amount,
+  #date-calc-unit,
+  #date-calc-direction,
+  #date-calc-submit,
+  #date-calc-clear,
+  #date-calc-close,
+  #date-calc-today,
+  #date-calc-copy,
+  #date-calc-download,
+  #date-calc-panel label {
     min-height: 44px;
     min-width: 44px;
   }

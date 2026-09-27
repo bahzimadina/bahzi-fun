@@ -23,6 +23,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+from datetime import date
 from pathlib import Path
 
 API_DIR = Path(__file__).resolve().parent
@@ -269,6 +270,35 @@ from app.json_tool import (
     JsonToolError,
     limits_payload as json_limits_payload_func,
     proses_json,
+)
+from app.date_calc import (
+    DIRECTIONS as DC_DIRECTIONS,
+    HARI as DC_HARI,
+    INVALID_AMOUNT as DC_INVALID_AMOUNT,
+    INVALID_DATE as DC_INVALID_DATE,
+    INVALID_DIRECTION as DC_INVALID_DIRECTION,
+    INVALID_REQUEST as DC_INVALID_REQUEST,
+    INVALID_UNIT as DC_INVALID_UNIT,
+    MAX_AMOUNT as DC_MAX_AMOUNT,
+    MAX_INPUT_CHARS as DC_MAX_INPUT_CHARS,
+    MAX_YEAR as DC_MAX_YEAR,
+    MIN_YEAR as DC_MIN_YEAR,
+    MODES as DC_MODES,
+    NO_DATE as DC_NO_DATE,
+    OUT_OF_RANGE as DC_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as DC_PAYLOAD_TOO_LARGE,
+    UNITS as DC_UNITS,
+    UNSUPPORTED_MODE as DC_UNSUPPORTED_MODE,
+    WIB as DC_WIB,
+    DateCalcError,
+    add_months,
+    compute_date,
+    format_date_id,
+    format_date_long_id,
+    hitung_hari_kerja_dan_akhir_pekan,
+    hitung_tahun_bulan_hari,
+    limits_payload as date_calc_limits_payload_func,
+    parse_date,
 )
 
 
@@ -3965,6 +3995,334 @@ def test_http_json_root_endpoint_dan_regresi() -> None:
 
     pc_limits = client.get("/api/percent-calc/limits")
     assert pc_limits.status_code == 200
+
+
+# --- Uji logika dan HTTP Kalkulator Tanggal (Date Calculator) -----------------
+def test_date_calc_logika_murni() -> None:
+    # 1. limits_payload memuat 4 mode, rentang tahun, dan today
+    limits = date_calc_limits_payload_func()
+    assert isinstance(limits["modes"], list)
+    assert len(limits["modes"]) == 4
+    assert limits["min_year"] == DC_MIN_YEAR
+    assert limits["max_year"] == DC_MAX_YEAR
+    assert "today" in limits
+    assert isinstance(limits["today"], str) and len(limits["today"]) == 10
+    assert limits["processed_on"] == "server"
+
+    # 2. Aturan pembacaan tanggal (parse_date)
+    # Spasi ujung dibuang
+    d_clean = parse_date("  2026-09-28  ")
+    assert d_clean.year == 2026 and d_clean.month == 9 and d_clean.day == 28
+
+    # Format DD-MM-YYYY dan DD/MM/YYYY
+    d_id = parse_date("28-09-2026")
+    assert d_id.year == 2026 and d_id.month == 9 and d_id.day == 28
+    d_slash = parse_date("28/09/2026")
+    assert d_slash.year == 2026 and d_slash.month == 9 and d_slash.day == 28
+    d_slash_ymd = parse_date("2026/09/28")
+    assert d_slash_ymd.year == 2026 and d_slash_ymd.month == 9 and d_slash_ymd.day == 28
+
+    # Pemisah campur -> 400 INVALID_DATE
+    try:
+        parse_date("2026-09/28")
+        assert False, "Harusnya melempar INVALID_DATE"
+    except DateCalcError as exc:
+        assert exc.code == DC_INVALID_DATE
+        assert exc.status_code == 400
+
+    # Tahun 2 digit -> 400 INVALID_DATE
+    try:
+        parse_date("28-09-26")
+        assert False, "Harusnya melempar INVALID_DATE"
+    except DateCalcError as exc:
+        assert exc.code == DC_INVALID_DATE
+        assert exc.status_code == 400
+
+    # Tanggal kabisat valid
+    d_leap = parse_date("2024-02-29")
+    assert d_leap.year == 2024 and d_leap.month == 2 and d_leap.day == 29
+
+    # Tanggal kalender tidak valid (2026-02-30) -> 400 INVALID_DATE
+    try:
+        parse_date("2026-02-30")
+        assert False, "Harusnya melempar INVALID_DATE"
+    except DateCalcError as exc:
+        assert exc.code == DC_INVALID_DATE
+        assert exc.status_code == 400
+
+    # Tanggal kosong -> 400 NO_DATE
+    for empty in ["", "   "]:
+        try:
+            parse_date(empty)
+            assert False, "Harusnya melempar NO_DATE"
+        except DateCalcError as exc:
+            assert exc.code == DC_NO_DATE
+            assert exc.status_code == 400
+
+    # Tahun di luar rentang (1899) -> 413 OUT_OF_RANGE
+    try:
+        parse_date("1899-12-31")
+        assert False, "Harusnya melempar OUT_OF_RANGE"
+    except DateCalcError as exc:
+        assert exc.code == DC_OUT_OF_RANGE
+        assert exc.status_code == 413
+        assert "1900" in exc.message and "2100" in exc.message
+
+    # Tahun 2101 -> 413 OUT_OF_RANGE
+    try:
+        parse_date("2101-01-01")
+        assert False, "Harusnya melempar OUT_OF_RANGE"
+    except DateCalcError as exc:
+        assert exc.code == DC_OUT_OF_RANGE
+        assert exc.status_code == 413
+
+    # Spasi ujung dibuang LEBIH DULU, jadi masukan yang hanya panjang karena spasi tetap valid
+    d_padded = parse_date("2026-09-28" + " " * 35)
+    assert d_padded == date(2026, 9, 28)
+
+    # Masukan lebih dari 40 karakter setelah dibersihkan -> 413 OUT_OF_RANGE
+    try:
+        parse_date("2026-09-28" + "9" * 31)
+        assert False, "Harusnya melempar OUT_OF_RANGE"
+    except DateCalcError as exc:
+        assert exc.code == DC_OUT_OF_RANGE
+        assert exc.status_code == 413
+
+    # 3. Mode selisih
+    # 1 Januari 2026 ke 31 Januari 2026 -> 30 hari
+    res_selisih1 = compute_date("selisih", a="2026-01-01", b="2026-01-31")
+    assert res_selisih1["hari"] == 30
+    assert res_selisih1["hari_abs"] == 30
+    assert res_selisih1["minggu"] == 4
+    assert res_selisih1["hari_sisa"] == 2
+    assert res_selisih1["hari_kerja"] == 22
+    assert res_selisih1["akhir_pekan"] == 9
+    assert res_selisih1["hari_kerja"] + res_selisih1["akhir_pekan"] == 31
+    assert "catatan" in res_selisih1
+
+    # 28 Februari 2024 ke 1 Maret 2024 -> 2 hari (tahun kabisat)
+    res_selisih2 = compute_date("selisih", a="2024-02-28", b="2024-03-01")
+    assert res_selisih2["hari"] == 2
+    assert res_selisih2["hari_abs"] == 2
+    assert res_selisih2["hari_kerja"] == 3
+    assert res_selisih2["akhir_pekan"] == 0
+
+    # Urutan terbalik -> nilai bertanda negatif
+    res_selisih_rev = compute_date("selisih", a="2026-01-31", b="2026-01-01")
+    assert res_selisih_rev["hari"] == -30
+    assert res_selisih_rev["hari_abs"] == 30
+    assert res_selisih_rev["hari_kerja"] == 22
+    assert res_selisih_rev["akhir_pekan"] == 9
+
+    # 4. Mode tambah_kurang
+    # 31 Januari 2026 + 1 bulan -> 28 Februari 2026
+    tk1 = compute_date("tambah_kurang", a="2026-01-31", amount=1, unit="bulan", direction="maju")
+    assert tk1["tanggal_hasil"] == "2026-02-28"
+    assert tk1["hari_hasil"] == "Sabtu"
+    assert tk1["selisih_hari"] == 28
+
+    # 31 Januari 2024 + 1 bulan -> 29 Februari 2024 (kabisat)
+    tk2 = compute_date("tambah_kurang", a="2024-01-31", amount=1, unit="bulan", direction="maju")
+    assert tk2["tanggal_hasil"] == "2024-02-29"
+    assert tk2["hari_hasil"] == "Kamis"
+    assert tk2["selisih_hari"] == 29
+
+    # 1 Maret 2026 - 1 bulan -> 1 Februari 2026
+    tk3 = compute_date("tambah_kurang", a="2026-03-01", amount=1, unit="bulan", direction="mundur")
+    assert tk3["tanggal_hasil"] == "2026-02-01"
+    assert tk3["hari_hasil"] == "Minggu"
+
+    # 29 Februari 2024 + 1 tahun -> 28 Februari 2025
+    tk4 = compute_date("tambah_kurang", a="2024-02-29", amount=1, unit="tahun", direction="maju")
+    assert tk4["tanggal_hasil"] == "2025-02-28"
+    assert tk4["hari_hasil"] == "Jumat"
+
+    # + 2 minggu
+    tk5 = compute_date("tambah_kurang", a="2026-01-01", amount=2, unit="minggu", direction="maju")
+    assert tk5["tanggal_hasil"] == "2026-01-15"
+    assert tk5["hari_hasil"] == "Kamis"
+    assert tk5["selisih_hari"] == 14
+
+    # 5. Mode hari_apa
+    # 28 September 2026 -> Senin, hari ke tahun, pekan ISO
+    ha1 = compute_date("hari_apa", a="2026-09-28")
+    assert ha1["hari"] == "Senin"
+    assert ha1["akhir_pekan"] is False
+    assert "Senin, 28 September 2026" in ha1["tanggal_panjang"]
+    assert ha1["hari_ke_tahun"] == 271
+    assert ha1["sisa_hari_tahun"] == 94
+    assert ha1["jumlah_hari_bulan"] == 30
+    assert ha1["pekan_iso"] == 40
+
+    # 26 September 2026 (Sabtu) -> akhir_pekan True
+    ha2 = compute_date("hari_apa", a="2026-09-26")
+    assert ha2["hari"] == "Sabtu"
+    assert ha2["akhir_pekan"] is True
+
+    # 6. Mode usia
+    # 17 Agustus 1990 ke 17 Agustus 2026 -> 36 tahun 0 bulan 0 hari dan penanda Hari ini
+    u1 = compute_date("usia", a="1990-08-17", b="2026-08-17")
+    assert u1["tahun_bulan_hari"] == {"tahun": 36, "bulan": 0, "hari": 0}
+    assert u1["ulang_tahun_berikutnya"]["berapa_hari_lagi"] == "Hari ini"
+
+    # Tanggal acuan lebih awal dari tanggal lahir -> 400 INVALID_DATE
+    try:
+        compute_date("usia", a="2026-08-17", b="1990-08-17")
+        assert False, "Harusnya melempar INVALID_DATE jika acuan lebih awal dari lahir"
+    except DateCalcError as exc:
+        assert exc.code == DC_INVALID_DATE
+        assert exc.status_code == 400
+
+
+def test_http_date_calc_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/date-calc/limits")
+    assert resp.status_code == 200, resp.text
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert isinstance(data["modes"], list)
+    assert len(data["modes"]) == 4
+    assert data["min_year"] == 1900
+    assert data["max_year"] == 2100
+    assert "today" in data
+    assert isinstance(data["today"], str) and len(data["today"]) == 10
+    assert data["processed_on"] == "server"
+
+
+def test_http_date_calc_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Mode selisih
+    resp_selisih = client.post(
+        "/api/date-calc",
+        data={"mode": "selisih", "a": "2026-01-01", "b": "2026-01-31"},
+    )
+    assert resp_selisih.status_code == 200, resp_selisih.text
+    body_s = resp_selisih.json()
+    assert body_s["hari"] == 30
+    assert body_s["hari_abs"] == 30
+    assert "no-store" in resp_selisih.headers.get("Cache-Control", "")
+    assert resp_selisih.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in resp_selisih.headers
+
+    # 2. Mode tambah_kurang
+    resp_tk = client.post(
+        "/api/date-calc",
+        data={
+            "mode": "tambah_kurang",
+            "a": "2026-01-31",
+            "amount": "1",
+            "unit": "bulan",
+            "direction": "maju",
+        },
+    )
+    assert resp_tk.status_code == 200, resp_tk.text
+    assert resp_tk.json()["tanggal_hasil"] == "2026-02-28"
+
+    # 3. Mode hari_apa
+    resp_ha = client.post(
+        "/api/date-calc",
+        data={"mode": "hari_apa", "a": "2026-09-28"},
+    )
+    assert resp_ha.status_code == 200, resp_ha.text
+    assert resp_ha.json()["hari"] == "Senin"
+
+    # 4. Mode usia
+    resp_usia = client.post(
+        "/api/date-calc",
+        data={"mode": "usia", "a": "1990-08-17", "b": "2026-08-17"},
+    )
+    assert resp_usia.status_code == 200, resp_usia.text
+    assert resp_usia.json()["tahun_bulan_hari"]["tahun"] == 36
+
+
+def test_http_date_calc_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tanpa field mode -> 400 INVALID_REQUEST
+    resp_no_mode = client.post("/api/date-calc", data={"a": "2026-01-01"})
+    assert resp_no_mode.status_code == 400, resp_no_mode.text
+    assert resp_no_mode.json()["error"]["code"] == DC_INVALID_REQUEST
+
+    # Tanggal kosong -> 400 NO_DATE
+    resp_empty = client.post("/api/date-calc", data={"mode": "selisih", "a": "   ", "b": "2026-01-31"})
+    assert resp_empty.status_code == 400, resp_empty.text
+    assert resp_empty.json()["error"]["code"] == DC_NO_DATE
+
+    # 2026-02-30 -> 400 INVALID_DATE
+    resp_inv_date = client.post("/api/date-calc", data={"mode": "hari_apa", "a": "2026-02-30"})
+    assert resp_inv_date.status_code == 400, resp_inv_date.text
+    assert resp_inv_date.json()["error"]["code"] == DC_INVALID_DATE
+
+    # 2026-09/28 -> 400 INVALID_DATE
+    resp_mixed = client.post("/api/date-calc", data={"mode": "hari_apa", "a": "2026-09/28"})
+    assert resp_mixed.status_code == 400, resp_mixed.text
+    assert resp_mixed.json()["error"]["code"] == DC_INVALID_DATE
+
+    # Tahun 1899 -> 413 OUT_OF_RANGE
+    resp_range = client.post("/api/date-calc", data={"mode": "hari_apa", "a": "1899-05-10"})
+    assert resp_range.status_code == 413, resp_range.text
+    assert resp_range.json()["error"]["code"] == DC_OUT_OF_RANGE
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    resp_bad_mode = client.post("/api/date-calc", data={"mode": "ngawur", "a": "2026-09-28"})
+    assert resp_bad_mode.status_code == 400, resp_bad_mode.text
+    assert resp_bad_mode.json()["error"]["code"] == DC_UNSUPPORTED_MODE
+
+    # Satuan tidak dikenal -> 400 INVALID_UNIT
+    resp_bad_unit = client.post(
+        "/api/date-calc",
+        data={"mode": "tambah_kurang", "a": "2026-09-28", "amount": "5", "unit": "abad"},
+    )
+    assert resp_bad_unit.status_code == 400, resp_bad_unit.text
+    assert resp_bad_unit.json()["error"]["code"] == DC_INVALID_UNIT
+
+    # Jumlah bukan angka -> 400 INVALID_AMOUNT
+    resp_bad_amt = client.post(
+        "/api/date-calc",
+        data={"mode": "tambah_kurang", "a": "2026-09-28", "amount": "lima", "unit": "hari"},
+    )
+    assert resp_bad_amt.status_code == 400, resp_bad_amt.text
+    assert resp_bad_amt.json()["error"]["code"] == DC_INVALID_AMOUNT
+
+    # Body JSON (bukan multipart) -> 400
+    resp_json = client.post(
+        "/api/date-calc",
+        json={"mode": "selisih", "a": "2026-01-01", "b": "2026-01-31"},
+    )
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == DC_INVALID_REQUEST
+
+
+def test_http_date_calc_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root endpoint memuat date-calc
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "date-calc" in root_data["tools"]
+    assert "percent-calc" in root_data["tools"]
+    assert "json" in root_data["tools"]
+
+    # Regresi endpoint lain
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200
+
+    pc_limits = client.get("/api/percent-calc/limits")
+    assert pc_limits.status_code == 200
+
+    json_limits = client.get("/api/json/limits")
+    assert json_limits.status_code == 200
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------
