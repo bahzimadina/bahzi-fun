@@ -300,6 +300,34 @@ from app.date_calc import (
     limits_payload as date_calc_limits_payload_func,
     parse_date,
 )
+from app.countdown import (
+    DEFAULT_JAM as CD_DEFAULT_JAM,
+    HARI as CD_HARI,
+    INVALID_AMOUNT as CD_INVALID_AMOUNT,
+    INVALID_DATE as CD_INVALID_DATE,
+    INVALID_REQUEST as CD_INVALID_REQUEST,
+    INVALID_TIME as CD_INVALID_TIME,
+    INVALID_UNIT as CD_INVALID_UNIT,
+    MAX_AMOUNT as CD_MAX_AMOUNT,
+    MAX_BYTES as CD_MAX_BYTES,
+    MAX_INPUT_CHARS as CD_MAX_INPUT_CHARS,
+    MAX_YEAR as CD_MAX_YEAR,
+    MIN_YEAR as CD_MIN_YEAR,
+    MODES as CD_MODES,
+    NO_DATE as CD_NO_DATE,
+    OUT_OF_RANGE as CD_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CD_PAYLOAD_TOO_LARGE,
+    SATUAN as CD_SATUAN,
+    UNSUPPORTED_MODE as CD_UNSUPPORTED_MODE,
+    WIB as CD_WIB,
+    CountdownError,
+    compute_countdown,
+    limits_payload as countdown_limits_payload_func,
+    parse_amount as parse_countdown_amount,
+    parse_date as parse_countdown_date,
+    parse_time as parse_countdown_time,
+    parse_unit as parse_countdown_unit,
+)
 
 
 SKIPPED: list[str] = []
@@ -4323,6 +4351,343 @@ def test_http_date_calc_root_endpoint_dan_regresi() -> None:
 
     json_limits = client.get("/api/json/limits")
     assert json_limits.status_code == 200
+
+
+# --- Uji Hitung Mundur (Countdown Timer) -----------------------------------
+def test_logika_countdown_ke_momen_maju() -> None:
+    from datetime import datetime
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=CD_WIB)
+    res = compute_countdown("ke_momen", tanggal="2026-01-05", jam="15:30", now=now)
+    assert res["mode"] == "ke_momen"
+    assert res["zona"] == "WIB (UTC+7)"
+    assert res["server_now"] == "2026-01-01T12:00:00+07:00"
+    assert res["target"] == "2026-01-05T15:30:00+07:00"
+    assert res["lewat"] is False
+    assert res["sisa_detik"] == 358200
+    assert res["lewat_detik"] == 0
+    assert res["hari"] == 4
+    assert res["jam"] == 3
+    assert res["menit"] == 30
+    assert res["detik"] == 0
+    assert res["total_jam"] == 99
+    assert res["total_menit"] == 5970
+    assert res["target_hari"] == "Senin"
+    assert res["target_tanggal"] == "2026-01-05"
+    assert res["target_jam"] == "15:30"
+    assert res["target_tanggal_teks"] == "5 Januari 2026"
+    assert res["target_label"] == "Senin, 5 Januari 2026, 15:30 WIB"
+    assert res["sisa_teks"] == "4 hari 3 jam lagi"
+    assert res["durasi_detik"] == 0
+    assert "catatan" in res
+
+
+def test_logika_countdown_ke_momen_lewat() -> None:
+    from datetime import datetime
+    now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=CD_WIB)
+    res = compute_countdown("ke_momen", tanggal="2026-05-30", jam="10:00", now=now)
+    assert res["mode"] == "ke_momen"
+    assert res["lewat"] is True
+    assert res["sisa_detik"] == 0
+    assert res["lewat_detik"] == 180000
+    assert res["hari"] == 0
+    assert res["jam"] == 0
+    assert res["menit"] == 0
+    assert res["detik"] == 0
+    assert res["total_jam"] == 0
+    assert res["total_menit"] == 0
+    assert res["sisa_teks"].startswith("sudah lewat")
+    assert "Waktu ini sudah lewat" in res["catatan"]
+
+
+def test_logika_countdown_ke_momen_sisa_nol() -> None:
+    from datetime import datetime
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=CD_WIB)
+    res = compute_countdown("ke_momen", tanggal="2026-01-01", jam="12:00", now=now)
+    assert res["mode"] == "ke_momen"
+    assert res["lewat"] is False
+    assert res["sisa_detik"] == 0
+    assert res["lewat_detik"] == 0
+    assert res["sisa_teks"] == "kurang dari 1 detik lagi"
+
+
+def test_logika_countdown_format_tanggal_dan_jam() -> None:
+    from datetime import datetime
+    now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=CD_WIB)
+
+    # Format YYYY-MM-DD
+    r1 = compute_countdown("ke_momen", tanggal="2026-12-31", jam="23:59", now=now)
+    assert r1["target_tanggal"] == "2026-12-31"
+
+    # Format DD-MM-YYYY
+    r2 = compute_countdown("ke_momen", tanggal="31-12-2026", jam="23:59", now=now)
+    assert r2["target_tanggal"] == "2026-12-31"
+
+    # Format DD/MM/YYYY
+    r3 = compute_countdown("ke_momen", tanggal="31/12/2026", jam="23:59", now=now)
+    assert r3["target_tanggal"] == "2026-12-31"
+
+    # Jam default kosong -> 00:00
+    r4 = compute_countdown("ke_momen", tanggal="2026-12-31", jam=None, now=now)
+    assert r4["target_jam"] == "00:00"
+
+    # Pemisah campuran ditolak
+    try:
+        compute_countdown("ke_momen", tanggal="2026-12/31", now=now)
+        assert False, "Harusnya gagal pemisah campuran"
+    except CountdownError as exc:
+        assert exc.code == CD_INVALID_DATE
+
+    # Jam 6:5 ditolak
+    try:
+        compute_countdown("ke_momen", tanggal="2026-12-31", jam="6:5", now=now)
+        assert False, "Harusnya gagal format jam 6:5"
+    except CountdownError as exc:
+        assert exc.code == CD_INVALID_TIME
+
+    # Jam 24:00 ditolak
+    try:
+        compute_countdown("ke_momen", tanggal="2026-12-31", jam="24:00", now=now)
+        assert False, "Harusnya gagal jam 24:00"
+    except CountdownError as exc:
+        assert exc.code == CD_INVALID_TIME
+
+    # Tanggal 30 Februari ditolak
+    try:
+        compute_countdown("ke_momen", tanggal="2026-02-30", now=now)
+        assert False, "Harusnya gagal tanggal 30 Februari"
+    except CountdownError as exc:
+        assert exc.code == CD_INVALID_DATE
+
+    # Tahun 1899 ditolak
+    try:
+        compute_countdown("ke_momen", tanggal="1899-12-31", now=now)
+        assert False, "Harusnya gagal tahun 1899"
+    except CountdownError as exc:
+        assert exc.code == CD_OUT_OF_RANGE
+
+    # Tahun 2101 ditolak
+    try:
+        compute_countdown("ke_momen", tanggal="2101-01-01", now=now)
+        assert False, "Harusnya gagal tahun 2101"
+    except CountdownError as exc:
+        assert exc.code == CD_OUT_OF_RANGE
+
+
+def test_logika_countdown_dari_durasi() -> None:
+    from datetime import datetime
+    now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=CD_WIB)
+
+    # 25 menit
+    d_menit = compute_countdown("dari_durasi", jumlah=25, satuan="menit", now=now)
+    assert d_menit["durasi_detik"] == 1500
+    assert d_menit["total_menit"] == 25
+    assert d_menit["menit"] == 25
+    assert d_menit["jam"] == 0
+    assert d_menit["hari"] == 0
+    assert d_menit["sisa_detik"] == 1500
+
+    # 2 jam
+    d_jam = compute_countdown("dari_durasi", jumlah=2, satuan="jam", now=now)
+    assert d_jam["durasi_detik"] == 7200
+    assert d_jam["total_jam"] == 2
+    assert d_jam["jam"] == 2
+
+    # 3 hari
+    d_hari = compute_countdown("dari_durasi", jumlah=3, satuan="hari", now=now)
+    assert d_hari["durasi_detik"] == 259200
+    assert d_hari["hari"] == 3
+
+    # 1 minggu
+    d_minggu = compute_countdown("dari_durasi", jumlah=1, satuan="minggu", now=now)
+    assert d_minggu["durasi_detik"] == 604800
+    assert d_minggu["hari"] == 7
+
+    # Jumlah 0
+    d_nol = compute_countdown("dari_durasi", jumlah=0, satuan="menit", now=now)
+    assert d_nol["durasi_detik"] == 0
+    assert d_nol["sisa_detik"] == 0
+    assert d_nol["sisa_teks"] == "kurang dari 1 detik lagi"
+
+    # Jumlah 100001 ditolak
+    try:
+        compute_countdown("dari_durasi", jumlah=100001, satuan="menit", now=now)
+        assert False, "Harusnya gagal jumlah 100001"
+    except CountdownError as exc:
+        assert exc.code == CD_INVALID_AMOUNT
+
+    # Satuan tidak dikenal ditolak
+    try:
+        compute_countdown("dari_durasi", jumlah=5, satuan="dekade", now=now)
+        assert False, "Harusnya gagal satuan tidak dikenal"
+    except CountdownError as exc:
+        assert exc.code == CD_INVALID_UNIT
+
+    # Mode tidak dikenal ditolak
+    try:
+        compute_countdown("ngawur", tanggal="2026-01-01", now=now)
+        assert False, "Harusnya gagal mode tidak dikenal"
+    except CountdownError as exc:
+        assert exc.code == CD_UNSUPPORTED_MODE
+
+
+def test_http_countdown_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/countdown/limits")
+    assert resp.status_code == 200, resp.text
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert data["tool"] == "countdown"
+    assert data["zona"] == "WIB (UTC+7)"
+    assert data["min_year"] == 1900
+    assert data["max_year"] == 2100
+    assert data["max_input_chars"] == 40
+    assert data["max_bytes"] == 65536
+    assert data["default_jam"] == "00:00"
+    assert isinstance(data["modes"], list)
+    assert len(data["modes"]) == 2
+    assert isinstance(data["satuan"], list)
+    assert len(data["satuan"]) == 4
+    assert [s["id"] for s in data["satuan"]] == ["menit", "jam", "hari", "minggu"]
+
+
+def test_http_countdown_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Mode ke_momen
+    resp_momen = client.post(
+        "/api/countdown",
+        data={"mode": "ke_momen", "tanggal": "2099-12-31", "jam": "23:59"},
+    )
+    assert resp_momen.status_code == 200, resp_momen.text
+    body_m = resp_momen.json()
+    assert body_m["mode"] == "ke_momen"
+    assert body_m["target_tanggal"] == "2099-12-31"
+    assert body_m["target_jam"] == "23:59"
+    assert body_m["lewat"] is False
+    assert body_m["sisa_detik"] > 0
+    assert "no-store" in resp_momen.headers.get("Cache-Control", "")
+    assert resp_momen.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in resp_momen.headers
+
+    # 2. Mode dari_durasi
+    resp_durasi = client.post(
+        "/api/countdown",
+        data={"mode": "dari_durasi", "jumlah": "45", "satuan": "menit"},
+    )
+    assert resp_durasi.status_code == 200, resp_durasi.text
+    body_d = resp_durasi.json()
+    assert body_d["mode"] == "dari_durasi"
+    assert body_d["durasi_detik"] == 2700
+    assert body_d["total_menit"] == 45
+
+
+def test_http_countdown_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tanpa field mode -> 400 INVALID_REQUEST
+    resp_no_mode = client.post("/api/countdown", data={"tanggal": "2026-12-31"})
+    assert resp_no_mode.status_code == 400, resp_no_mode.text
+    assert resp_no_mode.json()["error"]["code"] == CD_INVALID_REQUEST
+
+    # Mode ke_momen tanggal kosong -> 400 NO_DATE
+    resp_no_date = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "   "})
+    assert resp_no_date.status_code == 400, resp_no_date.text
+    assert resp_no_date.json()["error"]["code"] == CD_NO_DATE
+
+    # 2026-02-30 -> 400 INVALID_DATE
+    resp_inv_date = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "2026-02-30"})
+    assert resp_inv_date.status_code == 400, resp_inv_date.text
+    assert resp_inv_date.json()["error"]["code"] == CD_INVALID_DATE
+
+    # Pemisah campuran -> 400 INVALID_DATE
+    resp_mixed = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "2026-12/31"})
+    assert resp_mixed.status_code == 400, resp_mixed.text
+    assert resp_mixed.json()["error"]["code"] == CD_INVALID_DATE
+
+    # Tahun 1899 -> 400 OUT_OF_RANGE
+    resp_range_low = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "1899-01-01"})
+    assert resp_range_low.status_code == 400, resp_range_low.text
+    assert resp_range_low.json()["error"]["code"] == CD_OUT_OF_RANGE
+
+    # Tahun 2101 -> 400 OUT_OF_RANGE
+    resp_range_high = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "2101-01-01"})
+    assert resp_range_high.status_code == 400, resp_range_high.text
+    assert resp_range_high.json()["error"]["code"] == CD_OUT_OF_RANGE
+
+    # Format jam 6:5 -> 400 INVALID_TIME
+    resp_time_short = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "2026-12-31", "jam": "6:5"})
+    assert resp_time_short.status_code == 400, resp_time_short.text
+    assert resp_time_short.json()["error"]["code"] == CD_INVALID_TIME
+
+    # Jam 24:00 -> 400 INVALID_TIME
+    resp_time_24 = client.post("/api/countdown", data={"mode": "ke_momen", "tanggal": "2026-12-31", "jam": "24:00"})
+    assert resp_time_24.status_code == 400, resp_time_24.text
+    assert resp_time_24.json()["error"]["code"] == CD_INVALID_TIME
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    resp_bad_mode = client.post("/api/countdown", data={"mode": "tidak_ada", "tanggal": "2026-12-31"})
+    assert resp_bad_mode.status_code == 400, resp_bad_mode.text
+    assert resp_bad_mode.json()["error"]["code"] == CD_UNSUPPORTED_MODE
+
+    # Satuan tidak dikenal -> 400 INVALID_UNIT
+    resp_bad_unit = client.post(
+        "/api/countdown",
+        data={"mode": "dari_durasi", "jumlah": "10", "satuan": "abad"},
+    )
+    assert resp_bad_unit.status_code == 400, resp_bad_unit.text
+    assert resp_bad_unit.json()["error"]["code"] == CD_INVALID_UNIT
+
+    # Jumlah bukan angka -> 400 INVALID_AMOUNT
+    resp_bad_amt = client.post(
+        "/api/countdown",
+        data={"mode": "dari_durasi", "jumlah": "sepuluh", "satuan": "menit"},
+    )
+    assert resp_bad_amt.status_code == 400, resp_bad_amt.text
+    assert resp_bad_amt.json()["error"]["code"] == CD_INVALID_AMOUNT
+
+    # Jumlah 100001 -> 400 INVALID_AMOUNT
+    resp_amt_high = client.post(
+        "/api/countdown",
+        data={"mode": "dari_durasi", "jumlah": "100001", "satuan": "menit"},
+    )
+    assert resp_amt_high.status_code == 400, resp_amt_high.text
+    assert resp_amt_high.json()["error"]["code"] == CD_INVALID_AMOUNT
+
+    # Body JSON (bukan multipart) -> 400
+    resp_json = client.post(
+        "/api/countdown",
+        json={"mode": "ke_momen", "tanggal": "2026-12-31"},
+    )
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == CD_INVALID_REQUEST
+
+    # Body > 64 KB -> 413 PAYLOAD_TOO_LARGE
+    resp_large = client.post(
+        "/api/countdown",
+        data={"mode": "ke_momen", "tanggal": "2026-12-31", "ekstra": "x" * 70000},
+    )
+    assert resp_large.status_code == 413, resp_large.text
+    assert resp_large.json()["error"]["code"] == CD_PAYLOAD_TOO_LARGE
+
+
+def test_http_countdown_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root endpoint memuat countdown
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "countdown" in root_data["tools"]
+    assert "date-calc" in root_data["tools"]
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

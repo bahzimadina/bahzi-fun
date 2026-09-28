@@ -230,6 +230,28 @@ from .date_calc import (
     compute_date,
     limits_payload as date_calc_limits_payload_func,
 )
+from .countdown import (
+    DEFAULT_JAM as CD_DEFAULT_JAM,
+    INVALID_AMOUNT as CD_INVALID_AMOUNT,
+    INVALID_DATE as CD_INVALID_DATE,
+    INVALID_REQUEST as CD_INVALID_REQUEST,
+    INVALID_TIME as CD_INVALID_TIME,
+    INVALID_UNIT as CD_INVALID_UNIT,
+    MAX_AMOUNT as CD_MAX_AMOUNT,
+    MAX_BYTES as CD_MAX_BYTES,
+    MAX_INPUT_CHARS as CD_MAX_INPUT_CHARS,
+    MAX_YEAR as CD_MAX_YEAR,
+    MIN_YEAR as CD_MIN_YEAR,
+    MODES as CD_MODES,
+    NO_DATE as CD_NO_DATE,
+    OUT_OF_RANGE as CD_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CD_PAYLOAD_TOO_LARGE,
+    SATUAN as CD_SATUAN,
+    UNSUPPORTED_MODE as CD_UNSUPPORTED_MODE,
+    CountdownError,
+    compute_countdown,
+    limits_payload as countdown_limits_payload_func,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -409,6 +431,17 @@ async def handle_date_calc_error(request: Request, exc: DateCalcError) -> JSONRe
     )
 
 
+@app.exception_handler(CountdownError)
+async def handle_countdown_error(request: Request, exc: CountdownError) -> JSONResponse:
+    """Error hitung mundur yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung mundur ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
@@ -428,6 +461,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/percent-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
     elif request.url.path.startswith("/api/date-calc"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
+    elif request.url.path.startswith("/api/countdown"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/json"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
@@ -925,6 +960,27 @@ def _reject_oversized_date_content_length(request: Request) -> None:
 
 def _date_calc_limits_payload() -> dict:
     return date_calc_limits_payload_func()
+
+
+def _reject_oversized_countdown_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas hitung mundur."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > CD_MAX_BYTES:
+        raise CountdownError(
+            CD_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar (maksimal 64 KB).",
+            413,
+        )
+
+
+def _countdown_limits_payload() -> dict:
+    return countdown_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -1825,6 +1881,95 @@ async def date_calc_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/countdown/limits")
+async def countdown_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Mundur."""
+    return JSONResponse(content=_countdown_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/countdown")
+async def countdown_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    tanggal: str = Form(default=None),
+    jam: str = Form(default=None),
+    jumlah: str = Form(default=None),
+    satuan: str = Form(default=None),
+):
+    """Hitung mundur di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_countdown_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise CountdownError(
+            CD_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise CountdownError(
+            CD_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if tanggal is None and "tanggal" in form:
+        tanggal = form.get("tanggal")
+    if jam is None and "jam" in form:
+        jam = form.get("jam")
+    if jumlah is None and "jumlah" in form:
+        jumlah = form.get("jumlah")
+    if satuan is None and "satuan" in form:
+        satuan = form.get("satuan")
+
+    if mode is None:
+        raise CountdownError(
+            CD_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'mode' wajib diisi.",
+            400,
+        )
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (mode, tanggal, jam, jumlah, satuan)
+    ):
+        raise CountdownError(
+            CD_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = compute_countdown(
+        mode=mode,
+        tanggal=tanggal,
+        jam=jam,
+        jumlah=jumlah,
+        satuan=satuan,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log: cukup mode dan durasi.
+    logger.info(
+        "hitung mundur selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1846,6 +1991,7 @@ async def root() -> dict:
             "percent-calc",
             "json",
             "date-calc",
+            "countdown",
         ],
     }
 
