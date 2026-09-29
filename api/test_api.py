@@ -328,6 +328,29 @@ from app.countdown import (
     parse_time as parse_countdown_time,
     parse_unit as parse_countdown_unit,
 )
+from app.qr_tool import (
+    DEFAULT_CORRECTION as QR_DEFAULT_CORRECTION,
+    DEFAULT_MODE as QR_DEFAULT_MODE,
+    DEFAULT_SIZE as QR_DEFAULT_SIZE,
+    INVALID_CORRECTION as QR_INVALID_CORRECTION,
+    INVALID_REQUEST as QR_INVALID_REQUEST,
+    INVALID_SIZE as QR_INVALID_SIZE,
+    MAX_BYTES as QR_MAX_BYTES,
+    MAX_CHARS_BARCODE as QR_MAX_CHARS_BARCODE,
+    MAX_CHARS_QR as QR_MAX_CHARS_QR,
+    MODES as QR_MODES,
+    NO_TEXT as QR_NO_TEXT,
+    NOT_ENCODABLE as QR_NOT_ENCODABLE,
+    PAYLOAD_TOO_LARGE as QR_PAYLOAD_TOO_LARGE,
+    TEXT_TOO_LONG as QR_TEXT_TOO_LONG,
+    UKURAN_LIST as QR_UKURAN_LIST,
+    UNSUPPORTED_KIND as QR_UNSUPPORTED_KIND,
+    QrResult,
+    QrToolError,
+    generate_code,
+    limits_payload as qr_limits_payload_func,
+    validate_params as validate_qr_params,
+)
 
 
 SKIPPED: list[str] = []
@@ -4688,6 +4711,228 @@ def test_http_countdown_root_endpoint_dan_regresi() -> None:
     root_data = root_resp.json()
     assert "countdown" in root_data["tools"]
     assert "date-calc" in root_data["tools"]
+
+
+# --- Uji QR & Barcode Generator ---------------------------------------------
+def test_logika_qr_dan_barcode() -> None:
+    """Uji logika murni pembuatan kode QR dan barcode."""
+    # Validasi masukan dasar
+    try:
+        generate_code(teks="   ")
+        raise AssertionError("Seharusnya galat teks kosong")
+    except QrToolError as exc:
+        assert exc.code == QR_NO_TEXT
+        assert exc.status_code == 400
+
+    try:
+        generate_code(teks="A" * 1201, mode="qr")
+        raise AssertionError("Seharusnya galat teks QR terlalu panjang")
+    except QrToolError as exc:
+        assert exc.code == QR_TEXT_TOO_LONG
+        assert exc.status_code == 400
+
+    try:
+        generate_code(teks="A" * 81, mode="barcode")
+        raise AssertionError("Seharusnya galat teks barcode terlalu panjang")
+    except QrToolError as exc:
+        assert exc.code == QR_TEXT_TOO_LONG
+        assert exc.status_code == 400
+
+    try:
+        generate_code(teks="Halo", ukuran=999)
+        raise AssertionError("Seharusnya galat ukuran")
+    except QrToolError as exc:
+        assert exc.code == QR_INVALID_SIZE
+        assert exc.status_code == 400
+
+    try:
+        generate_code(teks="Halo", mode="pdf")
+        raise AssertionError("Seharusnya galat mode")
+    except QrToolError as exc:
+        assert exc.code == QR_UNSUPPORTED_KIND
+        assert exc.status_code == 400
+
+    try:
+        generate_code(teks="Halo", mode="qr", koreksi="Z")
+        raise AssertionError("Seharusnya galat koreksi")
+    except QrToolError as exc:
+        assert exc.code == QR_INVALID_CORRECTION
+        assert exc.status_code == 400
+
+    try:
+        generate_code(teks="halo dunia 😀", mode="barcode")
+        raise AssertionError("Seharusnya galat karakter non-latin barcode")
+    except QrToolError as exc:
+        assert exc.code == QR_NOT_ENCODABLE
+        assert exc.status_code == 400
+
+    # Sukses QR
+    res_qr = generate_code(mode="qr", teks="https://bahzi.fun", ukuran=512, koreksi="M")
+    assert isinstance(res_qr, QrResult)
+    assert res_qr.content.startswith(b"\x89PNG")
+    assert res_qr.mode == "qr"
+    assert res_qr.pixels == "512x512"
+
+    # Sukses Barcode
+    res_bc = generate_code(mode="barcode", teks="12345678", ukuran=512)
+    assert isinstance(res_bc, QrResult)
+    assert res_bc.content.startswith(b"\x89PNG")
+    assert res_bc.mode == "barcode"
+
+
+def test_http_qr_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/qr/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["tool"] == "qr"
+    assert data["teks_maks_qr"] == 1200
+    assert data["teks_maks_barcode"] == 80
+    assert data["ukuran"] == [256, 384, 512, 768, 1024]
+    assert data["ukuran_bawaan"] == 512
+    assert "qr" in data["mode"] and "barcode" in data["mode"]
+    assert "Code 128" in data["jenis_barcode"]
+    assert len(data["koreksi"]) == 4
+    koreksi_values = [k["nilai"] for k in data["koreksi"]]
+    assert koreksi_values == ["L", "M", "Q", "H"]
+    assert "catatan" in data
+
+
+def test_http_qr_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # QR teks pendek
+    resp_qr = client.post("/api/qr", data={"teks": "Halo Dunia", "mode": "qr"})
+    assert resp_qr.status_code == 200
+    assert resp_qr.headers["content-type"] == "image/png"
+    assert resp_qr.content.startswith(b"\x89PNG")
+    assert resp_qr.headers["x-qr-mode"] == "qr"
+    assert resp_qr.headers["x-qr-pixels"] == "512x512"
+    assert "x-qr-bytes" in resp_qr.headers
+    assert "x-processing-ms" in resp_qr.headers
+    assert "no-store" in resp_qr.headers.get("cache-control", "")
+
+    # QR teks panjang (900 karakter)
+    long_text = "OmniTools 2026 QR Generator " * 32
+    resp_long = client.post("/api/qr", data={"teks": long_text, "mode": "qr", "ukuran": "1024", "koreksi": "L"})
+    assert resp_long.status_code == 200
+    assert resp_long.headers["content-type"] == "image/png"
+    assert resp_long.content.startswith(b"\x89PNG")
+
+    # Barcode Code 128
+    resp_bc = client.post("/api/qr", data={"teks": "12345678", "mode": "barcode", "ukuran": "512"})
+    assert resp_bc.status_code == 200
+    assert resp_bc.headers["content-type"] == "image/png"
+    assert resp_bc.content.startswith(b"\x89PNG")
+    assert resp_bc.headers["x-qr-mode"] == "barcode"
+
+
+def test_http_qr_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Teks kosong / spasi saja -> 400 NO_TEXT
+    resp_empty = client.post("/api/qr", data={"teks": "   "})
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["error"]["code"] == QR_NO_TEXT
+
+    # Teks 1.201 karakter -> 400 TEXT_TOO_LONG
+    resp_long_qr = client.post("/api/qr", data={"teks": "A" * 1201, "mode": "qr"})
+    assert resp_long_qr.status_code == 400
+    assert resp_long_qr.json()["error"]["code"] == QR_TEXT_TOO_LONG
+
+    # Barcode 81 karakter -> 400 TEXT_TOO_LONG
+    resp_long_bc = client.post("/api/qr", data={"teks": "A" * 81, "mode": "barcode"})
+    assert resp_long_bc.status_code == 400
+    assert resp_long_bc.json()["error"]["code"] == QR_TEXT_TOO_LONG
+
+    # Ukuran tidak dikenal (999) -> 400 INVALID_SIZE
+    resp_inv_size = client.post("/api/qr", data={"teks": "Test", "ukuran": "999"})
+    assert resp_inv_size.status_code == 400
+    assert resp_inv_size.json()["error"]["code"] == QR_INVALID_SIZE
+
+    # Mode tidak dikenal ("pdf") -> 400 UNSUPPORTED_KIND
+    resp_inv_mode = client.post("/api/qr", data={"teks": "Test", "mode": "pdf"})
+    assert resp_inv_mode.status_code == 400
+    assert resp_inv_mode.json()["error"]["code"] == QR_UNSUPPORTED_KIND
+
+    # Koreksi tidak dikenal ("Z") -> 400 INVALID_CORRECTION
+    resp_inv_ec = client.post("/api/qr", data={"teks": "Test", "mode": "qr", "koreksi": "Z"})
+    assert resp_inv_ec.status_code == 400
+    assert resp_inv_ec.json()["error"]["code"] == QR_INVALID_CORRECTION
+
+    # Barcode non-latin ("halo dunia 😀") -> 400 NOT_ENCODABLE
+    resp_not_enc = client.post("/api/qr", data={"teks": "halo dunia 😀", "mode": "barcode"})
+    assert resp_not_enc.status_code == 400
+    assert resp_not_enc.json()["error"]["code"] == QR_NOT_ENCODABLE
+
+    # Format JSON bukan multipart -> 400 INVALID_REQUEST
+    resp_json = client.post("/api/qr", json={"teks": "Test"})
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == QR_INVALID_REQUEST
+
+    # Badan > 16 KB -> 413 PAYLOAD_TOO_LARGE
+    resp_large = client.post("/api/qr", data={"teks": "Test", "extra": "x" * 20000})
+    assert resp_large.status_code == 413
+    assert resp_large.json()["error"]["code"] == QR_PAYLOAD_TOO_LARGE
+
+
+def test_qr_dan_barcode_terbaca_zxing() -> None:
+    """Pastikan keluaran gambar QR dan barcode benar-benar bisa dibaca ulang ke teks aslinya."""
+    try:
+        import pytest
+        zxingcpp = pytest.importorskip("zxingcpp")
+    except ImportError:
+        try:
+            import zxingcpp
+        except ImportError:
+            SKIPPED.append("uji dekode zxingcpp dilewati: pustaka zxingcpp tidak terpasang")
+            return
+
+    # Uji pembacaan kode QR
+    qr_cases = [
+        "https://bahzi.fun/omnitools",
+        "Halo dunia dengan emoji 🚀 dan baris\nbaru",
+        "Teks panjang " * 40,
+    ]
+    for text in qr_cases:
+        res = generate_code(mode="qr", teks=text, ukuran=512, koreksi="M")
+        img = Image.open(io.BytesIO(res.content))
+        decoded = zxingcpp.read_barcodes(img)
+        assert len(decoded) == 1, f"QR gagal dibaca untuk: {text[:30]}"
+        assert decoded[0].text == text.strip()
+
+    # Uji pembacaan barcode Code 128
+    barcode_cases = [
+        "ABC-12345-XYZ",
+        "0123456789",
+        "OmniTools-2026",
+    ]
+    for text in barcode_cases:
+        res = generate_code(mode="barcode", teks=text, ukuran=512)
+        img = Image.open(io.BytesIO(res.content))
+        decoded = zxingcpp.read_barcodes(img)
+        assert len(decoded) == 1, f"Barcode gagal dibaca untuk: {text}"
+        assert decoded[0].text == text
+
+
+def test_http_qr_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root endpoint memuat qr
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "qr" in root_data["tools"]
+    assert "countdown" in root_data["tools"]
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

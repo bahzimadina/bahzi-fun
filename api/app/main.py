@@ -252,6 +252,28 @@ from .countdown import (
     compute_countdown,
     limits_payload as countdown_limits_payload_func,
 )
+from .qr_tool import (
+    DEFAULT_CORRECTION as QR_DEFAULT_CORRECTION,
+    DEFAULT_MODE as QR_DEFAULT_MODE,
+    DEFAULT_SIZE as QR_DEFAULT_SIZE,
+    INVALID_CORRECTION as QR_INVALID_CORRECTION,
+    INVALID_REQUEST as QR_INVALID_REQUEST,
+    INVALID_SIZE as QR_INVALID_SIZE,
+    MAX_BYTES as QR_MAX_BYTES,
+    MAX_CHARS_BARCODE as QR_MAX_CHARS_BARCODE,
+    MAX_CHARS_QR as QR_MAX_CHARS_QR,
+    MODES as QR_MODES,
+    NO_TEXT as QR_NO_TEXT,
+    NOT_ENCODABLE as QR_NOT_ENCODABLE,
+    PAYLOAD_TOO_LARGE as QR_PAYLOAD_TOO_LARGE,
+    TEXT_TOO_LONG as QR_TEXT_TOO_LONG,
+    UKURAN_LIST as QR_UKURAN_LIST,
+    UNSUPPORTED_KIND as QR_UNSUPPORTED_KIND,
+    QrResult,
+    QrToolError,
+    generate_code,
+    limits_payload as qr_limits_payload_func,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -301,6 +323,9 @@ if _cors_origins:
             "X-Ocr-Lang",
             "X-Base64-Mode",
             "X-Output-Length",
+            "X-Qr-Mode",
+            "X-Qr-Pixels",
+            "X-Qr-Bytes",
         ],
     )
 
@@ -442,12 +467,25 @@ async def handle_countdown_error(request: Request, exc: CountdownError) -> JSONR
     )
 
 
+@app.exception_handler(QrToolError)
+async def handle_qr_tool_error(request: Request, exc: QrToolError) -> JSONResponse:
+    """Error QR dan barcode yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("buat kode ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
     if request.url.path.startswith("/api/ocr"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi gambar atau PDF."
+    elif request.url.path.startswith("/api/qr"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks'."
     elif request.url.path.startswith("/api/base64"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/remove-duplicates"):
@@ -981,6 +1019,27 @@ def _reject_oversized_countdown_content_length(request: Request) -> None:
 
 def _countdown_limits_payload() -> dict:
     return countdown_limits_payload_func()
+
+
+def _reject_oversized_qr_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas QR dan barcode."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > QR_MAX_BYTES:
+        raise QrToolError(
+            QR_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar (maksimal 16 KB).",
+            413,
+        )
+
+
+def _qr_limits_payload() -> dict:
+    return qr_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -1970,6 +2029,89 @@ async def countdown_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/qr/limits")
+async def qr_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk QR dan Barcode Generator."""
+    return JSONResponse(content=_qr_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/qr")
+async def qr_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    teks: str = Form(default=None),
+    ukuran: str = Form(default=None),
+    koreksi: str = Form(default=None),
+):
+    """Buat gambar kode QR atau barcode di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_qr_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise QrToolError(
+            QR_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise QrToolError(
+            QR_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if teks is None and "teks" in form:
+        teks = form.get("teks")
+    if ukuran is None and "ukuran" in form:
+        ukuran = form.get("ukuran")
+    if koreksi is None and "koreksi" in form:
+        koreksi = form.get("koreksi")
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (mode, teks, ukuran, koreksi)
+    ):
+        raise QrToolError(
+            QR_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = generate_code(
+        mode=mode,
+        teks=teks,
+        ukuran=ukuran,
+        koreksi=koreksi,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log: cukup mode dan durasi.
+    logger.info(
+        "buat kode selesai: mode=%s piksel=%s byte=%d durasi=%.0fms",
+        result.mode,
+        result.pixels,
+        result.bytes_count,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+        "X-Qr-Mode": result.mode,
+        "X-Qr-Pixels": result.pixels,
+        "X-Qr-Bytes": str(result.bytes_count),
+    }
+    return Response(content=result.content, media_type="image/png", headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -1992,6 +2134,7 @@ async def root() -> dict:
             "json",
             "date-calc",
             "countdown",
+            "qr",
         ],
     }
 

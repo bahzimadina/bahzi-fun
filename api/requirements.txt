@@ -10,4 +10,9 @@ cairosvg==2.9.1
 pytesseract==0.3.13
 # Dipakai alat ambil teks (OCR); membaca dokumen PDF dan merender halaman ke gambar
 PyMuPDF==1.28.2
+# Dipakai alat pembuat kode QR
+qrcode==8.2
+# Dipakai alat pembuat barcode Code 128
+python-barcode==0.15.1
+
 

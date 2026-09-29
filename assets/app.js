@@ -90,7 +90,7 @@
         { name: 'CSV Tools', desc: 'Lihat, sunting, dan konversi berkas CSV.', status: 'soon' },
         { name: 'XML Tools', desc: 'Format dan validasi dokumen XML.', status: 'soon' },
         { name: 'Base64 Encoder/Decoder', desc: 'Ubah teks jadi Base64 dan sebaliknya, termasuk varian aman tautan.', status: 'available', action: 'base64' },
-        { name: 'QR & Barcode Generator', desc: 'Buat kode QR dan barcode dari teks.', status: 'soon' }
+        { name: 'QR & Barcode Generator', desc: 'Buat kode QR dan barcode dari teks.', status: 'available', action: 'qr' }
       ]
     },
     {
