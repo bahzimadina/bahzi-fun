@@ -45,6 +45,18 @@ from .image_convert import (
     normalize_quality,
     normalize_target,
 )
+from .image_edit import (
+    CHUNK_SIZE as EDIT_CHUNK_SIZE,
+    MAX_BYTES as EDIT_MAX_BYTES,
+    MAX_PIXELS as EDIT_MAX_PIXELS,
+    MIME_TYPES as EDIT_MIME_TYPES,
+    TARGETS as EDIT_TARGETS,
+    EMPTY_FILE as EDIT_EMPTY_FILE,
+    INVALID_REQUEST as EDIT_INVALID_REQUEST,
+    ImageEditError,
+    edit_image,
+    limits_payload as image_edit_limits_payload,
+)
 from .pdf_merge import (
     CHUNK_SIZE,
     ERR_TOO_LARGE,
@@ -348,6 +360,17 @@ async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONRe
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
+@app.exception_handler(ImageEditError)
+async def handle_image_edit_error(request: Request, exc: ImageEditError) -> JSONResponse:
+    """Error edit gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("edit gambar ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(WordCountError)
 async def handle_word_count_error(request: Request, exc: WordCountError) -> JSONResponse:
     """Error hitung kata yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -510,6 +533,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field teks bernama 'text'."
     elif request.url.path.startswith("/api/image/convert"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
+    elif request.url.path.startswith("/api/image/edit"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     else:
         msg = (
             "Permintaan tidak valid. Kirim multipart/form-data dengan satu "
@@ -1161,6 +1186,96 @@ async def image_convert(
         "X-Total-Bytes": str(len(result.data)),
         "X-Processing-Ms": f"{duration_ms:.0f}",
         "X-Scaled-Down": "true" if result.scaled_down else "false",
+    }
+    return Response(content=result.data, media_type=media_type, headers=headers)
+
+
+@app.get("/api/image/edit/limits")
+async def image_edit_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Image Editor."""
+    return JSONResponse(content=image_edit_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/image/edit")
+async def image_edit_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    putar: str | None = Form(default="0"),
+    balik: str | None = Form(default="tidak"),
+    rasio: str | None = Form(default="bebas"),
+    patokan: str | None = Form(default="tengah"),
+    orientasi: str | None = Form(default="ya"),
+    format: str | None = Form(default="tetap"),
+    kualitas: str | None = Form(default="90"),
+):
+    """Edit satu gambar di memori (PNG/JPEG/WebP).
+
+    Respons: binary gambar, Content-Type sesuai format output,
+    Content-Disposition: attachment; filename="hasil-edit.<ext>".
+    """
+    started = time.perf_counter()
+
+    try:
+        _reject_oversized_image_content_length(request)
+    except ImageConvertError as exc:
+        raise ImageEditError(exc.code, exc.message, exc.status_code) from exc
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise ImageEditError(
+            EDIT_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    upload_file = file
+    if upload_file is None:
+        raise ImageEditError(
+            EDIT_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'file' wajib disertakan.",
+            400,
+        )
+
+    try:
+        payload = await _read_capped_image(upload_file, EDIT_MAX_BYTES)
+    except ImageConvertError as exc:
+        raise ImageEditError(exc.code, exc.message, exc.status_code) from exc
+
+    result = edit_image(
+        payload=payload,
+        putar=putar,
+        balik=balik,
+        rasio=rasio,
+        patokan=patokan,
+        orientasi=orientasi,
+        format=format,
+        kualitas=kualitas,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "edit gambar selesai: in=%s out=%s piksel=%d byte=%d durasi=%.0fms",
+        result.input_format,
+        result.output_format,
+        result.width * result.height,
+        len(result.data),
+        duration_ms,
+    )
+
+    ext = EDIT_TARGETS[result.output_format].lstrip(".")
+    media_type = EDIT_MIME_TYPES[result.output_format]
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="hasil-edit.{ext}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Input-Format": result.input_format,
+        "X-Output-Format": result.output_format,
+        "X-Pixels": str(result.width * result.height),
+        "X-Image-Width": str(result.width),
+        "X-Image-Height": str(result.height),
+        "X-Total-Bytes": str(len(result.data)),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=media_type, headers=headers)
 
@@ -2122,6 +2237,7 @@ async def root() -> dict:
         "tools": [
             "pdf-merge",
             "image-convert",
+            "image-edit",
             "word-count",
             "case-convert",
             "ocr",

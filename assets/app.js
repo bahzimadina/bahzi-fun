@@ -29,7 +29,7 @@
       tools: [
         { name: 'Image Resizer', desc: 'Ubah dimensi gambar langsung di browser tanpa unggah.', status: 'available', action: 'image-resizer' },
         { name: 'Image Converter', desc: 'Konversi format gambar (PNG, JPG, WebP, SVG) di server.', status: 'available', action: 'image-converter' },
-        { name: 'Image Editor', desc: 'Edit dasar seperti crop dan rotate di perangkat sendiri.', status: 'soon' },
+        { name: 'Image Editor', desc: 'Potong, putar, dan balik gambar lalu unduh hasilnya.', status: 'available', action: 'image-editor' },
         { name: 'Video Trimmer', desc: 'Potong klip video pendek tanpa upload.', status: 'soon' },
         { name: 'Video Reverser', desc: 'Balik urutan frame video secara lokal.', status: 'soon' },
         { name: 'Extract Audio', desc: 'Ambil trek audio dari file video di browser.', status: 'soon' }

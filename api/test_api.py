@@ -351,6 +351,35 @@ from app.qr_tool import (
     limits_payload as qr_limits_payload_func,
     validate_params as validate_qr_params,
 )
+from app.image_edit import (  # noqa: E402
+    EMPTY_FILE as EDIT_EMPTY_FILE,
+    IMAGE_UNREADABLE as EDIT_IMAGE_UNREADABLE,
+    INVALID_BOOLEAN as EDIT_INVALID_BOOLEAN,
+    INVALID_QUALITY as EDIT_INVALID_QUALITY,
+    INVALID_REQUEST as EDIT_INVALID_REQUEST,
+    MAX_BYTES as EDIT_MAX_BYTES,
+    MAX_PIXELS as EDIT_MAX_PIXELS,
+    NOT_IMAGE as EDIT_NOT_IMAGE,
+    PAYLOAD_TOO_LARGE as EDIT_PAYLOAD_TOO_LARGE,
+    TOO_MANY_PIXELS as EDIT_TOO_MANY_PIXELS,
+    UNSUPPORTED_ANCHOR as EDIT_UNSUPPORTED_ANCHOR,
+    UNSUPPORTED_FLIP as EDIT_UNSUPPORTED_FLIP,
+    UNSUPPORTED_RATIO as EDIT_UNSUPPORTED_RATIO,
+    UNSUPPORTED_ROTATE as EDIT_UNSUPPORTED_ROTATE,
+    UNSUPPORTED_TARGET as EDIT_UNSUPPORTED_TARGET,
+    ImageEditError,
+    crop_to_ratio as edit_crop_to_ratio,
+    detect_format as detect_edit_format,
+    edit_image,
+    limits_payload as image_edit_limits_payload_func,
+    normalize_anchor as edit_normalize_anchor,
+    normalize_flip as edit_normalize_flip,
+    normalize_orientation as edit_normalize_orientation,
+    normalize_quality as edit_normalize_quality,
+    normalize_ratio as edit_normalize_ratio,
+    normalize_rotate as edit_normalize_rotate,
+    normalize_target as edit_normalize_target,
+)
 
 
 SKIPPED: list[str] = []
@@ -513,6 +542,20 @@ def expect_base64_error(func, code: str, status: int) -> Base64ToolError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar Base64ToolError {code}")
+
+
+def expect_image_edit_error(func, code: str, status: int) -> ImageEditError:
+    """Pastikan func() melempar ImageEditError dengan kode + status yang tepat."""
+    try:
+        func()
+    except ImageEditError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar ImageEditError {code}")
 
 
 
@@ -4933,6 +4976,417 @@ def test_http_qr_root_endpoint_dan_regresi() -> None:
     root_data = root_resp.json()
     assert "qr" in root_data["tools"]
     assert "countdown" in root_data["tools"]
+
+
+# --- Uji Image Editor -------------------------------------------------------
+def test_logika_murni_image_edit() -> None:
+    """Uji logika murni edit_image: rotasi, balik, potong rasio, dan format."""
+    # 1. Normalisasi
+    assert edit_normalize_rotate(0) == 0
+    assert edit_normalize_rotate("90") == 90
+    assert edit_normalize_rotate("180") == 180
+    assert edit_normalize_rotate("270") == 270
+    expect_image_edit_error(lambda: edit_normalize_rotate("45"), EDIT_UNSUPPORTED_ROTATE, 400)
+
+    assert edit_normalize_flip("tidak") == "tidak"
+    assert edit_normalize_flip("horizontal") == "horizontal"
+    assert edit_normalize_flip("vertikal") == "vertikal"
+    expect_image_edit_error(lambda: edit_normalize_flip("miring"), EDIT_UNSUPPORTED_FLIP, 400)
+
+    assert edit_normalize_ratio("bebas") == "bebas"
+    assert edit_normalize_ratio("16:9") == "16:9"
+    expect_image_edit_error(lambda: edit_normalize_ratio("21:9"), EDIT_UNSUPPORTED_RATIO, 400)
+
+    assert edit_normalize_anchor("tengah") == "tengah"
+    assert edit_normalize_anchor("atas") == "atas"
+    expect_image_edit_error(lambda: edit_normalize_anchor("pojok"), EDIT_UNSUPPORTED_ANCHOR, 400)
+
+    assert edit_normalize_orientation("ya") is True
+    assert edit_normalize_orientation("tidak") is False
+    expect_image_edit_error(lambda: edit_normalize_orientation("maybe"), EDIT_INVALID_BOOLEAN, 400)
+
+    assert edit_normalize_target("tetap") == "tetap"
+    assert edit_normalize_target("jpeg") == "jpeg"
+    assert edit_normalize_target("jpg") == "jpeg"
+    assert edit_normalize_target("png") == "png"
+    assert edit_normalize_target("webp") == "webp"
+    expect_image_edit_error(lambda: edit_normalize_target("bmp"), EDIT_UNSUPPORTED_TARGET, 400)
+
+    assert edit_normalize_quality(90) == 90
+    assert edit_normalize_quality("80") == 80
+    expect_image_edit_error(lambda: edit_normalize_quality("abc"), EDIT_INVALID_QUALITY, 400)
+    expect_image_edit_error(lambda: edit_normalize_quality(5), EDIT_INVALID_QUALITY, 400)
+    expect_image_edit_error(lambda: edit_normalize_quality(105), EDIT_INVALID_QUALITY, 400)
+
+    # 2. Pemotongan rasio murni
+    img_wide = Image.new("RGB", (100, 50))
+    res_kiri = edit_crop_to_ratio(img_wide, "1:1", "kiri")
+    assert res_kiri.size == (50, 50)
+    res_kanan = edit_crop_to_ratio(img_wide, "1:1", "kanan")
+    assert res_kanan.size == (50, 50)
+    res_tengah = edit_crop_to_ratio(img_wide, "1:1", "tengah")
+    assert res_tengah.size == (50, 50)
+
+    img_tall = Image.new("RGB", (50, 100))
+    res_atas = edit_crop_to_ratio(img_tall, "1:1", "atas")
+    assert res_atas.size == (50, 50)
+    res_bawah = edit_crop_to_ratio(img_tall, "1:1", "bawah")
+    assert res_bawah.size == (50, 50)
+    res_tengah_tall = edit_crop_to_ratio(img_tall, "1:1", "tengah")
+    assert res_tengah_tall.size == (50, 50)
+
+    # 3. Putar & balik murni
+    png_data = make_image("PNG", size=(60, 40), color="blue")
+    res_rot90 = edit_image(png_data, putar=90)
+    assert (res_rot90.width, res_rot90.height) == (40, 60)
+
+    res_rot180 = edit_image(png_data, putar=180)
+    assert (res_rot180.width, res_rot180.height) == (60, 40)
+
+    res_rot270 = edit_image(png_data, putar=270)
+    assert (res_rot270.width, res_rot270.height) == (40, 60)
+
+    res_flip_h = edit_image(png_data, balik="horizontal")
+    assert (res_flip_h.width, res_flip_h.height) == (60, 40)
+
+    res_flip_v = edit_image(png_data, balik="vertikal")
+    assert (res_flip_v.width, res_flip_v.height) == (60, 40)
+
+
+def test_http_image_edit_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/image/edit/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["max_mb"] == 15
+    assert data["max_pixels"] == EDIT_MAX_PIXELS
+    assert data["quality_min"] == 10
+    assert data["quality_max"] == 100
+    assert data["quality_default"] == 90
+    assert "putar_options" in data
+    assert "balik_options" in data
+    assert "rasio_options" in data
+    assert "patokan_options" in data
+    assert "orientasi_options" in data
+    assert "format_options" in data
+    assert "defaults" in data
+    assert data["defaults"]["putar"] == 0
+    assert data["defaults"]["balik"] == "tidak"
+    assert data["defaults"]["rasio"] == "bebas"
+    assert data["defaults"]["patokan"] == "tengah"
+    assert data["defaults"]["orientasi"] == "ya"
+    assert data["defaults"]["format"] == "tetap"
+    assert data["defaults"]["kualitas"] == 90
+
+
+def test_http_image_edit_sukses_putar_dan_balik() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    png_data = make_image("PNG", size=(60, 40), color="blue")
+
+    # Putar 90
+    resp_90 = client.post(
+        "/api/image/edit",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"putar": "90"},
+    )
+    assert resp_90.status_code == 200, resp_90.text
+    assert resp_90.headers["content-type"] == "image/png"
+    assert 'filename="hasil-edit.png"' in resp_90.headers["content-disposition"]
+    assert "no-store" in resp_90.headers.get("cache-control", "")
+    assert resp_90.headers["x-input-format"] == "png"
+    assert resp_90.headers["x-output-format"] == "png"
+    assert resp_90.headers["x-pixels"] == str(40 * 60)
+    assert resp_90.headers["x-image-width"] == "40"
+    assert resp_90.headers["x-image-height"] == "60"
+    img_90 = Image.open(io.BytesIO(resp_90.content))
+    assert img_90.size == (40, 60)
+
+    # Putar 180
+    resp_180 = client.post(
+        "/api/image/edit",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"putar": "180"},
+    )
+    assert resp_180.status_code == 200
+    img_180 = Image.open(io.BytesIO(resp_180.content))
+    assert img_180.size == (60, 40)
+
+    # Putar 270
+    resp_270 = client.post(
+        "/api/image/edit",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"putar": "270"},
+    )
+    assert resp_270.status_code == 200
+    img_270 = Image.open(io.BytesIO(resp_270.content))
+    assert img_270.size == (40, 60)
+
+    # Balik horizontal & vertikal
+    resp_flip_h = client.post(
+        "/api/image/edit",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"balik": "horizontal"},
+    )
+    assert resp_flip_h.status_code == 200
+    assert Image.open(io.BytesIO(resp_flip_h.content)).size == (60, 40)
+
+    resp_flip_v = client.post(
+        "/api/image/edit",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"balik": "vertikal"},
+    )
+    assert resp_flip_v.status_code == 200
+    assert Image.open(io.BytesIO(resp_flip_v.content)).size == (60, 40)
+
+
+def test_http_image_edit_sukses_potong_rasio_dan_patokan() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Gambar lanskap 100x50 dipotong rasio 1:1 (harus jadi 50x50)
+    png_wide = make_image("PNG", size=(100, 50), color="green")
+    for anchor in ("kiri", "tengah", "kanan", "atas", "bawah"):
+        resp = client.post(
+            "/api/image/edit",
+            files={"file": ("wide.png", png_wide, "image/png")},
+            data={"rasio": "1:1", "patokan": anchor},
+        )
+        assert resp.status_code == 200, resp.text
+        img_res = Image.open(io.BytesIO(resp.content))
+        assert img_res.size == (50, 50), f"Gagal pada anchor {anchor}: {img_res.size}"
+
+    # Gambar potret 50x100 dipotong rasio 1:1 (harus jadi 50x50)
+    png_tall = make_image("PNG", size=(50, 100), color="yellow")
+    for anchor in ("atas", "tengah", "bawah", "kiri", "kanan"):
+        resp = client.post(
+            "/api/image/edit",
+            files={"file": ("tall.png", png_tall, "image/png")},
+            data={"rasio": "1:1", "patokan": anchor},
+        )
+        assert resp.status_code == 200, resp.text
+        img_res = Image.open(io.BytesIO(resp.content))
+        assert img_res.size == (50, 50), f"Gagal pada anchor {anchor}: {img_res.size}"
+
+    # Rasio 16:9 pada 160x100 -> tinggi 90
+    png_169 = make_image("PNG", size=(160, 100), color="purple")
+    resp_169 = client.post(
+        "/api/image/edit",
+        files={"file": ("test.png", png_169, "image/png")},
+        data={"rasio": "16:9"},
+    )
+    assert resp_169.status_code == 200
+    assert Image.open(io.BytesIO(resp_169.content)).size == (160, 90)
+
+    # Rasio 9:16 pada 100x160 -> lebar 90
+    png_916 = make_image("PNG", size=(100, 160), color="red")
+    resp_916 = client.post(
+        "/api/image/edit",
+        files={"file": ("test.png", png_916, "image/png")},
+        data={"rasio": "9:16"},
+    )
+    assert resp_916.status_code == 200
+    assert Image.open(io.BytesIO(resp_916.content)).size == (90, 160)
+
+
+def test_http_image_edit_sukses_format_tujuan() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    png_data = make_image("PNG", size=(50, 50), color="red")
+    jpeg_data = make_image("JPEG", size=(50, 50), color="blue")
+    webp_data = make_image("WEBP", size=(50, 50), color="green")
+
+    # format: tetap
+    resp_png_tetap = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"format": "tetap"})
+    assert resp_png_tetap.status_code == 200
+    assert resp_png_tetap.headers["content-type"] == "image/png"
+    assert 'filename="hasil-edit.png"' in resp_png_tetap.headers["content-disposition"]
+
+    resp_jpg_tetap = client.post("/api/image/edit", files={"file": ("b.jpg", jpeg_data, "image/jpeg")}, data={"format": "tetap"})
+    assert resp_jpg_tetap.status_code == 200
+    assert resp_jpg_tetap.headers["content-type"] == "image/jpeg"
+    assert 'filename="hasil-edit.jpg"' in resp_jpg_tetap.headers["content-disposition"]
+
+    resp_webp_tetap = client.post("/api/image/edit", files={"file": ("c.webp", webp_data, "image/webp")}, data={"format": "tetap"})
+    assert resp_webp_tetap.status_code == 200
+    assert resp_webp_tetap.headers["content-type"] == "image/webp"
+    assert 'filename="hasil-edit.webp"' in resp_webp_tetap.headers["content-disposition"]
+
+    # konversi ke JPEG dengan kualitas
+    resp_to_jpeg = client.post(
+        "/api/image/edit",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"format": "jpeg", "kualitas": "75"},
+    )
+    assert resp_to_jpeg.status_code == 200
+    assert resp_to_jpeg.headers["content-type"] == "image/jpeg"
+    assert resp_to_jpeg.content.startswith(b"\xff\xd8\xff")
+
+    # konversi ke PNG
+    resp_to_png = client.post(
+        "/api/image/edit",
+        files={"file": ("b.jpg", jpeg_data, "image/jpeg")},
+        data={"format": "png"},
+    )
+    assert resp_to_png.status_code == 200
+    assert resp_to_png.headers["content-type"] == "image/png"
+    assert resp_to_png.content.startswith(b"\x89PNG")
+
+    # konversi ke WebP
+    resp_to_webp = client.post(
+        "/api/image/edit",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"format": "webp", "kualitas": "85"},
+    )
+    assert resp_to_webp.status_code == 200
+    assert resp_to_webp.headers["content-type"] == "image/webp"
+
+
+def test_http_image_edit_galat_not_image_dan_empty_file() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Bukan gambar -> 400 NOT_IMAGE
+    resp_not = client.post(
+        "/api/image/edit",
+        files={"file": ("test.png", b"ini file teks yang dinamai .png", "image/png")},
+    )
+    assert resp_not.status_code == 400
+    assert resp_not.json()["error"]["code"] == EDIT_NOT_IMAGE
+
+    # SVG tidak didukung di Image Editor -> 400 NOT_IMAGE
+    svg_data = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>'
+    resp_svg = client.post(
+        "/api/image/edit",
+        files={"file": ("test.svg", svg_data, "image/svg+xml")},
+    )
+    assert resp_svg.status_code == 400
+    assert resp_svg.json()["error"]["code"] == EDIT_NOT_IMAGE
+
+    # Berkas kosong -> 400 EMPTY_FILE
+    resp_empty = client.post(
+        "/api/image/edit",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["error"]["code"] == EDIT_EMPTY_FILE
+
+
+def test_http_image_edit_galat_invalid_request() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tanpa field file
+    resp_no_file = client.post("/api/image/edit", data={"putar": "0"})
+    assert resp_no_file.status_code == 400
+    assert resp_no_file.json()["error"]["code"] == EDIT_INVALID_REQUEST
+
+    # Permintaan JSON bukan multipart
+    resp_json = client.post("/api/image/edit", json={"putar": "0"})
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == EDIT_INVALID_REQUEST
+
+
+def test_http_image_edit_galat_parameter() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    png_data = make_image("PNG")
+
+    # UNSUPPORTED_ROTATE
+    resp_rot = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"putar": "45"})
+    assert resp_rot.status_code == 400
+    assert resp_rot.json()["error"]["code"] == EDIT_UNSUPPORTED_ROTATE
+
+    # UNSUPPORTED_FLIP
+    resp_flip = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"balik": "diagonal"})
+    assert resp_flip.status_code == 400
+    assert resp_flip.json()["error"]["code"] == EDIT_UNSUPPORTED_FLIP
+
+    # UNSUPPORTED_RATIO
+    resp_ratio = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"rasio": "21:9"})
+    assert resp_ratio.status_code == 400
+    assert resp_ratio.json()["error"]["code"] == EDIT_UNSUPPORTED_RATIO
+
+    # UNSUPPORTED_ANCHOR
+    resp_anchor = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"rasio": "1:1", "patokan": "pojok"})
+    assert resp_anchor.status_code == 400
+    assert resp_anchor.json()["error"]["code"] == EDIT_UNSUPPORTED_ANCHOR
+
+    # INVALID_BOOLEAN
+    resp_bool = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"orientasi": "mungkin"})
+    assert resp_bool.status_code == 400
+    assert resp_bool.json()["error"]["code"] == EDIT_INVALID_BOOLEAN
+
+    # UNSUPPORTED_TARGET
+    resp_target = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"format": "gif"})
+    assert resp_target.status_code == 400
+    assert resp_target.json()["error"]["code"] == EDIT_UNSUPPORTED_TARGET
+
+    # INVALID_QUALITY (bukan angka, < 10, > 100)
+    resp_q_str = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"kualitas": "bukan_angka"})
+    assert resp_q_str.status_code == 400
+    assert resp_q_str.json()["error"]["code"] == EDIT_INVALID_QUALITY
+
+    resp_q_low = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"kualitas": "5"})
+    assert resp_q_low.status_code == 400
+    assert resp_q_low.json()["error"]["code"] == EDIT_INVALID_QUALITY
+
+    resp_q_high = client.post("/api/image/edit", files={"file": ("a.png", png_data, "image/png")}, data={"kualitas": "105"})
+    assert resp_q_high.status_code == 400
+    assert resp_q_high.json()["error"]["code"] == EDIT_INVALID_QUALITY
+
+
+def test_http_image_edit_galat_payload_too_large_dan_too_many_pixels() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Uji PAYLOAD_TOO_LARGE lewat edit_image
+    expect_image_edit_error(
+        lambda: edit_image(b"\x89PNG\r\n\x1a\n" + b"0" * (EDIT_MAX_BYTES + 10)),
+        EDIT_PAYLOAD_TOO_LARGE,
+        413,
+    )
+
+    # Uji TOO_MANY_PIXELS (> 40.000.000 piksel)
+    img_huge = Image.new("1", (7000, 6000), 0)
+    buf = io.BytesIO()
+    img_huge.save(buf, format="PNG")
+    huge_png = buf.getvalue()
+
+    expect_image_edit_error(
+        lambda: edit_image(huge_png),
+        EDIT_TOO_MANY_PIXELS,
+        413,
+    )
+
+    resp_huge = client.post(
+        "/api/image/edit",
+        files={"file": ("huge.png", huge_png, "image/png")},
+    )
+    assert resp_huge.status_code == 413
+    assert resp_huge.json()["error"]["code"] == EDIT_TOO_MANY_PIXELS
+
+
+def test_http_image_edit_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "image-edit" in root_data["tools"]
+    assert "image-convert" in root_data["tools"]
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

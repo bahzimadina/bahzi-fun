@@ -3210,7 +3210,97 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   flex-wrap: wrap;
 }
 
-/* ================= Target sentuh QR di perangkat sentuh ================= */
+/* ================= Image Editor: panel alat inline ================= */
+.imgedit__preview-orig {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .7rem .8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.imgedit__thumb-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.imgedit__thumb {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.imgedit__orig-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+.imgedit__filename {
+  margin: 0;
+  font-weight: 600;
+  font-size: .88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imgedit__meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+.imgedit__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+}
+.imgedit__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .8rem;
+}
+.imgedit__row .field {
+  flex: 1 1 160px;
+}
+.imgedit__result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.imgedit__result .imgedit__thumb-wrap {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 240px;
+  padding: .4rem;
+  background: var(--code);
+}
+.imgedit__result .imgedit__thumb {
+  max-height: 220px;
+}
+.imgedit__result-meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ================= Target sentuh di perangkat sentuh (paling akhir) ================= */
 @media (pointer: coarse) {
   #qr-mode,
   #qr-ukuran,
@@ -3222,10 +3312,23 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #qr-clear,
   #qr-close,
   #qr-download,
-  #qr-panel label {
+  #qr-panel label,
+  #image-editor-putar,
+  #image-editor-balik,
+  #image-editor-rasio,
+  #image-editor-patokan,
+  #image-editor-orientasi,
+  #image-editor-format,
+  #image-editor-kualitas,
+  #image-editor-submit,
+  #image-editor-clear,
+  #image-editor-close,
+  #image-editor-download,
+  #image-editor-panel label {
     min-height: 44px;
     min-width: 44px;
   }
 }
+
 
 
