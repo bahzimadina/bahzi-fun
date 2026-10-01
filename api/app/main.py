@@ -286,6 +286,21 @@ from .qr_tool import (
     generate_code,
     limits_payload as qr_limits_payload_func,
 )
+from .prime_generator import (
+    INVALID_RANGE as PRIME_INVALID_RANGE,
+    INVALID_REQUEST as PRIME_INVALID_REQUEST,
+    MAX_BYTES as PRIME_MAX_BYTES,
+    NO_VALUE as PRIME_NO_VALUE,
+    NOT_A_NUMBER as PRIME_NOT_A_NUMBER,
+    OUT_OF_RANGE as PRIME_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as PRIME_PAYLOAD_TOO_LARGE,
+    TIMEOUT as PRIME_TIMEOUT,
+    TOO_MANY_RESULTS as PRIME_TOO_MANY_RESULTS,
+    UNSUPPORTED_MODE as PRIME_UNSUPPORTED_MODE,
+    PrimeError,
+    limits_payload as prime_limits_payload_func,
+    process_prime,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -501,11 +516,24 @@ async def handle_qr_tool_error(request: Request, exc: QrToolError) -> JSONRespon
     )
 
 
+@app.exception_handler(PrimeError)
+async def handle_prime_error(request: Request, exc: PrimeError) -> JSONResponse:
+    """Error bilangan prima yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("prime ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/ocr"):
+    if request.url.path.startswith("/api/prime"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
+    elif request.url.path.startswith("/api/ocr"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi gambar atau PDF."
     elif request.url.path.startswith("/api/qr"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks'."
@@ -1065,6 +1093,27 @@ def _reject_oversized_qr_content_length(request: Request) -> None:
 
 def _qr_limits_payload() -> dict:
     return qr_limits_payload_func()
+
+
+def _reject_oversized_prime_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas prime."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > PRIME_MAX_BYTES:
+        raise PrimeError(
+            PRIME_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar (maksimal 16 KB).",
+            413,
+        )
+
+
+def _prime_limits_payload() -> dict:
+    return prime_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -2227,6 +2276,95 @@ async def qr_endpoint(
     return Response(content=result.content, media_type="image/png", headers=headers)
 
 
+@app.get("/api/prime/limits")
+async def prime_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Prime Number Generator."""
+    return JSONResponse(content=_prime_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/prime")
+async def prime_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    jumlah: str = Form(default=None),
+    dari: str = Form(default=None),
+    sampai: str = Form(default=None),
+    angka: str = Form(default=None),
+):
+    """Hitung atau periksa bilangan prima di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_prime_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise PrimeError(
+            PRIME_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise PrimeError(
+            PRIME_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if jumlah is None and "jumlah" in form:
+        jumlah = form.get("jumlah")
+    if dari is None and "dari" in form:
+        dari = form.get("dari")
+    if sampai is None and "sampai" in form:
+        sampai = form.get("sampai")
+    if angka is None and "angka" in form:
+        angka = form.get("angka")
+
+    if mode is None:
+        raise PrimeError(
+            PRIME_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'mode' wajib diisi.",
+            400,
+        )
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (mode, jumlah, dari, sampai, angka)
+    ):
+        raise PrimeError(
+            PRIME_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = process_prime(
+        mode=mode,
+        jumlah=jumlah,
+        dari=dari,
+        sampai=sampai,
+        angka=angka,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log: cukup mode dan durasi.
+    logger.info(
+        "prime selesai: mode=%s durasi=%.0fms",
+        result.get("mode", mode),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -2251,6 +2389,7 @@ async def root() -> dict:
             "date-calc",
             "countdown",
             "qr",
+            "prime",
         ],
     }
 

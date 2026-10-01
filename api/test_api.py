@@ -380,6 +380,25 @@ from app.image_edit import (  # noqa: E402
     normalize_rotate as edit_normalize_rotate,
     normalize_target as edit_normalize_target,
 )
+from app.prime_generator import (
+    INVALID_RANGE as PRIME_INVALID_RANGE,
+    INVALID_REQUEST as PRIME_INVALID_REQUEST,
+    MAX_BYTES as PRIME_MAX_BYTES,
+    NO_VALUE as PRIME_NO_VALUE,
+    NOT_A_NUMBER as PRIME_NOT_A_NUMBER,
+    OUT_OF_RANGE as PRIME_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as PRIME_PAYLOAD_TOO_LARGE,
+    TIMEOUT as PRIME_TIMEOUT,
+    TOO_MANY_RESULTS as PRIME_TOO_MANY_RESULTS,
+    UNSUPPORTED_MODE as PRIME_UNSUPPORTED_MODE,
+    PrimeError,
+    factorize_number,
+    generate_primes_deret,
+    generate_primes_rentang,
+    is_prime,
+    limits_payload as prime_limits_payload_func,
+    process_prime,
+)
 
 
 SKIPPED: list[str] = []
@@ -556,6 +575,20 @@ def expect_image_edit_error(func, code: str, status: int) -> ImageEditError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar ImageEditError {code}")
+
+
+def expect_prime_error(func, code: str, status: int) -> PrimeError:
+    """Pastikan func() melempar PrimeError dengan kode + status yang tepat."""
+    try:
+        func()
+    except PrimeError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar PrimeError {code}")
 
 
 
@@ -5387,6 +5420,215 @@ def test_http_image_edit_root_endpoint_dan_regresi() -> None:
     root_data = root_resp.json()
     assert "image-edit" in root_data["tools"]
     assert "image-convert" in root_data["tools"]
+
+
+# --- Uji Prime Number Generator ---------------------------------------------
+def test_http_prime_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/prime/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert "modes" in data
+    mode_ids = [m["id"] for m in data["modes"]]
+    assert "deret" in mode_ids
+    assert "rentang" in mode_ids
+    assert "periksa" in mode_ids
+    assert data["batas_hasil"] == 5000
+    assert data["batas_waktu_detik"] == 10
+
+
+def test_http_prime_deret_100() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "deret", "jumlah": "100"})
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["mode"] == "deret"
+    assert data["banyak"] == 100
+    assert len(data["daftar"]) == 100
+    assert data["daftar"][0] == 2
+    assert data["daftar"][-1] == 541
+    assert data["terbesar"] == 541
+    assert "jumlah_digit" in data
+    assert "waktu_ms" in data
+
+
+def test_http_prime_deret_1() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "deret", "jumlah": "1"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "deret"
+    assert data["daftar"] == [2]
+    assert data["banyak"] == 1
+    assert data["terbesar"] == 2
+
+
+def test_http_prime_rentang_10_50() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "rentang", "dari": "10", "sampai": "50"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "rentang"
+    expected = [11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
+    assert data["daftar"] == expected
+    assert data["banyak"] == len(expected)
+    assert data["terbesar"] == 47
+
+
+def test_http_prime_rentang_batas_bawah_nol() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "rentang", "dari": "0", "sampai": "50"})
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data["error"]["code"] == PRIME_OUT_OF_RANGE
+
+
+def test_http_prime_periksa_97() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "periksa", "angka": "97"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "periksa"
+    assert data["angka"] == 97
+    assert data["prima"] is True
+    assert data["faktor"] == [{"prima": 97, "pangkat": 1}]
+    assert data["faktorisasi"] == "97"
+
+
+def test_http_prime_periksa_100() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "periksa", "angka": "100"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "periksa"
+    assert data["angka"] == 100
+    assert data["prima"] is False
+    assert data["faktor"] == [{"prima": 2, "pangkat": 2}, {"prima": 5, "pangkat": 2}]
+    assert data["faktorisasi"] == "2^2 x 5^2"
+
+
+def test_http_prime_not_a_number() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp1 = client.post("/api/prime", data={"mode": "deret", "jumlah": "abc"})
+    assert resp1.status_code == 400
+    assert resp1.json()["error"]["code"] == PRIME_NOT_A_NUMBER
+
+    resp2 = client.post("/api/prime", data={"mode": "deret", "jumlah": "10.5"})
+    assert resp2.status_code == 400
+    assert resp2.json()["error"]["code"] == PRIME_NOT_A_NUMBER
+
+    resp3 = client.post("/api/prime", data={"mode": "periksa", "angka": "1,000"})
+    assert resp3.status_code == 400
+    assert resp3.json()["error"]["code"] == PRIME_NOT_A_NUMBER
+
+
+def test_http_prime_invalid_range() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "rentang", "dari": "50", "sampai": "10"})
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data["error"]["code"] == PRIME_INVALID_RANGE
+
+
+def test_http_prime_unsupported_mode() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "acak", "jumlah": "10"})
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data["error"]["code"] == PRIME_UNSUPPORTED_MODE
+
+
+def test_http_prime_too_many_results() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post("/api/prime", data={"mode": "rentang", "dari": "2", "sampai": "100000"})
+    assert resp.status_code == 413
+    data = resp.json()
+    assert data["error"]["code"] == PRIME_TOO_MANY_RESULTS
+
+
+def test_http_prime_no_store_header() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp_ok = client.post("/api/prime", data={"mode": "deret", "jumlah": "10"})
+    assert resp_ok.status_code == 200
+    assert "no-store" in resp_ok.headers.get("cache-control", "")
+
+    resp_err = client.post("/api/prime", data={"mode": "deret", "jumlah": "-5"})
+    assert resp_err.status_code == 400
+    assert "no-store" in resp_err.headers.get("cache-control", "")
+
+
+def test_http_prime_no_value_dan_invalid_request() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp_no_mode = client.post("/api/prime", data={})
+    assert resp_no_mode.status_code == 400
+    assert resp_no_mode.json()["error"]["code"] == PRIME_INVALID_REQUEST
+
+    resp_json = client.post("/api/prime", json={"mode": "deret", "jumlah": "10"})
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == PRIME_INVALID_REQUEST
+
+    resp_no_val = client.post("/api/prime", data={"mode": "periksa", "angka": ""})
+    assert resp_no_val.status_code == 400
+    assert resp_no_val.json()["error"]["code"] == PRIME_NO_VALUE
+
+
+def test_http_prime_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/")
+    assert resp.status_code == 200
+    tools = resp.json()["tools"]
+    assert "prime" in tools
+    assert "qr" in tools
+
+
+def test_prime_logika_is_prime_dan_faktorisasi() -> None:
+    assert is_prime(2) is True
+    assert is_prime(3) is True
+    assert is_prime(4) is False
+    assert is_prime(97) is True
+    assert is_prime(100) is False
+    assert is_prime(10**15) is False
+
+    p_besar = 999999999999989
+    t0 = time.monotonic()
+    hasil_p = is_prime(p_besar)
+    durasi = time.monotonic() - t0
+    assert hasil_p is True
+    assert durasi < 2.0, f"Pemeriksaan prima 10^15 terlalu lambat: {durasi:.2f} detik"
+
+    is_p, factors, formula = factorize_number(100)
+    assert is_p is False
+    assert formula == "2^2 x 5^2"
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------
