@@ -301,6 +301,23 @@ from .prime_generator import (
     limits_payload as prime_limits_payload_func,
     process_prime,
 )
+from .timezone import (
+    INVALID_DATE as TZ_INVALID_DATE,
+    INVALID_RANGE as TZ_INVALID_RANGE,
+    INVALID_REQUEST as TZ_INVALID_REQUEST,
+    INVALID_TIME as TZ_INVALID_TIME,
+    INVALID_ZONE as TZ_INVALID_ZONE,
+    MAX_BYTES as TZ_MAX_BYTES,
+    MODES as TZ_MODES,
+    OUT_OF_RANGE as TZ_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as TZ_PAYLOAD_TOO_LARGE,
+    TOO_MANY_ZONES as TZ_TOO_MANY_ZONES,
+    UNSUPPORTED_MODE as TZ_UNSUPPORTED_MODE,
+    ZONES as TZ_ZONES,
+    TimezoneError,
+    limits_payload as timezone_limits_payload_func,
+    proses_zona,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -527,11 +544,24 @@ async def handle_prime_error(request: Request, exc: PrimeError) -> JSONResponse:
     )
 
 
+@app.exception_handler(TimezoneError)
+async def handle_timezone_error(request: Request, exc: TimezoneError) -> JSONResponse:
+    """Error konverter zona waktu yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("zona waktu ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/prime"):
+    if request.url.path.startswith("/api/timezone"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
+    elif request.url.path.startswith("/api/prime"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/ocr"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi gambar atau PDF."
@@ -1114,6 +1144,27 @@ def _reject_oversized_prime_content_length(request: Request) -> None:
 
 def _prime_limits_payload() -> dict:
     return prime_limits_payload_func()
+
+
+def _reject_oversized_timezone_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas konverter zona waktu."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > TZ_MAX_BYTES:
+        raise TimezoneError(
+            TZ_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar (maksimal 64 KB).",
+            413,
+        )
+
+
+def _timezone_limits_payload() -> dict:
+    return timezone_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -2365,6 +2416,117 @@ async def prime_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/timezone/limits")
+async def timezone_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Konverter Zona Waktu."""
+    return JSONResponse(content=_timezone_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/timezone")
+async def timezone_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    tanggal: str = Form(default=None),
+    jam: str = Form(default=None),
+    dari: str = Form(default=None),
+    ke: str = Form(default=None),
+    zona: str = Form(default=None),
+    jam_mulai: str = Form(default=None),
+    jam_selesai: str = Form(default=None),
+):
+    """Konversi zona waktu, bandingkan kota, atau cari jam rapat di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_timezone_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise TimezoneError(
+            TZ_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise TimezoneError(
+            TZ_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if tanggal is None and "tanggal" in form:
+        tanggal = form.get("tanggal")
+    if jam is None and "jam" in form:
+        jam = form.get("jam")
+    if dari is None and "dari" in form:
+        dari = form.get("dari")
+    if ke is None and "ke" in form:
+        ke = form.get("ke")
+    if zona is None and "zona" in form:
+        zona = form.get("zona")
+    if jam_mulai is None and "jam_mulai" in form:
+        jam_mulai = form.get("jam_mulai")
+    if jam_selesai is None and "jam_selesai" in form:
+        jam_selesai = form.get("jam_selesai")
+
+    if mode is None:
+        raise TimezoneError(
+            TZ_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'mode' wajib diisi.",
+            400,
+        )
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (mode, tanggal, jam, dari, ke, zona, jam_mulai, jam_selesai)
+    ):
+        raise TimezoneError(
+            TZ_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = proses_zona(
+        mode=mode,
+        tanggal=tanggal,
+        jam=jam,
+        dari=dari,
+        ke=ke,
+        zona=zona,
+        jam_mulai=jam_mulai,
+        jam_selesai=jam_selesai,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    count_zones = 1
+    if mode == "titik":
+        count_zones = 2
+    elif mode == "banding":
+        count_zones = len(result.get("daftar", []))
+    elif mode == "cocok":
+        rekom = result.get("rekomendasi", [])
+        count_zones = len(rekom[0].get("detail", [])) if rekom else 1
+
+    # JANGAN mencatat tanggal/jam/zona masukan pengguna ke log: cukup mode, jumlah zona, dan durasi.
+    logger.info(
+        "timezone selesai: mode=%s zona=%d durasi=%.0fms",
+        result.get("mode", mode),
+        count_zones,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -2390,6 +2552,7 @@ async def root() -> dict:
             "countdown",
             "qr",
             "prime",
+            "timezone",
         ],
     }
 

@@ -399,6 +399,24 @@ from app.prime_generator import (
     limits_payload as prime_limits_payload_func,
     process_prime,
 )
+from app.timezone import (
+    INVALID_DATE as TZ_INVALID_DATE,
+    INVALID_RANGE as TZ_INVALID_RANGE,
+    INVALID_REQUEST as TZ_INVALID_REQUEST,
+    INVALID_TIME as TZ_INVALID_TIME,
+    INVALID_ZONE as TZ_INVALID_ZONE,
+    MAX_BYTES as TZ_MAX_BYTES,
+    MAX_ZONES as TZ_MAX_ZONES,
+    MODES as TZ_MODES,
+    OUT_OF_RANGE as TZ_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as TZ_PAYLOAD_TOO_LARGE,
+    TOO_MANY_ZONES as TZ_TOO_MANY_ZONES,
+    UNSUPPORTED_MODE as TZ_UNSUPPORTED_MODE,
+    ZONES as TZ_ZONES,
+    TimezoneError,
+    limits_payload as timezone_limits_payload_func,
+    proses_zona,
+)
 
 
 SKIPPED: list[str] = []
@@ -5629,6 +5647,286 @@ def test_prime_logika_is_prime_dan_faktorisasi() -> None:
     is_p, factors, formula = factorize_number(100)
     assert is_p is False
     assert formula == "2^2 x 5^2"
+
+
+# --- Uji Konverter Zona Waktu -----------------------------------------------
+def test_http_timezone_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/timezone/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert "modes" in data
+    assert "zones" in data
+    assert data["max_zones"] == 8
+    assert len(data["zones"]) == 22
+    mode_ids = [m["id"] for m in data["modes"]]
+    assert "titik" in mode_ids
+    assert "banding" in mode_ids
+    assert "cocok" in mode_ids
+
+
+def test_http_timezone_titik_wib_ke_london_dan_sebaliknya() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # WIB ke London (tanggal sama, 06:30 WIB -> 00:30 BST)
+    resp = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-10-03", "jam": "06:30", "dari": "wib", "ke": "london"},
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["mode"] == "titik"
+    assert data["acuan"]["zona"] == "wib"
+    assert data["tujuan"]["zona"] == "london"
+    assert data["tujuan"]["jam"] == "00:30"
+    assert data["geser_hari"] == 0
+    assert data["geser_teks"] == "tanggal sama"
+    assert data["selisih_menit"] == 360
+    assert "London 6 jam lebih lambat dari Jakarta" in data["selisih_teks"]
+
+    # WIB ke London dengan geser hari kemarin (04:00 WIB -> 22:00 BST hari sebelumnya)
+    resp_prev = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-10-03", "jam": "04:00", "dari": "wib", "ke": "london"},
+    )
+    assert resp_prev.status_code == 200
+    data_prev = resp_prev.json()
+    assert data_prev["geser_hari"] == -1
+    assert data_prev["geser_teks"] == "kemarin di zona tujuan"
+
+    # London ke WIB (00:30 BST -> 06:30 WIB)
+    resp2 = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-10-03", "jam": "00:30", "dari": "london", "ke": "wib"},
+    )
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data2["tujuan"]["jam"] == "06:30"
+    assert data2["geser_hari"] == 0
+    assert data2["geser_teks"] == "tanggal sama"
+    assert data2["selisih_menit"] == 360
+    assert "Jakarta 6 jam lebih cepat dari London" in data2["selisih_teks"]
+
+    # London ke WIB dengan geser hari besok (23:00 BST -> 05:00 WIB hari berikutnya)
+    resp_next = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-10-03", "jam": "23:00", "dari": "london", "ke": "wib"},
+    )
+    assert resp_next.status_code == 200
+    data_next = resp_next.json()
+    assert data_next["geser_hari"] == 1
+    assert data_next["geser_teks"] == "besok di zona tujuan"
+
+
+def test_http_timezone_banding_4_zona() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post(
+        "/api/timezone",
+        data={
+            "mode": "banding",
+            "tanggal": "2026-10-03",
+            "jam": "09:00",
+            "dari": "wib",
+            "zona": "tokyo,london,newyork,sydney",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "banding"
+    assert len(data["daftar"]) == 4
+    zone_ids = [item["zona"] for item in data["daftar"]]
+    assert zone_ids == ["tokyo", "london", "newyork", "sydney"]
+    for item in data["daftar"]:
+        assert "zona" in item
+        assert "label" in item
+        assert "iana" in item
+        assert "tanggal" in item
+        assert "jam" in item
+        assert "waktu" in item
+        assert "offset_teks" in item
+        assert "singkatan" in item
+        assert "geser_hari" in item
+        assert "geser_teks" in item
+        assert "jam_kerja" in item
+        assert "keterangan" in item
+        assert isinstance(item["jam_kerja"], bool)
+
+
+def test_http_timezone_cocok_rentang_kecil() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.post(
+        "/api/timezone",
+        data={
+            "mode": "cocok",
+            "tanggal": "2026-10-03",
+            "dari": "wib",
+            "zona": "tokyo,london,sydney",
+            "jam_mulai": "12",
+            "jam_selesai": "16",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "cocok"
+    assert data["rentang"]["jam_mulai"] == "12:00"
+    assert data["rentang"]["jam_selesai"] == "16:00"
+    rekom = data["rekomendasi"]
+    assert len(rekom) == 5
+    for i in range(len(rekom) - 1):
+        assert rekom[i]["cocok"] >= rekom[i + 1]["cocok"]
+    assert rekom[0]["total"] == 4
+    assert "jam_acuan_teks" in rekom[0]
+    assert len(rekom[0]["detail"]) == 4
+
+
+def test_http_timezone_daylight_saving_summer_vs_winter() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # London musim panas (BST -> UTC+01:00)
+    resp_summer = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-07-15", "jam": "12:00", "dari": "wib", "ke": "london"},
+    )
+    assert resp_summer.status_code == 200
+    data_summer = resp_summer.json()
+    assert data_summer["tujuan"]["offset_teks"] == "UTC+01:00"
+    assert data_summer["tujuan"]["singkatan"] == "BST"
+
+    # London musim dingin (GMT -> UTC+00:00)
+    resp_winter = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-01-15", "jam": "12:00", "dari": "wib", "ke": "london"},
+    )
+    assert resp_winter.status_code == 200
+    data_winter = resp_winter.json()
+    assert data_winter["tujuan"]["offset_teks"] == "UTC+00:00"
+    assert data_winter["tujuan"]["singkatan"] == "GMT"
+
+
+def test_http_timezone_jalur_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # INVALID_REQUEST: tanpa mode
+    r1 = client.post("/api/timezone", data={})
+    assert r1.status_code == 400
+    assert r1.json()["error"]["code"] == TZ_INVALID_REQUEST
+
+    # INVALID_REQUEST: kirim json bukan multipart
+    r_json = client.post("/api/timezone", json={"mode": "titik"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == TZ_INVALID_REQUEST
+
+    # INVALID_REQUEST: field kurang pada mode titik
+    r_missing = client.post("/api/timezone", data={"mode": "titik", "tanggal": "2026-10-03"})
+    assert r_missing.status_code == 400
+    assert r_missing.json()["error"]["code"] == TZ_INVALID_REQUEST
+
+    # UNSUPPORTED_MODE
+    r_mode = client.post("/api/timezone", data={"mode": "teleport"})
+    assert r_mode.status_code == 400
+    assert r_mode.json()["error"]["code"] == TZ_UNSUPPORTED_MODE
+
+    # INVALID_ZONE: zona tidak dikenal
+    r_zone = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-10-03", "jam": "06:30", "dari": "atlantis", "ke": "london"},
+    )
+    assert r_zone.status_code == 400
+    assert r_zone.json()["error"]["code"] == TZ_INVALID_ZONE
+    assert "atlantis" in r_zone.json()["error"]["message"]
+
+    # TOO_MANY_ZONES: lebih dari 8 zona
+    r_many = client.post(
+        "/api/timezone",
+        data={
+            "mode": "banding",
+            "tanggal": "2026-10-03",
+            "jam": "09:00",
+            "dari": "wib",
+            "zona": "tokyo,seoul,shanghai,hongkong,delhi,dubai,mekkah,kairo,london",
+        },
+    )
+    assert r_many.status_code == 400
+    assert r_many.json()["error"]["code"] == TZ_TOO_MANY_ZONES
+
+    # INVALID_DATE: format tanggal salah
+    r_date = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "03-10-2026", "jam": "06:30", "dari": "wib", "ke": "london"},
+    )
+    assert r_date.status_code == 400
+    assert r_date.json()["error"]["code"] == TZ_INVALID_DATE
+
+    # OUT_OF_RANGE: tahun di luar 1900-2100
+    r_year = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "1899-10-03", "jam": "06:30", "dari": "wib", "ke": "london"},
+    )
+    assert r_year.status_code == 400
+    assert r_year.json()["error"]["code"] == TZ_OUT_OF_RANGE
+
+    # INVALID_TIME: format jam salah
+    r_time = client.post(
+        "/api/timezone",
+        data={"mode": "titik", "tanggal": "2026-10-03", "jam": "25:70", "dari": "wib", "ke": "london"},
+    )
+    assert r_time.status_code == 400
+    assert r_time.json()["error"]["code"] == TZ_INVALID_TIME
+
+    # INVALID_RANGE: jam_mulai >= jam_selesai pada mode cocok
+    r_range = client.post(
+        "/api/timezone",
+        data={
+            "mode": "cocok",
+            "tanggal": "2026-10-03",
+            "dari": "wib",
+            "zona": "tokyo,london",
+            "jam_mulai": "18",
+            "jam_selesai": "09",
+        },
+    )
+    assert r_range.status_code == 400
+    assert r_range.json()["error"]["code"] == TZ_INVALID_RANGE
+
+
+def test_http_timezone_payload_too_large() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    huge_data = "x" * 70000
+    resp = client.post("/api/timezone", data={"mode": "titik", "ekstra": huge_data})
+    assert resp.status_code == 413
+    assert resp.json()["error"]["code"] == TZ_PAYLOAD_TOO_LARGE
+
+
+def test_http_timezone_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/")
+    assert resp.status_code == 200
+    tools = resp.json()["tools"]
+    assert "timezone" in tools
+    assert "prime" in tools
+    assert "unit-convert" in tools
+
+    r_prime = client.get("/api/prime/limits")
+    assert r_prime.status_code == 200
+    r_unit = client.get("/api/unit-convert/limits")
+    assert r_unit.status_code == 200
+    r_date = client.get("/api/date-calc/limits")
+    assert r_date.status_code == 200
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------
