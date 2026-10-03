@@ -15,6 +15,7 @@ Keluar dengan status 1 bila ada uji yang gagal.
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 import os
@@ -416,6 +417,30 @@ from app.timezone import (
     TimezoneError,
     limits_payload as timezone_limits_payload_func,
     proses_zona,
+)
+from app.csv_tool import (
+    CHUNK_SIZE as CSV_CHUNK_SIZE,
+    INDENTS as CSV_INDENTS,
+    INVALID_BOOLEAN as CSV_INVALID_BOOLEAN,
+    INVALID_FORMAT as CSV_INVALID_FORMAT,
+    INVALID_INDENT as CSV_INVALID_INDENT,
+    INVALID_JSON as CSV_INVALID_JSON,
+    INVALID_REQUEST as CSV_INVALID_REQUEST,
+    INVALID_SEPARATOR as CSV_INVALID_SEPARATOR,
+    MAX_BYTES as CSV_MAX_BYTES,
+    MAX_CHARS as CSV_MAX_CHARS,
+    MAX_COLS as CSV_MAX_COLS,
+    MAX_ROWS as CSV_MAX_ROWS,
+    MODES as CSV_MODES,
+    NO_TEXT as CSV_NO_TEXT,
+    PAYLOAD_TOO_LARGE as CSV_PAYLOAD_TOO_LARGE,
+    TOO_LONG as CSV_TOO_LONG,
+    TOO_MANY_COLUMNS as CSV_TOO_MANY_COLUMNS,
+    TOO_MANY_ROWS as CSV_TOO_MANY_ROWS,
+    UNSUPPORTED_MODE as CSV_UNSUPPORTED_MODE,
+    CsvToolError,
+    limits_payload as csv_limits_payload_func,
+    proses_csv,
 )
 
 
@@ -5927,6 +5952,332 @@ def test_http_timezone_root_endpoint_dan_regresi() -> None:
     assert r_unit.status_code == 200
     r_date = client.get("/api/date-calc/limits")
     assert r_date.status_code == 200
+
+
+# --- Uji CSV Tools ----------------------------------------------------------
+def test_csv_ke_json_lengkap() -> None:
+    # 1. Parsing CSV sadar tanda kutip RFC 4180 dengan sel berkutip berisi koma dan kutip ganda
+    csv_teks = (
+        'nama,kota,catatan\n'
+        'Budi,"Jakarta, Selatan","Kata dia: ""Halo!"""\n'
+        'Siti,Surabaya,Biasa saja\n'
+    )
+    res = proses_csv(csv_teks, mode="ke_json", pemisah="otomatis", header="ya", rapikan="ya", indent="2")
+    assert res["mode"] == "ke_json"
+    assert res["pemisah_terpakai"] == "koma"
+    assert res["ringkasan"]["jumlah_baris"] == 2
+    assert res["ringkasan"]["jumlah_kolom"] == 3
+    data = res["keluaran"]["data"]
+    assert len(data) == 2
+    assert data[0]["nama"] == "Budi"
+    assert data[0]["kota"] == "Jakarta, Selatan"
+    assert data[0]["catatan"] == 'Kata dia: "Halo!"'
+
+    # 2. Header kosong dan ganda (kolom_2, nama_2)
+    csv_header_aneh = (
+        'nama,,nama,skor\n'
+        'Budi,10,Utama,100\n'
+    )
+    res_hdr = proses_csv(csv_header_aneh, mode="ke_json", header="ya")
+    data_hdr = res_hdr["keluaran"]["data"]
+    assert "nama" in data_hdr[0]
+    assert "kolom_2" in data_hdr[0]
+    assert "nama_2" in data_hdr[0]
+    assert "skor" in data_hdr[0]
+    assert data_hdr[0]["kolom_2"] == "10"
+    assert data_hdr[0]["nama_2"] == "Utama"
+
+    # 3. Baris sel kurang (diisi string kosong) dan sel lebih (kolom_tambahan_1)
+    csv_beda_sel = (
+        'a,b\n'
+        '1\n'
+        '1,2,3,4\n'
+    )
+    res_sel = proses_csv(csv_beda_sel, mode="ke_json", header="ya")
+    data_sel = res_sel["keluaran"]["data"]
+    assert data_sel[0] == {"a": "1", "b": ""}
+    assert data_sel[1]["a"] == "1"
+    assert data_sel[1]["b"] == "2"
+    assert data_sel[1]["kolom_tambahan_1"] == "3"
+    assert data_sel[1]["kolom_tambahan_2"] == "4"
+    assert "kolom_tambahan" in res_sel["catatan"]
+
+    # 4. Header=tidak (array dari array)
+    res_no_hdr = proses_csv("1,2\n3,4", mode="ke_json", header="tidak")
+    assert res_no_hdr["keluaran"]["data"] == [["1", "2"], ["3", "4"]]
+
+    # 5. Pemisah titik_koma, tab, pipa
+    res_semi = proses_csv("a;b\n1;2", mode="ke_json", pemisah="titik_koma")
+    assert res_semi["pemisah_terpakai"] == "titik_koma"
+    assert res_semi["keluaran"]["data"] == [{"a": "1", "b": "2"}]
+
+    res_tab = proses_csv("a\tb\n1\t2", mode="ke_json", pemisah="tab")
+    assert res_tab["pemisah_terpakai"] == "tab"
+
+    res_pipa = proses_csv("a|b\n1|2", mode="ke_json", pemisah="pipa")
+    assert res_pipa["pemisah_terpakai"] == "pipa"
+
+    # 6. Indentasi 4 dan tab
+    res_ind4 = proses_csv("a,b\n1,2", mode="ke_json", indent="4")
+    assert "    " in res_ind4["keluaran"]["teks"]
+
+    res_ind_tab = proses_csv("a,b\n1,2", mode="ke_json", indent="tab")
+    assert "\t" in res_ind_tab["keluaran"]["teks"]
+
+
+def test_csv_ke_csv_lengkap() -> None:
+    # 1. Array objek dengan kunci gabungan menurut kemunculan pertama
+    json_obj = json.dumps([
+        {"id": 1, "nama": "Budi"},
+        {"nama": "Siti", "kota": "Surabaya"},
+        {"id": 3, "kota": "Medan", "extra": {"level": 2}},
+    ])
+    res = proses_csv(json_obj, mode="ke_csv", pemisah="koma")
+    assert res["mode"] == "ke_csv"
+    assert res["ringkasan"]["jumlah_baris"] == 3
+    assert res["ringkasan"]["jumlah_kolom"] == 4
+    csv_lines = res["keluaran"]["teks"].splitlines()
+    assert csv_lines[0] == "id,nama,kota,extra"
+    # Nilai bersarang objek disimpan sebagai JSON padat; kutip di dalam sel ditulis ganda.
+    baris_ketiga = list(csv.reader(csv_lines))[3]
+    assert baris_ketiga == ["3", "", "Medan", '{"level":2}']
+
+    # 2. Objek wrapper dengan field data / items / rows
+    json_wrap = json.dumps({"data": [{"x": 10, "y": 20}]})
+    res_wrap = proses_csv(json_wrap, mode="ke_csv")
+    assert res_wrap["ringkasan"]["jumlah_baris"] == 1
+
+    # 3. Array dari array
+    json_arr = json.dumps([["h1", "h2"], ["val1", "val2,dengan,koma"]])
+    res_arr = proses_csv(json_arr, mode="ke_csv")
+    lines_arr = res_arr["keluaran"]["teks"].splitlines()
+    assert lines_arr[0] == "h1,h2"
+    assert lines_arr[1] == 'val1,"val2,dengan,koma"'
+
+
+def test_csv_ringkas_lengkap() -> None:
+    csv_teks = (
+        "angka,tanggal,kategori,status,kosong\n"
+        "10,2026-01-01,Elektronik,Aktif,\n"
+        "50,2026-06-15,Pakaian,Aktif,\n"
+        "100,2026-12-31,Elektronik,Pasif,\n"
+        ",2026-03-10,Makanan,Aktif,\n"
+    )
+    res = proses_csv(csv_teks, mode="ringkas", header="ya", rapikan="ya")
+    assert res["mode"] == "ringkas"
+    assert res["ringkasan"]["total_baris"] == 4
+    assert res["ringkasan"]["total_kolom"] == 5
+    assert res["ringkasan"]["kolom_kosong"] == 1
+
+    cols = {c["nama"]: c for c in res["kolom"]}
+    # Angka
+    assert cols["angka"]["tipe"] == "angka"
+    assert cols["angka"]["nilai_terkecil"] == 10
+    assert cols["angka"]["nilai_terbesar"] == 100
+    assert cols["angka"]["sel_kosong"] == 1
+    assert cols["angka"]["nilai_unik"] == 3
+
+    # Tanggal
+    assert cols["tanggal"]["tipe"] == "tanggal"
+    assert cols["tanggal"]["nilai_terkecil"] == "2026-01-01"
+    assert cols["tanggal"]["nilai_terbesar"] == "2026-12-31"
+
+    # Teks
+    assert cols["status"]["tipe"] == "teks"
+    assert cols["status"]["nilai_terbanyak"][0] == {"nilai": "Aktif", "jumlah": 3}
+
+    # Kolom kosong
+    assert cols["kosong"]["tipe"] == "kosong"
+    assert cols["kosong"]["sel_kosong"] == 4
+
+
+def test_csv_galat_logika() -> None:
+    # NO_TEXT
+    try:
+        proses_csv("", mode="ke_json")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_NO_TEXT
+
+    # INVALID_REQUEST (mode kosong)
+    try:
+        proses_csv("a,b", mode="")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_REQUEST
+
+    # UNSUPPORTED_MODE
+    try:
+        proses_csv("a,b", mode="magic")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_UNSUPPORTED_MODE
+
+    # INVALID_SEPARATOR
+    try:
+        proses_csv("a,b", mode="ke_json", pemisah="spasi")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_SEPARATOR
+
+    # INVALID_BOOLEAN
+    try:
+        proses_csv("a,b", mode="ke_json", header="mungkin")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_BOOLEAN
+
+    # INVALID_INDENT
+    try:
+        proses_csv("a,b", mode="ke_json", indent="8")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_INDENT
+
+    # INVALID_JSON pada mode ke_csv
+    try:
+        proses_csv("bukan json sah", mode="ke_csv")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_JSON
+        assert e.detail is not None
+        assert "baris" in e.detail
+
+    # INVALID_FORMAT pada mode ke_csv (bukan array / tabel)
+    try:
+        proses_csv('{"skalar": 123}', mode="ke_csv")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_FORMAT
+
+    # INVALID_FORMAT pada mode ke_json bila diberi data JSON
+    try:
+        proses_csv('[{"a": 1}]', mode="ke_json")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_INVALID_FORMAT
+
+    # TOO_LONG (> 400.000 karakter)
+    try:
+        proses_csv("a," * 250000, mode="ke_json")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_TOO_LONG
+
+    # TOO_MANY_COLUMNS (> 200)
+    banyak_kolom = ",".join(f"col_{i}" for i in range(205))
+    try:
+        proses_csv(banyak_kolom + "\n" + banyak_kolom, mode="ke_json")
+        assert False, "harus gagal"
+    except CsvToolError as e:
+        assert e.code == CSV_TOO_MANY_COLUMNS
+
+
+def test_http_csv_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/csv/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert "modes" in data
+    assert "separators" in data
+    assert "contoh_csv" in data
+    assert "contoh_json" in data
+    assert data["max_chars"] == CSV_MAX_CHARS
+    assert data["max_rows"] == CSV_MAX_ROWS
+    assert data["max_cols"] == CSV_MAX_COLS
+
+
+def test_http_csv_ke_json_endpoint() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    csv_data = "nama,nilai\nBudi,90\nSiti,95"
+    resp = client.post(
+        "/api/csv",
+        data={"teks": csv_data, "mode": "ke_json", "header": "ya"},
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    assert "X-Processing-Ms" in resp.headers
+    body = resp.json()
+    assert body["mode"] == "ke_json"
+    assert len(body["keluaran"]["data"]) == 2
+    assert body["keluaran"]["data"][0]["nama"] == "Budi"
+
+
+def test_http_csv_ke_csv_endpoint() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    json_data = json.dumps([{"nama": "Andi", "skor": 85}])
+    resp = client.post(
+        "/api/csv",
+        data={"teks": json_data, "mode": "ke_csv"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "ke_csv"
+    assert "nama,skor" in body["keluaran"]["teks"]
+
+
+def test_http_csv_ringkas_endpoint() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    csv_data = "item,harga\nBuku,15000\nPena,5000"
+    resp = client.post(
+        "/api/csv",
+        data={"teks": csv_data, "mode": "ringkas"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "ringkas"
+    assert len(body["kolom"]) == 2
+
+
+def test_http_csv_jalur_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # JSON body ditolak
+    r_json = client.post("/api/csv", json={"mode": "ke_json"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == CSV_INVALID_REQUEST
+
+    # Mode kosong
+    r_no_mode = client.post("/api/csv", data={"teks": "a,b"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == CSV_INVALID_REQUEST
+
+    # Teks kosong
+    r_no_text = client.post("/api/csv", data={"teks": "", "mode": "ke_json"})
+    assert r_no_text.status_code == 400
+    assert r_no_text.json()["error"]["code"] == CSV_NO_TEXT
+
+    # Mode tidak didukung
+    r_bad_mode = client.post("/api/csv", data={"teks": "a,b", "mode": "unknown"})
+    assert r_bad_mode.status_code == 400
+    assert r_bad_mode.json()["error"]["code"] == CSV_UNSUPPORTED_MODE
+
+    # Format JSON salah di ke_csv
+    r_bad_json = client.post("/api/csv", data={"teks": "{rusak", "mode": "ke_csv"})
+    assert r_bad_json.status_code == 400
+    assert r_bad_json.json()["error"]["code"] == CSV_INVALID_JSON
+    assert "posisi" in r_bad_json.json()["error"]
+
+
+def test_http_csv_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/")
+    assert resp.status_code == 200
+    tools = resp.json()["tools"]
+    assert "csv" in tools
+    assert "timezone" in tools
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

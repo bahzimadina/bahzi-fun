@@ -318,6 +318,30 @@ from .timezone import (
     limits_payload as timezone_limits_payload_func,
     proses_zona,
 )
+from .csv_tool import (
+    CHUNK_SIZE as CSV_CHUNK_SIZE,
+    INDENTS as CSV_INDENTS,
+    INVALID_BOOLEAN as CSV_INVALID_BOOLEAN,
+    INVALID_FORMAT as CSV_INVALID_FORMAT,
+    INVALID_INDENT as CSV_INVALID_INDENT,
+    INVALID_JSON as CSV_INVALID_JSON,
+    INVALID_REQUEST as CSV_INVALID_REQUEST,
+    INVALID_SEPARATOR as CSV_INVALID_SEPARATOR,
+    MAX_BYTES as CSV_MAX_BYTES,
+    MAX_CHARS as CSV_MAX_CHARS,
+    MAX_COLS as CSV_MAX_COLS,
+    MAX_ROWS as CSV_MAX_ROWS,
+    MODES as CSV_MODES,
+    NO_TEXT as CSV_NO_TEXT,
+    PAYLOAD_TOO_LARGE as CSV_PAYLOAD_TOO_LARGE,
+    TOO_LONG as CSV_TOO_LONG,
+    TOO_MANY_COLUMNS as CSV_TOO_MANY_COLUMNS,
+    TOO_MANY_ROWS as CSV_TOO_MANY_ROWS,
+    UNSUPPORTED_MODE as CSV_UNSUPPORTED_MODE,
+    CsvToolError,
+    limits_payload as csv_limits_payload_func,
+    proses_csv,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -555,11 +579,27 @@ async def handle_timezone_error(request: Request, exc: TimezoneError) -> JSONRes
     )
 
 
+@app.exception_handler(CsvToolError)
+async def handle_csv_tool_error(request: Request, exc: CsvToolError) -> JSONResponse:
+    """Error alat CSV yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("alat csv ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    content = exc.to_dict()
+    if exc.detail and "posisi" not in content.get("error", {}):
+        content.setdefault("error", {})["posisi"] = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/timezone"):
+    if request.url.path.startswith("/api/csv"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks' dan 'mode'."
+    elif request.url.path.startswith("/api/timezone"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/prime"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
@@ -1165,6 +1205,27 @@ def _reject_oversized_timezone_content_length(request: Request) -> None:
 
 def _timezone_limits_payload() -> dict:
     return timezone_limits_payload_func()
+
+
+def _reject_oversized_csv_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat CSV."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > CSV_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise CsvToolError(
+            CSV_PAYLOAD_TOO_LARGE,
+            f"Ukuran permintaan melebihi batas {CSV_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+def _csv_limits_payload() -> dict:
+    return csv_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -2527,6 +2588,101 @@ async def timezone_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/csv/limits")
+async def csv_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk CSV Tools."""
+    return JSONResponse(content=_csv_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/csv")
+async def csv_endpoint(
+    request: Request,
+    teks: str = Form(default=None),
+    mode: str = Form(default=None),
+    pemisah: str = Form(default=None),
+    header: str = Form(default=None),
+    rapikan: str = Form(default=None),
+    indent: str = Form(default=None),
+):
+    """Ubah CSV ke JSON, JSON ke CSV, atau ringkas kolom CSV di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_csv_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise CsvToolError(
+            CSV_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise CsvToolError(
+            CSV_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if teks is None and "teks" in form:
+        teks = form.get("teks")
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if pemisah is None and "pemisah" in form:
+        pemisah = form.get("pemisah")
+    if header is None and "header" in form:
+        header = form.get("header")
+    if rapikan is None and "rapikan" in form:
+        rapikan = form.get("rapikan")
+    if indent is None and "indent" in form:
+        indent = form.get("indent")
+
+    if mode is None:
+        raise CsvToolError(
+            CSV_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'mode' wajib diisi.",
+            400,
+        )
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (teks, mode, pemisah, header, rapikan, indent)
+    ):
+        raise CsvToolError(
+            CSV_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = proses_csv(
+        teks=teks,
+        mode=mode,
+        pemisah=pemisah,
+        header=header,
+        rapikan=rapikan,
+        indent=indent,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # JANGAN mencatat isi masukan pengguna ke log: cukup mode, ukuran, dan durasi.
+    char_len = len(teks) if isinstance(teks, str) else 0
+    logger.info(
+        "csv selesai: mode=%s chars=%d durasi=%.0fms",
+        result.get("mode", mode),
+        char_len,
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -2553,6 +2709,7 @@ async def root() -> dict:
             "qr",
             "prime",
             "timezone",
+            "csv",
         ],
     }
 

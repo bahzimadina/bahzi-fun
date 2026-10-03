@@ -87,7 +87,7 @@
       icon: 'icon-data',
       tools: [
         { name: 'Rapikan & periksa JSON', desc: 'Periksa, rapikan, atau padatkan JSON.', status: 'available', action: 'json' },
-        { name: 'CSV Tools', desc: 'Lihat, sunting, dan konversi berkas CSV.', status: 'soon' },
+        { name: 'CSV Tools', desc: 'Ubah CSV jadi JSON, JSON jadi CSV, atau lihat ringkasan kolomnya.', status: 'available', action: 'csv' },
         { name: 'XML Tools', desc: 'Format dan validasi dokumen XML.', status: 'soon' },
         { name: 'Base64 Encoder/Decoder', desc: 'Ubah teks jadi Base64 dan sebaliknya, termasuk varian aman tautan.', status: 'available', action: 'base64' },
         { name: 'QR & Barcode Generator', desc: 'Buat kode QR dan barcode dari teks.', status: 'available', action: 'qr' }
