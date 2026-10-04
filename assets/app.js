@@ -76,7 +76,7 @@
       icon: 'icon-math',
       tools: [
         { name: 'Prime Number Generator', desc: 'Hasilkan bilangan prima, cari bilangan prima dalam rentang, atau periksa satu angka.', status: 'available', action: 'prime' },
-        { name: 'Kalkulator Listrik (V/I/R)', desc: 'Hitung tegangan, arus, dan resistansi.', status: 'soon' },
+        { name: 'Kalkulator listrik', desc: 'Hitung tegangan, arus, hambatan, daya, dan perkiraan biaya listrik.', status: 'available', action: 'listrik' },
         { name: 'Kalkulator Persen', desc: 'Hitung persentase, kenaikan, dan potongan.', status: 'available', action: 'percent-calc' },
         { name: 'Unit Converter', desc: 'Ubah nilai antar satuan panjang, berat, suhu, luas, volume, kecepatan, waktu, dan data.', status: 'available', action: 'unit-converter' }
       ]

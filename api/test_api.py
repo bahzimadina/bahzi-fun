@@ -442,6 +442,29 @@ from app.csv_tool import (
     limits_payload as csv_limits_payload_func,
     proses_csv,
 )
+from app.listrik import (
+    DIVIDE_BY_ZERO as LK_DIVIDE_BY_ZERO,
+    INVALID_REQUEST as LK_INVALID_REQUEST,
+    LIST_KOSONG as LK_LIST_KOSONG,
+    MAX_INPUT_CHARS as LK_MAX_INPUT_CHARS,
+    NILAI_KURANG as LK_NILAI_KURANG,
+    NOT_A_NUMBER as LK_NOT_A_NUMBER,
+    OUT_OF_RANGE as LK_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as LK_PAYLOAD_TOO_LARGE,
+    TERLALU_BANYAK_NILAI as LK_TERLALU_BANYAK_NILAI,
+    TOO_MANY_ITEMS as LK_TOO_MANY_ITEMS,
+    UNSUPPORTED_JENIS as LK_UNSUPPORTED_JENIS,
+    UNSUPPORTED_MODE as LK_UNSUPPORTED_MODE,
+    ListrikError,
+    format_angka as format_listrik_angka,
+    format_rupiah as format_listrik_rupiah,
+    hitung_daya,
+    hitung_hambatan,
+    hitung_listrik,
+    hitung_ohm,
+    limits_payload as listrik_limits_payload_func,
+    parse_number as parse_listrik_number,
+)
 
 
 SKIPPED: list[str] = []
@@ -6278,6 +6301,483 @@ def test_http_csv_root_endpoint_dan_regresi() -> None:
     tools = resp.json()["tools"]
     assert "csv" in tools
     assert "timezone" in tools
+
+
+# --- Uji Kalkulator Listrik --------------------------------------------------
+def test_listrik_format_angka_dan_rupiah() -> None:
+    assert format_listrik_angka(0) == "0"
+    assert format_listrik_angka(220) == "220"
+    assert format_listrik_angka(1100) == "1.100"
+    assert format_listrik_angka(1444.7) == "1.444,7"
+    assert format_listrik_angka(5.6) == "5,6"
+    assert format_listrik_angka(3.333333333) == "3,333333"
+    assert format_listrik_rupiah(1444.7) == "Rp 1.444,7"
+    assert format_listrik_rupiah(242709.6) == "Rp 242.709,6"
+    assert format_listrik_rupiah(0) == "Rp 0"
+
+
+def test_listrik_parse_number() -> None:
+    assert parse_listrik_number("220") == 220.0
+    assert parse_listrik_number(" 5 ") == 5.0
+    assert parse_listrik_number("1.444,7") == 1444.7
+    assert parse_listrik_number("1444.7") == 1444.7
+    assert parse_listrik_number("0,5") == 0.5
+    assert parse_listrik_number("1.000.000") == 1000000.0
+
+
+def test_listrik_mode_ohm_variasi() -> None:
+    # 1. Hitung tegangan (arus=5 A, hambatan=44 Ω) -> V = 220 V, P = 1100 W
+    res_v = hitung_ohm(tegangan_raw="", arus_raw="5", hambatan_raw="44")
+    assert res_v["dihitung"] == "tegangan"
+    assert res_v["hasil"]["nilai"] == 220.0
+    assert res_v["hasil"]["teks"] == "220"
+    assert res_v["hasil"]["satuan"] == "V"
+    assert res_v["daya"]["nilai"] == 1100.0
+    assert res_v["daya"]["teks"] == "1.100"
+    assert len(res_v["langkah"]) == 2
+    assert "catatan_jujur" in res_v
+
+    # 2. Hitung arus (tegangan=220 V, hambatan=44 Ω) -> I = 5 A, P = 1100 W
+    res_i = hitung_ohm(tegangan_raw="220", arus_raw="", hambatan_raw="44")
+    assert res_i["dihitung"] == "arus"
+    assert res_i["hasil"]["nilai"] == 5.0
+    assert res_i["hasil"]["teks"] == "5"
+    assert res_i["hasil"]["satuan"] == "A"
+    assert res_i["daya"]["nilai"] == 1100.0
+
+    # 3. Hitung hambatan (tegangan=220 V, arus=5 A) -> R = 44 Ω, P = 1100 W
+    res_r = hitung_ohm(tegangan_raw="220", arus_raw="5", hambatan_raw="")
+    assert res_r["dihitung"] == "hambatan"
+    assert res_r["hasil"]["nilai"] == 44.0
+    assert res_r["hasil"]["teks"] == "44"
+    assert res_r["hasil"]["satuan"] == "Ω"
+    assert res_r["daya"]["nilai"] == 1100.0
+
+
+def test_listrik_mode_ohm_galat() -> None:
+    # Kurang dari dua nilai terisi
+    try:
+        hitung_ohm(tegangan_raw="220", arus_raw="", hambatan_raw="")
+    except ListrikError as e:
+        assert e.code == LK_NILAI_KURANG
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu NILAI_KURANG"
+
+    # Semua tiga nilai terisi
+    try:
+        hitung_ohm(tegangan_raw="220", arus_raw="5", hambatan_raw="44")
+    except ListrikError as e:
+        assert e.code == LK_TERLALU_BANYAK_NILAI
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu TERLALU_BANYAK_NILAI"
+
+    # Hambatan 0 -> DIVIDE_BY_ZERO
+    try:
+        hitung_ohm(tegangan_raw="220", arus_raw="", hambatan_raw="0")
+    except ListrikError as e:
+        assert e.code == LK_DIVIDE_BY_ZERO
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu DIVIDE_BY_ZERO"
+
+    # Arus 0 -> DIVIDE_BY_ZERO
+    try:
+        hitung_ohm(tegangan_raw="220", arus_raw="0", hambatan_raw="")
+    except ListrikError as e:
+        assert e.code == LK_DIVIDE_BY_ZERO
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu DIVIDE_BY_ZERO"
+
+    # Tegangan 0 -> OUT_OF_RANGE
+    try:
+        hitung_ohm(tegangan_raw="0", arus_raw="5", hambatan_raw="")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Nilai negatif -> OUT_OF_RANGE
+    try:
+        hitung_ohm(tegangan_raw="-220", arus_raw="5", hambatan_raw="")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Nilai bukan angka -> NOT_A_NUMBER
+    try:
+        hitung_ohm(tegangan_raw="abc", arus_raw="5", hambatan_raw="")
+    except ListrikError as e:
+        assert e.code == LK_NOT_A_NUMBER
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu NOT_A_NUMBER"
+
+    # Panjang karakter melebihi 24 -> OUT_OF_RANGE
+    try:
+        hitung_ohm(tegangan_raw="1" * 25, arus_raw="5", hambatan_raw="")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+
+def test_listrik_mode_daya_sukses() -> None:
+    res = hitung_daya(
+        daya_alat_raw="350",
+        jam_per_hari_raw="8",
+        jumlah_alat_raw="2",
+        hari_raw="30",
+        tarif_raw="1444.7",
+    )
+    # kwh = 350 * 8 * 2 * 30 / 1000 = 168.0 kWh
+    # biaya = 168.0 * 1444.7 = 242709.6 Rp
+    assert res["hasil"]["kwh"]["nilai"] == 168.0
+    assert res["hasil"]["kwh"]["teks"] == "168"
+    assert res["hasil"]["biaya"]["nilai"] == 242709.6
+    assert "242.709,6" in res["hasil"]["biaya"]["teks"]
+
+    # Turunan
+    assert res["turunan"]["kwh_per_hari"]["nilai"] == 5.6
+    assert res["turunan"]["biaya_per_hari"]["nilai"] == 5.6 * 1444.7
+    assert res["turunan"]["biaya_per_bulan"]["nilai"] == 5.6 * 30.0 * 1444.7
+    assert res["turunan"]["biaya_per_tahun"]["nilai"] == 5.6 * 365.0 * 1444.7
+    assert len(res["langkah"]) == 4
+
+    # Tarif 0 diperbolehkan
+    res_nol = hitung_daya(
+        daya_alat_raw="100",
+        jam_per_hari_raw="10",
+        jumlah_alat_raw="1",
+        hari_raw="1",
+        tarif_raw="0",
+    )
+    assert res_nol["hasil"]["kwh"]["nilai"] == 1.0
+    assert res_nol["hasil"]["biaya"]["nilai"] == 0.0
+
+
+def test_listrik_mode_daya_galat() -> None:
+    # Daya di bawah 0.1 W
+    try:
+        hitung_daya("0.05", "8", "1", "30", "1500")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Jam di atas 24
+    try:
+        hitung_daya("100", "25", "1", "30", "1500")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Jumlah alat bukan bilangan bulat
+    try:
+        hitung_daya("100", "8", "2.5", "30", "1500")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Jumlah hari bukan bilangan bulat
+    try:
+        hitung_daya("100", "8", "2", "30.5", "1500")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Tarif negatif
+    try:
+        hitung_daya("100", "8", "2", "30", "-1500")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Tarif melebihi 100.000
+    try:
+        hitung_daya("100", "8", "2", "30", "100001")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+
+def test_listrik_mode_hambatan_seri_dan_paralel() -> None:
+    # Seri: 100 + 220 + 470 = 790 Ω
+    res_s = hitung_hambatan("100\n220\n470", "seri")
+    assert res_s["jenis"] == "seri"
+    assert res_s["jumlah_komponen"] == 3
+    assert res_s["hasil"]["nilai"] == 790.0
+    assert res_s["hasil"]["teks"] == "790"
+    assert res_s["hasil"]["satuan"] == "Ω"
+    assert len(res_s["komponen"]) == 3
+
+    # Paralel: 1/(1/100 + 1/100) = 50 Ω
+    res_p = hitung_hambatan("100\n100", "paralel")
+    assert res_p["jenis"] == "paralel"
+    assert res_p["jumlah_komponen"] == 2
+    assert res_p["hasil"]["nilai"] == 50.0
+    assert res_p["hasil"]["teks"] == "50"
+
+    # Paralel 3 komponen: 10, 20, 30
+    # 1/R = 1/10 + 1/20 + 1/30 = 6/60 + 3/60 + 2/60 = 11/60
+    # R = 60/11 = 5.4545454545...
+    res_p3 = hitung_hambatan("10\n20\n30", "paralel")
+    expected = 60.0 / 11.0
+    assert abs(res_p3["hasil"]["nilai"] - expected) < 1e-9
+    assert res_p3["hasil"]["teks"] == "5,454545"
+
+    # Mengabaikan baris kosong
+    res_sp = hitung_hambatan("100\n\n  \n220\n470\n", "seri")
+    assert res_sp["hasil"]["nilai"] == 790.0
+
+    # 50 komponen seri dan paralel
+    items_50 = "\n".join(["100"] * 50)
+    res_50_s = hitung_hambatan(items_50, "seri")
+    assert res_50_s["hasil"]["nilai"] == 5000.0
+    assert res_50_s["jumlah_komponen"] == 50
+
+    res_50_p = hitung_hambatan(items_50, "paralel")
+    assert abs(res_50_p["hasil"]["nilai"] - 2.0) < 1e-9
+    assert res_50_p["jumlah_komponen"] == 50
+
+
+def test_listrik_mode_hambatan_galat() -> None:
+    # Daftar kosong
+    try:
+        hitung_hambatan("", "seri")
+    except ListrikError as e:
+        assert e.code == LK_LIST_KOSONG
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu LIST_KOSONG"
+
+    # Daftar spasi saja
+    try:
+        hitung_hambatan("   \n\n  ", "seri")
+    except ListrikError as e:
+        assert e.code == LK_LIST_KOSONG
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu LIST_KOSONG"
+
+    # Lebih dari 50 komponen (51 baris) -> TOO_MANY_ITEMS (413)
+    items_51 = "\n".join(["10"] * 51)
+    try:
+        hitung_hambatan(items_51, "seri")
+    except ListrikError as e:
+        assert e.code == LK_TOO_MANY_ITEMS
+        assert e.status_code == 413
+    else:
+        assert False, "Harus memicu TOO_MANY_ITEMS"
+
+    # Jenis tidak didukung
+    try:
+        hitung_hambatan("100\n200", "campuran")
+    except ListrikError as e:
+        assert e.code == LK_UNSUPPORTED_JENIS
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu UNSUPPORTED_JENIS"
+
+    # Nilai 0 -> DIVIDE_BY_ZERO
+    try:
+        hitung_hambatan("100\n0\n200", "seri")
+    except ListrikError as e:
+        assert e.code == LK_DIVIDE_BY_ZERO
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu DIVIDE_BY_ZERO"
+
+    # Nilai negatif -> OUT_OF_RANGE
+    try:
+        hitung_hambatan("100\n-50\n200", "seri")
+    except ListrikError as e:
+        assert e.code == LK_OUT_OF_RANGE
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu OUT_OF_RANGE"
+
+    # Nilai bukan angka -> NOT_A_NUMBER
+    try:
+        hitung_hambatan("100\nsepuluh\n200", "seri")
+    except ListrikError as e:
+        assert e.code == LK_NOT_A_NUMBER
+        assert e.status_code == 400
+    else:
+        assert False, "Harus memicu NOT_A_NUMBER"
+
+
+def test_listrik_limits_payload() -> None:
+    data = listrik_limits_payload_func()
+    assert data["max_input_chars"] == 24
+    assert data["max_value"] == 1e12
+    assert data["max_items"] == 50
+    assert data["processed_on"] == "server"
+    modes = [m["value"] for m in data["modes"]]
+    assert "ohm" in modes
+    assert "daya" in modes
+    assert "hambatan" in modes
+    assert "catatan_jujur" in data
+
+
+def test_http_listrik_endpoints() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. GET /api/listrik/limits
+    r_limits = client.get("/api/listrik/limits")
+    assert r_limits.status_code == 200
+    assert "no-store" in r_limits.headers.get("cache-control", "")
+    assert len(r_limits.json()["modes"]) == 3
+
+    # 2. POST /api/listrik - mode ohm
+    r_ohm = client.post(
+        "/api/listrik",
+        data={"mode": "ohm", "tegangan": "", "arus": "5", "hambatan": "44"},
+    )
+    assert r_ohm.status_code == 200
+    assert "no-store" in r_ohm.headers.get("cache-control", "")
+    assert "X-Processing-Ms" in r_ohm.headers
+    body_ohm = r_ohm.json()
+    assert body_ohm["mode"] == "ohm"
+    assert body_ohm["hasil"]["nilai"] == 220.0
+    assert body_ohm["daya"]["nilai"] == 1100.0
+
+    # 3. POST /api/listrik - mode daya
+    r_daya = client.post(
+        "/api/listrik",
+        data={
+            "mode": "daya",
+            "daya_alat": "350",
+            "jam_per_hari": "8",
+            "jumlah_alat": "2",
+            "hari": "30",
+            "tarif": "1444.7",
+        },
+    )
+    assert r_daya.status_code == 200
+    body_daya = r_daya.json()
+    assert body_daya["mode"] == "daya"
+    assert body_daya["hasil"]["kwh"]["nilai"] == 168.0
+
+    # 4. POST /api/listrik - mode hambatan
+    r_hambatan = client.post(
+        "/api/listrik",
+        data={"mode": "hambatan", "jenis": "paralel", "daftar": "100\n100"},
+    )
+    assert r_hambatan.status_code == 200
+    body_hambatan = r_hambatan.json()
+    assert body_hambatan["mode"] == "hambatan"
+    assert body_hambatan["hasil"]["nilai"] == 50.0
+
+
+def test_http_listrik_jalur_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Non-multipart body (JSON) -> 400 INVALID_REQUEST
+    r_json = client.post("/api/listrik", json={"mode": "ohm"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == LK_INVALID_REQUEST
+
+    # Mode kosong -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/listrik", data={})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == LK_INVALID_REQUEST
+
+    # Mode tidak didukung -> 400 UNSUPPORTED_MODE
+    r_bad_mode = client.post("/api/listrik", data={"mode": "tidak_ada"})
+    assert r_bad_mode.status_code == 400
+    assert r_bad_mode.json()["error"]["code"] == LK_UNSUPPORTED_MODE
+
+    # Mode ohm kurang nilai -> 400 NILAI_KURANG
+    r_ohm_kurang = client.post("/api/listrik", data={"mode": "ohm", "tegangan": "220"})
+    assert r_ohm_kurang.status_code == 400
+    assert r_ohm_kurang.json()["error"]["code"] == LK_NILAI_KURANG
+
+    # Mode ohm terlalu banyak nilai -> 400 TERLALU_BANYAK_NILAI
+    r_ohm_lebih = client.post(
+        "/api/listrik",
+        data={"mode": "ohm", "tegangan": "220", "arus": "5", "hambatan": "44"},
+    )
+    assert r_ohm_lebih.status_code == 400
+    assert r_ohm_lebih.json()["error"]["code"] == LK_TERLALU_BANYAK_NILAI
+
+    # Mode ohm pembagian dengan nol -> 400 DIVIDE_BY_ZERO
+    r_ohm_zero = client.post(
+        "/api/listrik",
+        data={"mode": "ohm", "tegangan": "220", "arus": "0"},
+    )
+    assert r_ohm_zero.status_code == 400
+    assert r_ohm_zero.json()["error"]["code"] == LK_DIVIDE_BY_ZERO
+
+    # Mode daya di luar rentang -> 400 OUT_OF_RANGE
+    r_daya_range = client.post(
+        "/api/listrik",
+        data={
+            "mode": "daya",
+            "daya_alat": "0",
+            "jam_per_hari": "8",
+            "jumlah_alat": "1",
+            "hari": "30",
+            "tarif": "1500",
+        },
+    )
+    assert r_daya_range.status_code == 400
+    assert r_daya_range.json()["error"]["code"] == LK_OUT_OF_RANGE
+
+    # Mode hambatan daftar kosong -> 400 LIST_KOSONG
+    r_hambatan_empty = client.post(
+        "/api/listrik",
+        data={"mode": "hambatan", "jenis": "seri", "daftar": "   "},
+    )
+    assert r_hambatan_empty.status_code == 400
+    assert r_hambatan_empty.json()["error"]["code"] == LK_LIST_KOSONG
+
+    # Mode hambatan > 50 baris -> 413 TOO_MANY_ITEMS
+    r_hambatan_banyak = client.post(
+        "/api/listrik",
+        data={"mode": "hambatan", "jenis": "seri", "daftar": "\n".join(["10"] * 51)},
+    )
+    assert r_hambatan_banyak.status_code == 413
+    assert r_hambatan_banyak.json()["error"]["code"] == LK_TOO_MANY_ITEMS
+
+    # Mode hambatan jenis tidak didukung -> 400 UNSUPPORTED_JENIS
+    r_hambatan_bad_j = client.post(
+        "/api/listrik",
+        data={"mode": "hambatan", "jenis": "segitiga", "daftar": "10\n20"},
+    )
+    assert r_hambatan_bad_j.status_code == 400
+    assert r_hambatan_bad_j.json()["error"]["code"] == LK_UNSUPPORTED_JENIS
+
+
+def test_http_listrik_root_endpoint() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/")
+    assert resp.status_code == 200
+    tools = resp.json()["tools"]
+    assert "listrik" in tools
 
 
 # --- Uji HTTP ke server yang benar-benar jalan ------------------------------

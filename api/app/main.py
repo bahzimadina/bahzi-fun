@@ -342,6 +342,23 @@ from .csv_tool import (
     limits_payload as csv_limits_payload_func,
     proses_csv,
 )
+from .listrik import (
+    DIVIDE_BY_ZERO as LK_DIVIDE_BY_ZERO,
+    INVALID_REQUEST as LK_INVALID_REQUEST,
+    LIST_KOSONG as LK_LIST_KOSONG,
+    MAX_INPUT_CHARS as LK_MAX_INPUT_CHARS,
+    NILAI_KURANG as LK_NILAI_KURANG,
+    NOT_A_NUMBER as LK_NOT_A_NUMBER,
+    OUT_OF_RANGE as LK_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as LK_PAYLOAD_TOO_LARGE,
+    TERLALU_BANYAK_NILAI as LK_TERLALU_BANYAK_NILAI,
+    TOO_MANY_ITEMS as LK_TOO_MANY_ITEMS,
+    UNSUPPORTED_JENIS as LK_UNSUPPORTED_JENIS,
+    UNSUPPORTED_MODE as LK_UNSUPPORTED_MODE,
+    ListrikError,
+    hitung_listrik,
+    limits_payload as listrik_limits_payload_func,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -593,11 +610,24 @@ async def handle_csv_tool_error(request: Request, exc: CsvToolError) -> JSONResp
     )
 
 
+@app.exception_handler(ListrikError)
+async def handle_listrik_error(request: Request, exc: ListrikError) -> JSONResponse:
+    """Error kalkulator listrik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("kalkulator listrik ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/csv"):
+    if request.url.path.startswith("/api/listrik"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
+    elif request.url.path.startswith("/api/csv"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks' dan 'mode'."
     elif request.url.path.startswith("/api/timezone"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
@@ -1226,6 +1256,27 @@ def _reject_oversized_csv_content_length(request: Request) -> None:
 
 def _csv_limits_payload() -> dict:
     return csv_limits_payload_func()
+
+
+def _reject_oversized_listrik_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator listrik (32 KB)."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 32 * 1024:
+        raise ListrikError(
+            LK_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 32 KB.",
+            413,
+        )
+
+
+def _listrik_limits_payload() -> dict:
+    return listrik_limits_payload_func()
 
 
 # --- Endpoint -----------------------------------------------------------------
@@ -2683,6 +2734,52 @@ async def csv_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/listrik/limits")
+async def listrik_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Kalkulator listrik."""
+    return JSONResponse(content=_listrik_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/listrik")
+async def listrik_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+):
+    """Hitung kalkulator listrik di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_listrik_content_length(request)
+
+    form = await request.form()
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise ListrikError(
+                LK_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    form_dict = dict(form)
+    mode_val = mode if mode is not None else form_dict.get("mode")
+
+    result = hitung_listrik(mode=mode_val, data=form_dict)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log - cukup mode dan durasi.
+    logger.info(
+        "kalkulator listrik selesai: mode=%s durasi=%.0fms",
+        result.get("mode", mode_val),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -2710,6 +2807,7 @@ async def root() -> dict:
             "prime",
             "timezone",
             "csv",
+            "listrik",
         ],
     }
 
