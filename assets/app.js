@@ -40,7 +40,7 @@
       name: 'PDF',
       icon: 'icon-pdf',
       tools: [
-        { name: 'PDF Splitter', desc: 'Pecah dokumen PDF menjadi beberapa berkas.', status: 'soon' },
+        { name: 'PDF Splitter', desc: 'Pecah dokumen PDF menjadi beberapa berkas, atau ambil sebagian halamannya.', status: 'available', href: '/pisah-pdf/' },
         { name: 'PDF Merger', desc: 'Gabungkan beberapa PDF jadi satu berkas (diproses di server).', status: 'available', action: 'pdf-merge' },
         { name: 'PDF Editor', desc: 'Sunting teks dan halaman PDF secara ringan.', status: 'soon' },
         { name: 'PDF to Image', desc: 'Ubah tiap halaman PDF menjadi gambar.', status: 'soon' },

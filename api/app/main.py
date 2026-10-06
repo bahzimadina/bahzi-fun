@@ -68,6 +68,16 @@ from .pdf_merge import (
     check_total_size,
     merge_pdfs,
 )
+from .pdf_split import (
+    DEFAULT_CHUNK as SPLIT_DEFAULT_CHUNK,
+    MAX_CHUNK as SPLIT_MAX_CHUNK,
+    MAX_FILE_BYTES as SPLIT_MAX_FILE_BYTES,
+    MAX_PAGES as SPLIT_MAX_PAGES,
+    MIN_CHUNK as SPLIT_MIN_CHUNK,
+    PdfSplitError,
+    inspect_pdf,
+    split_pdf,
+)
 from .case_convert import (
     CHUNK_SIZE as CC_CHUNK_SIZE,
     MAX_BYTES as CC_MAX_BYTES,
@@ -434,6 +444,12 @@ if _cors_origins:
             "X-Qr-Mode",
             "X-Qr-Pixels",
             "X-Qr-Bytes",
+            "X-Output-Kind",
+            "X-Output-Count",
+            "X-Source-Pages",
+            "X-Result-Pages",
+            "X-First-Page",
+            "X-Last-Page",
         ],
     )
 
@@ -447,6 +463,17 @@ async def handle_pdf_error(request: Request, exc: PdfMergeError) -> JSONResponse
     """Error yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
     logger.warning("ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
+@app.exception_handler(PdfSplitError)
+async def handle_pdf_split_error(request: Request, exc: PdfSplitError) -> JSONResponse:
+    """Error pemisahan PDF yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("pisah pdf ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.exception_handler(ImageConvertError)
@@ -699,6 +726,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
     elif request.url.path.startswith("/api/image/edit"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/pdf/split"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     else:
         msg = (
             "Permintaan tidak valid. Kirim multipart/form-data dengan satu "
@@ -822,6 +851,23 @@ def _limits_payload() -> dict:
             "Berkas dikirim ke server ini, digabung di memori, lalu dibuang setelah "
             "respons dikirim. Tidak ada berkas yang disimpan di disk."
         ),
+    }
+
+
+def _pdf_split_limits_payload() -> dict:
+    return {
+        "max_file_bytes": SPLIT_MAX_FILE_BYTES,
+        "max_file_mb": SPLIT_MAX_FILE_BYTES // (1024 * 1024),
+        "max_pages": SPLIT_MAX_PAGES,
+        "modes": [
+            {"id": "per-halaman", "label": "Pisah setiap halaman"},
+            {"id": "rentang", "label": "Ambil rentang halaman"},
+            {"id": "setiap-n", "label": "Pisah per beberapa halaman"},
+        ],
+        "default_chunk": SPLIT_DEFAULT_CHUNK,
+        "min_chunk": SPLIT_MIN_CHUNK,
+        "max_chunk": SPLIT_MAX_CHUNK,
+        "sample_range": "1-3,5",
     }
 
 
@@ -1395,6 +1441,86 @@ async def pdf_merge(request: Request, files: list[UploadFile] = File(default=[])
         "X-Pdf-Passthrough": "true" if result.passthrough else "false",
     }
     return Response(content=result.data, media_type="application/pdf", headers=headers)
+
+
+@app.get("/api/pdf/split/limits")
+async def pdf_split_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Pisah PDF — dipakai front-end untuk menampilkan aturan."""
+    return JSONResponse(content=_pdf_split_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pdf/split")
+async def pdf_split_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    mode: str | None = Form(default=None),
+    pages: str | None = Form(default=None),
+    chunk: str | None = Form(default=None),
+):
+    """Pisah dokumen PDF: per halaman, rentang halaman, setiap N halaman, atau baca info."""
+    started = time.perf_counter()
+
+    raw_cl = request.headers.get("content-length")
+    if raw_cl:
+        try:
+            declared = int(raw_cl)
+            if declared > SPLIT_MAX_FILE_BYTES + CONTENT_LENGTH_SLACK:
+                raise PdfSplitError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+        except ValueError:
+            pass
+
+    if file is None:
+        raise PdfSplitError("NO_FILE", "Tidak ada berkas yang dikirim. Sertakan berkas PDF pada field 'file'.", 400)
+
+    try:
+        data = await _read_capped(file, SPLIT_MAX_FILE_BYTES)
+    except PdfMergeError:
+        raise PdfSplitError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+
+    if not mode:
+        raise PdfSplitError("UNSUPPORTED_MODE", "Mode pemisahan wajib diisi.", 400)
+
+    if mode == "info":
+        info = inspect_pdf(data)
+        duration_ms = (time.perf_counter() - started) * 1000
+        logger.info("split info selesai: byte=%d halaman=%d durasi=%.0fms", info.size_bytes, info.page_count, duration_ms)
+        return JSONResponse(
+            content={
+                "page_count": info.page_count,
+                "size_bytes": info.size_bytes,
+                "max_pages": SPLIT_MAX_PAGES,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    result = split_pdf(data, mode, pages=pages, chunk=chunk)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "split selesai: mode=%s hasil=%d halaman_asal=%d halaman_hasil=%d byte=%d durasi=%.0fms",
+        mode,
+        result.output_count,
+        result.source_pages,
+        result.result_pages,
+        len(result.data),
+        duration_ms,
+    )
+
+    media_type = "application/pdf" if result.output_kind == "pdf" else "application/zip"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Output-Kind": result.output_kind,
+        "X-Output-Count": str(result.output_count),
+        "X-Source-Pages": str(result.source_pages),
+        "X-Result-Pages": str(result.result_pages),
+        "X-First-Page": str(result.first_page),
+        "X-Last-Page": str(result.last_page),
+        "X-Total-Bytes": str(len(result.data)),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=media_type, headers=headers)
 
 
 @app.get("/api/image/convert/limits")
@@ -2938,6 +3064,7 @@ async def root() -> dict:
         "docs": "/docs",
         "tools": [
             "pdf-merge",
+            "pdf-split",
             "image-convert",
             "image-edit",
             "word-count",

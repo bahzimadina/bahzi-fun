@@ -85,6 +85,30 @@ from app.pdf_merge import (  # noqa: E402
     is_pdf_bytes,
     merge_pdfs,
 )
+from app.pdf_split import (  # noqa: E402
+    DEFAULT_CHUNK as SPLIT_DEFAULT_CHUNK,
+    ERR_EMPTY_FILE as SPLIT_ERR_EMPTY_FILE,
+    ERR_PDF_ENCRYPTED as SPLIT_ERR_PDF_ENCRYPTED,
+    ERR_INVALID_CHUNK as SPLIT_ERR_INVALID_CHUNK,
+    ERR_INVALID_PAGES as SPLIT_ERR_INVALID_PAGES,
+    ERR_NO_FILE as SPLIT_ERR_NO_FILE,
+    ERR_NOT_PDF as SPLIT_ERR_NOT_PDF,
+    ERR_PAYLOAD_TOO_LARGE as SPLIT_ERR_PAYLOAD_TOO_LARGE,
+    ERR_PDF_UNREADABLE as SPLIT_ERR_PDF_UNREADABLE,
+    ERR_TOO_MANY_PAGES as SPLIT_ERR_TOO_MANY_PAGES,
+    ERR_UNSUPPORTED_MODE as SPLIT_ERR_UNSUPPORTED_MODE,
+    MAX_CHUNK as SPLIT_MAX_CHUNK,
+    MAX_FILE_BYTES as SPLIT_MAX_FILE_BYTES,
+    MAX_PAGES as SPLIT_MAX_PAGES,
+    MIN_CHUNK as SPLIT_MIN_CHUNK,
+    PdfInfo,
+    PdfSplitError,
+    SplitResult,
+    check_size as check_split_size,
+    inspect_pdf,
+    parse_page_range,
+    split_pdf,
+)
 from app.word_count import (  # noqa: E402
     INVALID_REQUEST as WC_INVALID_REQUEST,
     MAX_BYTES as WC_MAX_BYTES,
@@ -610,6 +634,20 @@ def expect_error(func, code: str, status: int) -> PdfMergeError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar PdfMergeError {code}")
+
+
+def expect_split_error(func, code: str, status: int) -> PdfSplitError:
+    """Pastikan func() melempar PdfSplitError dengan kode + status yang tepat."""
+    try:
+        func()
+    except PdfSplitError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar PdfSplitError {code}")
 
 
 def expect_word_count_error(func, code: str, status: int) -> WordCountError:
@@ -7243,6 +7281,357 @@ def test_http_pomodoro_root_endpoint_dan_regresi() -> None:
     assert "listrik" in root_data["tools"]
 
 
+# --- Uji Pisah PDF (PDF Splitter) --------------------------------------------
+def test_pdf_split_inspect_pdf() -> None:
+    pdf_3 = make_pdf(3)
+    info = inspect_pdf(pdf_3)
+    assert info.page_count == 3
+    assert info.size_bytes == len(pdf_3)
+    d = info.to_dict()
+    assert d["page_count"] == 3
+    assert d["max_pages"] == 300
+
+
+def test_pdf_split_per_halaman_3_halaman() -> None:
+    pdf_3 = make_pdf(3)
+    result = split_pdf(pdf_3, mode="per-halaman")
+    assert isinstance(result, SplitResult)
+    assert result.output_kind == "zip"
+    assert result.output_name == "pisah-pdf.zip"
+    assert result.output_count == 3
+    assert result.source_pages == 3
+    assert result.result_pages == 3
+    assert result.first_page == 1
+    assert result.last_page == 3
+
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(result.data), "r") as zf:
+        names = zf.namelist()
+        assert names == ["halaman-01.pdf", "halaman-02.pdf", "halaman-03.pdf"]
+        for name in names:
+            entry_bytes = zf.read(name)
+            assert entry_bytes.startswith(b"%PDF-")
+            reader = PdfReader(io.BytesIO(entry_bytes))
+            assert len(reader.pages) == 1
+
+
+def test_pdf_split_per_halaman_1_halaman() -> None:
+    pdf_1 = make_pdf(1)
+    result = split_pdf(pdf_1, mode="per-halaman")
+    assert isinstance(result, SplitResult)
+    assert result.output_kind == "pdf"
+    assert result.output_name == "pisah-pdf.pdf"
+    assert result.output_count == 1
+    assert result.source_pages == 1
+    assert result.result_pages == 1
+    assert result.first_page == 1
+    assert result.last_page == 1
+    assert page_count(result.data) == 1
+
+
+def test_pdf_split_rentang_sukses() -> None:
+    pdf_5 = make_pdf(5)
+
+    # Rentang 1-3 -> 3 halaman
+    res1 = split_pdf(pdf_5, mode="rentang", pages="1-3")
+    assert isinstance(res1, SplitResult)
+    assert res1.output_kind == "pdf"
+    assert res1.output_name == "pisah-pdf.pdf"
+    assert res1.output_count == 1
+    assert res1.source_pages == 5
+    assert res1.result_pages == 3
+    assert res1.first_page == 1
+    assert res1.last_page == 3
+    assert page_count(res1.data) == 3
+
+    # Rentang 2,4 -> 2 halaman
+    res2 = split_pdf(pdf_5, mode="rentang", pages="2,4")
+    assert isinstance(res2, SplitResult)
+    assert res2.output_kind == "pdf"
+    assert res2.output_count == 1
+    assert res2.source_pages == 5
+    assert res2.result_pages == 2
+    assert res2.first_page == 2
+    assert res2.last_page == 4
+    assert page_count(res2.data) == 2
+
+    # Rentang tumpang tindih 1-3,2 -> 3 halaman (tanpa duplikat, urut)
+    res3 = split_pdf(pdf_5, mode="rentang", pages="1-3,2")
+    assert isinstance(res3, SplitResult)
+    assert res3.output_kind == "pdf"
+    assert res3.output_count == 1
+    assert res3.source_pages == 5
+    assert res3.result_pages == 3
+    assert page_count(res3.data) == 3
+
+
+def test_pdf_split_rentang_invalid() -> None:
+    pdf_5 = make_pdf(5)
+    for invalid in ["3-1", "0", "abc", "1-99", "", "   ", "1-3-5", "-2"]:
+        expect_split_error(
+            lambda inv=invalid: split_pdf(pdf_5, mode="rentang", pages=inv),
+            SPLIT_ERR_INVALID_PAGES,
+            400,
+        )
+
+
+def test_pdf_split_setiap_n_chunk_2_dari_5_halaman() -> None:
+    pdf_5 = make_pdf(5)
+    result = split_pdf(pdf_5, mode="setiap-n", chunk=2)
+    assert isinstance(result, SplitResult)
+    assert result.output_kind == "zip"
+    assert result.output_name == "pisah-pdf.zip"
+    assert result.output_count == 3
+    assert result.source_pages == 5
+    assert result.result_pages == 5
+    assert result.first_page == 1
+    assert result.last_page == 5
+
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(result.data), "r") as zf:
+        names = zf.namelist()
+        assert names == ["bagian-01.pdf", "bagian-02.pdf", "bagian-03.pdf"]
+        assert len(PdfReader(io.BytesIO(zf.read("bagian-01.pdf"))).pages) == 2
+        assert len(PdfReader(io.BytesIO(zf.read("bagian-02.pdf"))).pages) == 2
+        assert len(PdfReader(io.BytesIO(zf.read("bagian-03.pdf"))).pages) == 1
+
+
+def test_pdf_split_setiap_n_chunk_lebih_besar_dari_halaman() -> None:
+    pdf_5 = make_pdf(5)
+    result = split_pdf(pdf_5, mode="setiap-n", chunk=10)
+    assert isinstance(result, SplitResult)
+    assert result.output_kind == "pdf"
+    assert result.output_name == "pisah-pdf.pdf"
+    assert result.output_count == 1
+    assert result.source_pages == 5
+    assert result.result_pages == 5
+    assert page_count(result.data) == 5
+
+
+def test_pdf_split_logika_galat() -> None:
+    pdf_1 = make_pdf(1)
+
+    # Tanpa berkas / berkas kosong / bukan PDF
+    expect_split_error(lambda: split_pdf(None, mode="per-halaman"), SPLIT_ERR_NO_FILE, 400)
+    expect_split_error(lambda: split_pdf(b"", mode="per-halaman"), SPLIT_ERR_EMPTY_FILE, 400)
+    expect_split_error(lambda: split_pdf(b"bukan pdf sama sekali", mode="per-halaman"), SPLIT_ERR_NOT_PDF, 400)
+
+    # Mode tidak dikenal
+    expect_split_error(lambda: split_pdf(pdf_1, mode="acak"), SPLIT_ERR_UNSUPPORTED_MODE, 400)
+
+    # Chunk tidak valid
+    expect_split_error(lambda: split_pdf(pdf_1, mode="setiap-n", chunk=0), SPLIT_ERR_INVALID_CHUNK, 400)
+    expect_split_error(lambda: split_pdf(pdf_1, mode="setiap-n", chunk=101), SPLIT_ERR_INVALID_CHUNK, 400)
+    expect_split_error(lambda: split_pdf(pdf_1, mode="setiap-n", chunk="abc"), SPLIT_ERR_INVALID_CHUNK, 400)
+
+    # PDF rusak / terenkripsi
+    rusak = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog\n" + b"x" * 200
+    expect_split_error(lambda: split_pdf(rusak, mode="per-halaman"), SPLIT_ERR_PDF_UNREADABLE, 422)
+    expect_split_error(lambda: split_pdf(make_encrypted_pdf(1), mode="per-halaman"), SPLIT_ERR_PDF_ENCRYPTED, 422)
+
+    # Ukuran / halaman lewat batas
+    expect_split_error(lambda: check_split_size(SPLIT_MAX_FILE_BYTES + 1), SPLIT_ERR_PAYLOAD_TOO_LARGE, 413)
+    banyak = make_pdf(SPLIT_MAX_PAGES + 1)
+    expect_split_error(lambda: split_pdf(banyak, mode="per-halaman"), SPLIT_ERR_TOO_MANY_PAGES, 413)
+
+
+def test_http_pdf_split_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/pdf/split/limits")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["max_file_bytes"] == 26214400
+    assert data["max_file_mb"] == 25
+    assert data["max_pages"] == 300
+    assert data["default_chunk"] == 5
+    assert data["min_chunk"] == 1
+    assert data["max_chunk"] == 100
+    assert data["sample_range"] == "1-3,5"
+    assert isinstance(data["modes"], list)
+    mode_ids = [m["id"] for m in data["modes"]]
+    assert mode_ids == ["per-halaman", "rentang", "setiap-n"]
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_pdf_split_info_mode() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/pdf/split",
+        files=[("file", ("dokumen.pdf", make_pdf(4), "application/pdf"))],
+        data={"mode": "info"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["page_count"] == 4
+    assert data["size_bytes"] > 0
+    assert data["max_pages"] == 300
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_pdf_split_per_halaman_zip() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/pdf/split",
+        files=[("file", ("dokumen.pdf", make_pdf(3), "application/pdf"))],
+        data={"mode": "per-halaman"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/zip")
+    assert 'filename="pisah-pdf.zip"' in response.headers.get("content-disposition", "")
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("X-Output-Kind") == "zip"
+    assert response.headers.get("X-Output-Count") == "3"
+    assert response.headers.get("X-Source-Pages") == "3"
+    assert response.headers.get("X-Result-Pages") == "3"
+    assert response.headers.get("X-First-Page") == "1"
+    assert response.headers.get("X-Last-Page") == "3"
+
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(response.content), "r") as zf:
+        names = zf.namelist()
+        assert names == ["halaman-01.pdf", "halaman-02.pdf", "halaman-03.pdf"]
+
+
+def test_http_pdf_split_per_halaman_single_pdf() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/pdf/split",
+        files=[("file", ("dokumen.pdf", make_pdf(1), "application/pdf"))],
+        data={"mode": "per-halaman"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert 'filename="pisah-pdf.pdf"' in response.headers.get("content-disposition", "")
+    assert response.headers.get("X-Output-Kind") == "pdf"
+    assert response.headers.get("X-Output-Count") == "1"
+    assert response.headers.get("X-Source-Pages") == "1"
+    assert response.headers.get("X-Result-Pages") == "1"
+    assert page_count(response.content) == 1
+
+
+def test_http_pdf_split_rentang_pdf() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/pdf/split",
+        files=[("file", ("dokumen.pdf", make_pdf(5), "application/pdf"))],
+        data={"mode": "rentang", "pages": "1-3"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert 'filename="pisah-pdf.pdf"' in response.headers.get("content-disposition", "")
+    assert response.headers.get("X-Output-Count") == "1"
+    assert response.headers.get("X-Result-Pages") == "3"
+    assert response.headers.get("X-First-Page") == "1"
+    assert response.headers.get("X-Last-Page") == "3"
+    assert page_count(response.content) == 3
+
+
+def test_http_pdf_split_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tanpa file -> 400 NO_FILE
+    r_no_file = client.post("/api/pdf/split", data={"mode": "per-halaman"})
+    assert r_no_file.status_code == 400, r_no_file.text
+    assert r_no_file.json()["error"]["code"] == SPLIT_ERR_NO_FILE
+
+    # Berkas kosong -> 400 EMPTY_FILE
+    r_empty = client.post(
+        "/api/pdf/split",
+        files=[("file", ("kosong.pdf", b"", "application/pdf"))],
+        data={"mode": "per-halaman"},
+    )
+    assert r_empty.status_code == 400, r_empty.text
+    assert r_empty.json()["error"]["code"] == SPLIT_ERR_EMPTY_FILE
+
+    # Bukan PDF -> 400 NOT_PDF
+    r_not_pdf = client.post(
+        "/api/pdf/split",
+        files=[("file", ("catatan.txt", b"halo ini teks", "text/plain"))],
+        data={"mode": "per-halaman"},
+    )
+    assert r_not_pdf.status_code == 400, r_not_pdf.text
+    assert r_not_pdf.json()["error"]["code"] == SPLIT_ERR_NOT_PDF
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    r_bad_mode = client.post(
+        "/api/pdf/split",
+        files=[("file", ("doc.pdf", make_pdf(1), "application/pdf"))],
+        data={"mode": "mode_ngawur"},
+    )
+    assert r_bad_mode.status_code == 400, r_bad_mode.text
+    assert r_bad_mode.json()["error"]["code"] == SPLIT_ERR_UNSUPPORTED_MODE
+
+    # Chunk tidak valid -> 400 INVALID_CHUNK
+    for chunk_val in ["0", "101", "abc"]:
+        r_chunk = client.post(
+            "/api/pdf/split",
+            files=[("file", ("doc.pdf", make_pdf(1), "application/pdf"))],
+            data={"mode": "setiap-n", "chunk": chunk_val},
+        )
+        assert r_chunk.status_code == 400, r_chunk.text
+        assert r_chunk.json()["error"]["code"] == SPLIT_ERR_INVALID_CHUNK
+
+    # PDF rusak -> 422 PDF_UNREADABLE
+    rusak = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog\n" + b"x" * 200
+    r_rusak = client.post(
+        "/api/pdf/split",
+        files=[("file", ("rusak.pdf", rusak, "application/pdf"))],
+        data={"mode": "per-halaman"},
+    )
+    assert r_rusak.status_code == 422, r_rusak.text
+    assert r_rusak.json()["error"]["code"] == SPLIT_ERR_PDF_UNREADABLE
+
+    # PDF terenkripsi -> 422 PDF_ENCRYPTED
+    r_enc = client.post(
+        "/api/pdf/split",
+        files=[("file", ("rahasia.pdf", make_encrypted_pdf(1), "application/pdf"))],
+        data={"mode": "per-halaman"},
+    )
+    assert r_enc.status_code == 422, r_enc.text
+    assert r_enc.json()["error"]["code"] == SPLIT_ERR_PDF_ENCRYPTED
+
+
+def test_http_pdf_split_regresi_dan_root() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memiliki pdf-split di daftar alat
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "pdf-split" in root_data["tools"]
+
+    # Endpoint limits lama tetap 200
+    assert client.get("/api/pdf/merge/limits").status_code == 200
+    assert client.get("/api/image/convert/limits").status_code == 200
+    assert client.get("/api/word-count/limits").status_code == 200
+    assert client.get("/health").status_code == 200
+
+
+def test_http_pdf_split_live_bila_tersedia() -> None:
+    base = os.getenv("OMNITOOLS_API_URL", "").rstrip("/")
+    if not base:
+        return
+    req = urllib.request.Request(f"{base}/api/pdf/split/limits")
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["max_pages"] == 300
+
+
 # --- Runner mandiri ---------------------------------------------------------
 def main() -> int:
     tests = [
@@ -7259,7 +7648,11 @@ def main() -> int:
     for name, func in tests:
         try:
             func()
-        except Exception:
+        except BaseException as exc:
+            if exc.__class__.__name__ == "Skipped":
+                SKIPPED.append(f"{name}: {exc}")
+                print(f"LEWAT  {name}")
+                continue
             failures.append((name, traceback.format_exc()))
             print(f"GAGAL  {name}")
         else:
