@@ -264,6 +264,29 @@ from .countdown import (
     compute_countdown,
     limits_payload as countdown_limits_payload_func,
 )
+from .pomodoro import (
+    DEFAULT_SESI as PM_DEFAULT_SESI,
+    INVALID_NUMBER as PM_INVALID_NUMBER,
+    INVALID_RANGE as PM_INVALID_RANGE,
+    INVALID_REQUEST as PM_INVALID_REQUEST,
+    INVALID_START_TIME as PM_INVALID_START_TIME,
+    MAX_BYTES as PM_MAX_BYTES,
+    MAX_INPUT_CHARS as PM_MAX_INPUT_CHARS,
+    MAX_ISTIRAHAT as PM_MAX_ISTIRAHAT,
+    MAX_ISTIRAHAT_PANJANG as PM_MAX_ISTIRAHAT_PANJANG,
+    MAX_KERJA as PM_MAX_KERJA,
+    MAX_SESI as PM_MAX_SESI,
+    MIN_ISTIRAHAT as PM_MIN_ISTIRAHAT,
+    MIN_ISTIRAHAT_PANJANG as PM_MIN_ISTIRAHAT_PANJANG,
+    MIN_KERJA as PM_MIN_KERJA,
+    MIN_SESI as PM_MIN_SESI,
+    MODES as PM_MODES,
+    PAYLOAD_TOO_LARGE as PM_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as PM_UNSUPPORTED_MODE,
+    PomodoroError,
+    compute_pomodoro,
+    limits_payload as pomodoro_limits_payload_func,
+)
 from .qr_tool import (
     DEFAULT_CORRECTION as QR_DEFAULT_CORRECTION,
     DEFAULT_MODE as QR_DEFAULT_MODE,
@@ -563,6 +586,17 @@ async def handle_countdown_error(request: Request, exc: CountdownError) -> JSONR
     )
 
 
+@app.exception_handler(PomodoroError)
+async def handle_pomodoro_error(request: Request, exc: PomodoroError) -> JSONResponse:
+    """Error pomodoro yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("pomodoro ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(QrToolError)
 async def handle_qr_tool_error(request: Request, exc: QrToolError) -> JSONResponse:
     """Error QR dan barcode yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -652,6 +686,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/date-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/countdown"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
+    elif request.url.path.startswith("/api/pomodoro"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/json"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
@@ -1172,6 +1208,27 @@ def _reject_oversized_countdown_content_length(request: Request) -> None:
 
 def _countdown_limits_payload() -> dict:
     return countdown_limits_payload_func()
+
+
+def _reject_oversized_pomodoro_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas pomodoro."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > PM_MAX_BYTES:
+        raise PomodoroError(
+            PM_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar (maksimal 64 KB).",
+            413,
+        )
+
+
+def _pomodoro_limits_payload() -> dict:
+    return pomodoro_limits_payload_func()
 
 
 def _reject_oversized_qr_content_length(request: Request) -> None:
@@ -2780,6 +2837,98 @@ async def listrik_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/pomodoro/limits")
+async def pomodoro_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Pomodoro Timer."""
+    return JSONResponse(content=_pomodoro_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pomodoro")
+async def pomodoro_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    kerja: str = Form(default=None),
+    istirahat: str = Form(default=None),
+    istirahat_panjang: str = Form(default=None),
+    sesi: str = Form(default=None),
+    mulai: str = Form(default=None),
+):
+    """Susun jadwal Pomodoro di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_pomodoro_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise PomodoroError(
+            PM_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise PomodoroError(
+            PM_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if kerja is None and "kerja" in form:
+        kerja = form.get("kerja")
+    if istirahat is None and "istirahat" in form:
+        istirahat = form.get("istirahat")
+    if istirahat_panjang is None and "istirahat_panjang" in form:
+        istirahat_panjang = form.get("istirahat_panjang")
+    if sesi is None and "sesi" in form:
+        sesi = form.get("sesi")
+    if mulai is None and "mulai" in form:
+        mulai = form.get("mulai")
+
+    if mode is None:
+        raise PomodoroError(
+            PM_INVALID_REQUEST,
+            "Permintaan tidak valid. Field 'mode' wajib diisi.",
+            400,
+        )
+
+    if any(
+        isinstance(val, UploadFile)
+        for val in (mode, kerja, istirahat, istirahat_panjang, sesi, mulai)
+    ):
+        raise PomodoroError(
+            PM_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = compute_pomodoro(
+        mode=mode,
+        kerja=kerja,
+        istirahat=istirahat,
+        istirahat_panjang=istirahat_panjang,
+        sesi=sesi,
+        mulai=mulai,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "pomodoro selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -2808,6 +2957,7 @@ async def root() -> dict:
             "timezone",
             "csv",
             "listrik",
+            "pomodoro",
         ],
     }
 

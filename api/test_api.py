@@ -329,6 +329,31 @@ from app.countdown import (
     parse_time as parse_countdown_time,
     parse_unit as parse_countdown_unit,
 )
+from app.pomodoro import (
+    DEFAULT_SESI as PM_DEFAULT_SESI,
+    INVALID_NUMBER as PM_INVALID_NUMBER,
+    INVALID_RANGE as PM_INVALID_RANGE,
+    INVALID_REQUEST as PM_INVALID_REQUEST,
+    INVALID_START_TIME as PM_INVALID_START_TIME,
+    MAX_BYTES as PM_MAX_BYTES,
+    MAX_INPUT_CHARS as PM_MAX_INPUT_CHARS,
+    MAX_ISTIRAHAT as PM_MAX_ISTIRAHAT,
+    MAX_ISTIRAHAT_PANJANG as PM_MAX_ISTIRAHAT_PANJANG,
+    MAX_KERJA as PM_MAX_KERJA,
+    MAX_SESI as PM_MAX_SESI,
+    MIN_ISTIRAHAT as PM_MIN_ISTIRAHAT,
+    MIN_ISTIRAHAT_PANJANG as PM_MIN_ISTIRAHAT_PANJANG,
+    MIN_KERJA as PM_MIN_KERJA,
+    MIN_SESI as PM_MIN_SESI,
+    MODES as PM_MODES,
+    PAYLOAD_TOO_LARGE as PM_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as PM_UNSUPPORTED_MODE,
+    PomodoroError,
+    compute_pomodoro,
+    limits_payload as pomodoro_limits_payload_func,
+    parse_int_field as parse_pomodoro_int_field,
+    parse_start_time as parse_pomodoro_start_time,
+)
 from app.qr_tool import (
     DEFAULT_CORRECTION as QR_DEFAULT_CORRECTION,
     DEFAULT_MODE as QR_DEFAULT_MODE,
@@ -6851,6 +6876,371 @@ def test_http_live_jika_env_diisi() -> None:
         assert wc_data["words"] == 5
         assert wc_data["chars"] == 25
 
+
+
+# --- Uji Pomodoro Timer ----------------------------------------------------
+def test_logika_pomodoro_klasik() -> None:
+    res = compute_pomodoro("klasik")
+    assert res["mode"] == "klasik"
+    assert res["kerja_menit"] == 25
+    assert res["istirahat_menit"] == 5
+    assert res["istirahat_panjang_menit"] == 15
+    assert res["sesi_fokus"] == 4
+    assert res["jumlah_langkah"] == 7
+    assert res["total_fokus_detik"] == 4 * 25 * 60
+    assert res["total_istirahat_detik"] == 3 * 5 * 60
+    assert res["total_detik"] == res["total_fokus_detik"] + res["total_istirahat_detik"]
+    assert "perkiraan_selesai" not in res
+
+    # Periksa langkah satu per satu
+    langkah = res["langkah"]
+    assert len(langkah) == 7
+    assert langkah[0]["urutan"] == 1
+    assert langkah[0]["jenis"] == "fokus"
+    assert langkah[0]["label"] == "Fokus sesi 1"
+    assert langkah[0]["durasi_detik"] == 1500
+    assert langkah[0]["mulai_detik"] == 0
+    assert langkah[0]["selesai_detik"] == 1500
+    assert "jam_mulai" not in langkah[0]
+
+    assert langkah[1]["urutan"] == 2
+    assert langkah[1]["jenis"] == "istirahat"
+    assert langkah[1]["label"] == "Istirahat pendek"
+    assert langkah[1]["durasi_detik"] == 300
+    assert langkah[1]["mulai_detik"] == 1500
+    assert langkah[1]["selesai_detik"] == 1800
+
+    assert langkah[6]["urutan"] == 7
+    assert langkah[6]["jenis"] == "fokus"
+    assert langkah[6]["label"] == "Fokus sesi 4"
+    assert langkah[6]["durasi_detik"] == 1500
+    assert langkah[6]["mulai_detik"] == 5400
+    assert langkah[6]["selesai_detik"] == 6900
+
+
+def test_logika_pomodoro_siklus_istirahat_panjang() -> None:
+    # 5 sesi: sesi 4 diikuti istirahat panjang, lalu fokus sesi 5 (terakhir, tanpa istirahat)
+    res5 = compute_pomodoro("klasik", sesi=5)
+    assert res5["sesi_fokus"] == 5
+    assert res5["jumlah_langkah"] == 9
+    langkah5 = res5["langkah"]
+
+    # Langkah 7: fokus sesi 4
+    assert langkah5[6]["jenis"] == "fokus"
+    assert langkah5[6]["label"] == "Fokus sesi 4"
+    # Langkah 8: istirahat panjang
+    assert langkah5[7]["jenis"] == "istirahat_panjang"
+    assert langkah5[7]["label"] == "Istirahat panjang"
+    assert langkah5[7]["durasi_detik"] == 15 * 60
+    # Langkah 9: fokus sesi 5
+    assert langkah5[8]["jenis"] == "fokus"
+    assert langkah5[8]["label"] == "Fokus sesi 5"
+
+    # 1 sesi: hanya fokus 1 langkah saja
+    res1 = compute_pomodoro("klasik", sesi=1)
+    assert res1["jumlah_langkah"] == 1
+    assert res1["langkah"][0]["label"] == "Fokus sesi 1"
+    assert res1["total_istirahat_detik"] == 0
+
+    # 8 sesi: sesi 4 ada istirahat panjang, sesi 8 terakhir tanpa istirahat
+    res8 = compute_pomodoro("klasik", sesi=8)
+    assert res8["jumlah_langkah"] == 15
+    assert res8["langkah"][7]["jenis"] == "istirahat_panjang"
+    assert res8["langkah"][14]["jenis"] == "fokus"
+    assert res8["langkah"][14]["label"] == "Fokus sesi 8"
+
+
+def test_logika_pomodoro_mode_panjang_dan_pendek() -> None:
+    res_p = compute_pomodoro("panjang")
+    assert res_p["kerja_menit"] == 50
+    assert res_p["istirahat_menit"] == 10
+    assert res_p["istirahat_panjang_menit"] == 20
+    assert res_p["sesi_fokus"] == 4
+
+    res_s = compute_pomodoro("pendek")
+    assert res_s["kerja_menit"] == 15
+    assert res_s["istirahat_menit"] == 3
+    assert res_s["istirahat_panjang_menit"] == 12
+    assert res_s["sesi_fokus"] == 4
+
+
+def test_logika_pomodoro_kustom() -> None:
+    res_k = compute_pomodoro(
+        "kustom",
+        kerja=35,
+        istirahat=7,
+        istirahat_panjang=22,
+        sesi=3,
+    )
+    assert res_k["mode"] == "kustom"
+    assert res_k["kerja_menit"] == 35
+    assert res_k["istirahat_menit"] == 7
+    assert res_k["istirahat_panjang_menit"] == 22
+    assert res_k["sesi_fokus"] == 3
+    assert res_k["jumlah_langkah"] == 5
+
+
+def test_logika_pomodoro_dengan_jam_mulai() -> None:
+    res = compute_pomodoro("klasik", sesi=2, mulai="08:00")
+    assert "perkiraan_selesai" in res
+    assert res["perkiraan_selesai"] == "08:55"
+    assert res["langkah"][0]["jam_mulai"] == "08:00"
+    assert res["langkah"][0]["jam_selesai"] == "08:25"
+    assert res["langkah"][1]["jam_mulai"] == "08:25"
+    assert res["langkah"][1]["jam_selesai"] == "08:30"
+    assert res["langkah"][2]["jam_mulai"] == "08:30"
+    assert res["langkah"][2]["jam_selesai"] == "08:55"
+
+    # Uji jam mulai melewati tengah malam
+    res_mid = compute_pomodoro("klasik", sesi=1, mulai="23:50")
+    assert res_mid["langkah"][0]["jam_mulai"] == "23:50"
+    assert res_mid["langkah"][0]["jam_selesai"] == "00:15"
+    assert res_mid["perkiraan_selesai"] == "00:15"
+
+
+def test_logika_pomodoro_galat() -> None:
+    # Mode kosong atau bukan string
+    try:
+        compute_pomodoro(None)
+        assert False, "Harusnya gagal mode None"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_REQUEST
+
+    try:
+        compute_pomodoro("")
+        assert False, "Harusnya gagal mode kosong"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_REQUEST
+
+    try:
+        compute_pomodoro(123)
+        assert False, "Harusnya gagal mode bukan string"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_REQUEST
+
+    # Mode tidak didukung
+    try:
+        compute_pomodoro("ngawur")
+        assert False, "Harusnya gagal mode tidak didukung"
+    except PomodoroError as exc:
+        assert exc.code == PM_UNSUPPORTED_MODE
+
+    # Bilangan tidak valid (bukan angka)
+    try:
+        compute_pomodoro("kustom", kerja="bukan_angka")
+        assert False, "Harusnya gagal bukan angka"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_NUMBER
+
+    try:
+        compute_pomodoro("kustom", kerja="12.5")
+        assert False, "Harusnya gagal angka desimal"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_NUMBER
+
+    # Di luar rentang kerja (1..180)
+    try:
+        compute_pomodoro("kustom", kerja=0)
+        assert False, "Harusnya gagal kerja 0"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    try:
+        compute_pomodoro("kustom", kerja=181)
+        assert False, "Harusnya gagal kerja 181"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    # Di luar rentang istirahat (1..60)
+    try:
+        compute_pomodoro("kustom", istirahat=0)
+        assert False, "Harusnya gagal istirahat 0"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    try:
+        compute_pomodoro("kustom", istirahat=61)
+        assert False, "Harusnya gagal istirahat 61"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    # Di luar rentang istirahat panjang (1..90)
+    try:
+        compute_pomodoro("kustom", istirahat_panjang=0)
+        assert False, "Harusnya gagal istirahat panjang 0"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    try:
+        compute_pomodoro("kustom", istirahat_panjang=91)
+        assert False, "Harusnya gagal istirahat panjang 91"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    # Di luar rentang sesi (1..12)
+    try:
+        compute_pomodoro("klasik", sesi=0)
+        assert False, "Harusnya gagal sesi 0"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    try:
+        compute_pomodoro("klasik", sesi=13)
+        assert False, "Harusnya gagal sesi 13"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+    # Format jam mulai tidak valid
+    try:
+        compute_pomodoro("klasik", mulai="8:00")
+        assert False, "Harusnya gagal jam 8:00"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_START_TIME
+
+    try:
+        compute_pomodoro("klasik", mulai="25:00")
+        assert False, "Harusnya gagal jam 25:00"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_START_TIME
+
+    try:
+        compute_pomodoro("klasik", mulai="12:60")
+        assert False, "Harusnya gagal jam 12:60"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_START_TIME
+
+    try:
+        compute_pomodoro("klasik", mulai="jam_pagi")
+        assert False, "Harusnya gagal jam teks"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_START_TIME
+
+    # Masukan melebihi 40 karakter
+    try:
+        compute_pomodoro("klasik", kerja="1" * 45)
+        assert False, "Harusnya gagal masukan > 40 karakter"
+    except PomodoroError as exc:
+        assert exc.code == PM_INVALID_RANGE
+
+
+def test_http_pomodoro_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/pomodoro/limits")
+    assert resp.status_code == 200, resp.text
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert data["tool"] == "pomodoro"
+    assert data["max_input_chars"] == 40
+    assert data["max_bytes"] == 65536
+    assert isinstance(data["modes"], list)
+    assert len(data["modes"]) == 4
+    mode_ids = [m["id"] for m in data["modes"]]
+    assert mode_ids == ["klasik", "panjang", "pendek", "kustom"]
+    assert "limits" in data
+    assert data["limits"]["kerja"]["min"] == 1
+    assert data["limits"]["kerja"]["max"] == 180
+    assert data["limits"]["sesi"]["min"] == 1
+    assert data["limits"]["sesi"]["max"] == 12
+
+
+def test_http_pomodoro_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Mode klasik dengan mulai
+    resp_klasik = client.post(
+        "/api/pomodoro",
+        data={"mode": "klasik", "sesi": "4", "mulai": "08:30"},
+    )
+    assert resp_klasik.status_code == 200, resp_klasik.text
+    body_k = resp_klasik.json()
+    assert body_k["mode"] == "klasik"
+    assert body_k["kerja_menit"] == 25
+    assert body_k["istirahat_menit"] == 5
+    assert body_k["sesi_fokus"] == 4
+    assert body_k["jumlah_langkah"] == 7
+    assert body_k["perkiraan_selesai"] == "10:25"
+    assert "no-store" in resp_klasik.headers.get("Cache-Control", "")
+    assert resp_klasik.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in resp_klasik.headers
+
+    # 2. Mode kustom
+    resp_kustom = client.post(
+        "/api/pomodoro",
+        data={
+            "mode": "kustom",
+            "kerja": "40",
+            "istirahat": "8",
+            "istirahat_panjang": "20",
+            "sesi": "3",
+        },
+    )
+    assert resp_kustom.status_code == 200, resp_kustom.text
+    body_c = resp_kustom.json()
+    assert body_c["mode"] == "kustom"
+    assert body_c["kerja_menit"] == 40
+    assert body_c["istirahat_menit"] == 8
+    assert body_c["istirahat_panjang_menit"] == 20
+    assert body_c["sesi_fokus"] == 3
+    assert body_c["jumlah_langkah"] == 5
+
+
+def test_http_pomodoro_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tanpa field mode -> 400 INVALID_REQUEST
+    resp_no_mode = client.post("/api/pomodoro", data={"kerja": "25"})
+    assert resp_no_mode.status_code == 400, resp_no_mode.text
+    assert resp_no_mode.json()["error"]["code"] == PM_INVALID_REQUEST
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    resp_bad_mode = client.post("/api/pomodoro", data={"mode": "acak"})
+    assert resp_bad_mode.status_code == 400, resp_bad_mode.text
+    assert resp_bad_mode.json()["error"]["code"] == PM_UNSUPPORTED_MODE
+
+    # Kerja bukan angka -> 400 INVALID_NUMBER
+    resp_bad_num = client.post("/api/pomodoro", data={"mode": "kustom", "kerja": "sepuluh"})
+    assert resp_bad_num.status_code == 400, resp_bad_num.text
+    assert resp_bad_num.json()["error"]["code"] == PM_INVALID_NUMBER
+
+    # Kerja di luar batas -> 400 INVALID_RANGE
+    resp_bad_range = client.post("/api/pomodoro", data={"mode": "kustom", "kerja": "300"})
+    assert resp_bad_range.status_code == 400, resp_bad_range.text
+    assert resp_bad_range.json()["error"]["code"] == PM_INVALID_RANGE
+
+    # Jam mulai salah format -> 400 INVALID_START_TIME
+    resp_bad_time = client.post("/api/pomodoro", data={"mode": "klasik", "mulai": "08.00"})
+    assert resp_bad_time.status_code == 400, resp_bad_time.text
+    assert resp_bad_time.json()["error"]["code"] == PM_INVALID_START_TIME
+
+    # Body JSON (bukan multipart) -> 400 INVALID_REQUEST
+    resp_json = client.post("/api/pomodoro", json={"mode": "klasik"})
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == PM_INVALID_REQUEST
+
+    # Body > 64 KB -> 413 PAYLOAD_TOO_LARGE
+    resp_large = client.post("/api/pomodoro", data={"mode": "klasik", "ekstra": "x" * 70000})
+    assert resp_large.status_code == 413, resp_large.text
+    assert resp_large.json()["error"]["code"] == PM_PAYLOAD_TOO_LARGE
+
+
+def test_http_pomodoro_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "pomodoro" in root_data["tools"]
+    assert "countdown" in root_data["tools"]
+    assert "listrik" in root_data["tools"]
 
 
 # --- Runner mandiri ---------------------------------------------------------

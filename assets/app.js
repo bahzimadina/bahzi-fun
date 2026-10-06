@@ -67,7 +67,7 @@
         { name: 'Date Calculator', desc: 'Hitung selisih dua tanggal, tambah atau kurangi tanggal, nama hari, dan usia.', status: 'available', action: 'date-calc' },
         { name: 'Time Zone Converter', desc: 'Lihat jam yang sama di beberapa kota, konversi antar zona waktu, dan cari jam rapat yang cocok.', status: 'available', action: 'timezone' },
         { name: 'Countdown Timer', desc: 'Hitung mundur ke tanggal atau waktu tertentu, berdetak tiap detik.', status: 'available', action: 'countdown' },
-        { name: 'Pomodoro Timer', desc: 'Timer fokus kerja dengan siklus istirahat.', status: 'soon' }
+        { name: 'Pomodoro Timer', desc: 'Susun jadwal fokus dan istirahat, lalu jalankan penghitung waktunya.', status: 'available', action: 'pomodoro' }
       ]
     },
     {
