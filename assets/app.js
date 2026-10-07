@@ -44,7 +44,7 @@
         { name: 'PDF Merger', desc: 'Gabungkan beberapa PDF jadi satu berkas (diproses di server).', status: 'available', action: 'pdf-merge' },
         { name: 'PDF Editor', desc: 'Sunting teks dan halaman PDF secara ringan.', status: 'soon' },
         { name: 'PDF to Image', desc: 'Ubah tiap halaman PDF menjadi gambar.', status: 'soon' },
-        { name: 'Compress PDF', desc: 'Perkecil ukuran berkas PDF tanpa server.', status: 'soon' }
+        { name: 'Kompres PDF', desc: 'Perkecil ukuran berkas PDF sampai jauh lebih ringan, dengan pilihan tingkat kompresi.', status: 'available', href: '/kompres-pdf/' }
       ]
     },
     {

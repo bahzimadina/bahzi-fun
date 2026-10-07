@@ -109,6 +109,35 @@ from app.pdf_split import (  # noqa: E402
     parse_page_range,
     split_pdf,
 )
+from app.pdf_compress import (  # noqa: E402
+    DEFAULT_DPI as COMPRESS_DEFAULT_DPI,
+    DEFAULT_QUALITY as COMPRESS_DEFAULT_QUALITY,
+    ERR_EMPTY_FILE as COMPRESS_ERR_EMPTY_FILE,
+    ERR_INVALID_DPI as COMPRESS_ERR_INVALID_DPI,
+    ERR_INVALID_QUALITY as COMPRESS_ERR_INVALID_QUALITY,
+    ERR_NO_FILE as COMPRESS_ERR_NO_FILE,
+    ERR_NOT_PDF as COMPRESS_ERR_NOT_PDF,
+    ERR_PAYLOAD_TOO_LARGE as COMPRESS_ERR_PAYLOAD_TOO_LARGE,
+    ERR_PDF_ENCRYPTED as COMPRESS_ERR_PDF_ENCRYPTED,
+    ERR_PDF_UNREADABLE as COMPRESS_ERR_PDF_UNREADABLE,
+    ERR_TOO_MANY_PAGES as COMPRESS_ERR_TOO_MANY_PAGES,
+    ERR_UNSUPPORTED_MODE as COMPRESS_ERR_UNSUPPORTED_MODE,
+    MAX_DPI as COMPRESS_MAX_DPI,
+    MAX_FILE_BYTES as COMPRESS_MAX_FILE_BYTES,
+    MAX_PAGES as COMPRESS_MAX_PAGES,
+    MAX_QUALITY as COMPRESS_MAX_QUALITY,
+    MIN_DPI as COMPRESS_MIN_DPI,
+    MIN_QUALITY as COMPRESS_MIN_QUALITY,
+    MODES as COMPRESS_MODES,
+    CompressResult,
+    PdfCompressError,
+    PdfInfo as CompressPdfInfo,
+    check_size as check_compress_size,
+    compress_pdf,
+    inspect_pdf as inspect_compress_pdf,
+    parse_dpi,
+    parse_quality,
+)
 from app.word_count import (  # noqa: E402
     INVALID_REQUEST as WC_INVALID_REQUEST,
     MAX_BYTES as WC_MAX_BYTES,
@@ -648,6 +677,20 @@ def expect_split_error(func, code: str, status: int) -> PdfSplitError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar PdfSplitError {code}")
+
+
+def expect_compress_error(func, code: str, status: int) -> PdfCompressError:
+    """Pastikan func() melempar PdfCompressError dengan kode + status yang tepat."""
+    try:
+        func()
+    except PdfCompressError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar PdfCompressError {code}")
 
 
 def expect_word_count_error(func, code: str, status: int) -> WordCountError:
@@ -7629,7 +7672,369 @@ def test_http_pdf_split_live_bila_tersedia() -> None:
     with urllib.request.urlopen(req) as resp:
         assert resp.status == 200
         data = json.loads(resp.read().decode("utf-8"))
-        assert data["max_pages"] == 300
+def test_pdf_compress_logika_dasar() -> None:
+    pdf_data = make_pdf(2)
+
+    # Inspect
+    info = inspect_compress_pdf(pdf_data)
+    assert isinstance(info, CompressPdfInfo)
+    assert info.page_count == 2
+    assert info.size_bytes == len(pdf_data)
+
+    # Ringan
+    res_ringan = compress_pdf(pdf_data, mode="ringan")
+    assert isinstance(res_ringan, CompressResult)
+    assert res_ringan.page_count == 2
+    assert res_ringan.mode == "ringan"
+    assert res_ringan.keep_text is True
+    assert isinstance(res_ringan.data, bytes)
+    assert len(res_ringan.data) > 0
+
+    # Sedang
+    res_sedang = compress_pdf(pdf_data, mode="sedang")
+    assert isinstance(res_sedang, CompressResult)
+    assert res_sedang.page_count == 2
+    assert res_sedang.mode == "sedang"
+    assert res_sedang.keep_text is True
+
+    # Kuat
+    res_kuat = compress_pdf(pdf_data, mode="kuat", dpi=90, quality=50)
+    assert isinstance(res_kuat, CompressResult)
+    assert res_kuat.page_count == 2
+    assert res_kuat.mode == "kuat"
+    assert res_kuat.keep_text is False
+
+    # DPI & Quality parsing
+    assert parse_dpi(None) == COMPRESS_DEFAULT_DPI
+    assert parse_dpi("120") == 120
+    assert parse_quality(None) == COMPRESS_DEFAULT_QUALITY
+    assert parse_quality("75") == 75
+
+    expect_compress_error(lambda: parse_dpi(50), COMPRESS_ERR_INVALID_DPI, 400)
+    expect_compress_error(lambda: parse_dpi(300), COMPRESS_ERR_INVALID_DPI, 400)
+    expect_compress_error(lambda: parse_quality(10), COMPRESS_ERR_INVALID_QUALITY, 400)
+    expect_compress_error(lambda: parse_quality(100), COMPRESS_ERR_INVALID_QUALITY, 400)
+
+
+def test_pdf_compress_logika_gambar_dan_fallback() -> None:
+    def make_pdf_with_image(pages: int = 1) -> bytes:
+        import fitz
+        doc = fitz.open()
+        for _ in range(pages):
+            page = doc.new_page(width=300, height=300)
+            img_bytes = make_image("JPEG", size=(200, 200), color="blue")
+            rect = fitz.Rect(20, 20, 280, 280)
+            page.insert_image(rect, stream=img_bytes)
+        buf = io.BytesIO()
+        doc.save(buf)
+        data = buf.getvalue()
+        doc.close()
+        return data
+
+    # Dokumen dengan gambar
+    pdf_img = make_pdf_with_image(pages=3)
+    res_kuat = compress_pdf(pdf_img, mode="kuat", dpi=72, quality=40)
+    assert isinstance(res_kuat, CompressResult)
+    assert res_kuat.page_count == 3
+    assert res_kuat.keep_text is False
+    assert len(res_kuat.notes) >= 1
+
+    # Cek dokumen yang sudah efisien: used_original bernilai True
+    tiny_pdf = make_pdf(1)
+    res_tiny = compress_pdf(tiny_pdf, mode="ringan")
+    assert isinstance(res_tiny, CompressResult)
+    assert res_tiny.used_original is True
+    assert res_tiny.size_after == res_tiny.size_before
+    assert res_tiny.data == tiny_pdf
+    # (b) catatan fallback tetap muncul saat hasil tidak lebih kecil
+    assert any("Berkas aslinya sudah efisien, jadi hasil kompresi tidak lebih kecil" in note for note in res_tiny.notes)
+
+    # (c) untuk mode kuat yang jatuh ke fallback, catatan lanjutan "Tingkat Sedang atau Ringan bisa dicoba" juga muncul
+    res_kuat_fallback = compress_pdf(tiny_pdf, mode="kuat")
+    assert res_kuat_fallback.used_original is True
+    assert any("Berkas aslinya sudah efisien, jadi hasil kompresi tidak lebih kecil" in note for note in res_kuat_fallback.notes)
+    assert any("Rasterisasi tidak membuat berkas ini lebih kecil. Tingkat Sedang atau Ringan bisa dicoba sebagai perbandingan." in note for note in res_kuat_fallback.notes)
+
+    # Uji dokumen multi-halaman (20 halaman) pada mode kuat yang jatuh ke fallback
+    pdf_20 = make_pdf(20)
+    res_20_kuat = compress_pdf(pdf_20, mode="kuat")
+    assert res_20_kuat.used_original is True
+    assert any("Rasterisasi tidak membuat berkas ini lebih kecil. Tingkat Sedang atau Ringan bisa dicoba sebagai perbandingan." in note for note in res_20_kuat.notes)
+
+    # (a) catatan "Penghematannya sangat kecil" muncul untuk PDF yang hasil kompresinya hampir sama besarnya (< 1%)
+    doc_clean = pymupdf.open()
+    doc_clean.new_page(width=300, height=300)
+    buf_clean = io.BytesIO()
+    doc_clean.save(
+        buf_clean,
+        garbage=4,
+        deflate=True,
+        deflate_images=True,
+        deflate_fonts=True,
+        clean=True,
+    )
+    clean_bytes = buf_clean.getvalue()
+    doc_clean.close()
+
+    pdf_near_equal = clean_bytes + b"\n%"
+    res_near = compress_pdf(pdf_near_equal, mode="ringan")
+    assert res_near.used_original is False
+    assert len(res_near.data) < len(pdf_near_equal)
+    assert (len(pdf_near_equal) - len(res_near.data)) * 100 / len(pdf_near_equal) < 1
+    assert any("Penghematannya sangat kecil (di bawah 1 persen)" in note for note in res_near.notes)
+
+
+def test_pdf_compress_logika_galat() -> None:
+    pdf_1 = make_pdf(1)
+
+    # Tanpa berkas / berkas kosong / bukan PDF
+    expect_compress_error(lambda: compress_pdf(None, mode="ringan"), COMPRESS_ERR_NO_FILE, 400)
+    expect_compress_error(lambda: compress_pdf(b"", mode="ringan"), COMPRESS_ERR_EMPTY_FILE, 400)
+    expect_compress_error(lambda: compress_pdf(b"bukan pdf sama sekali", mode="ringan"), COMPRESS_ERR_NOT_PDF, 400)
+
+    # Mode tidak dikenal
+    expect_compress_error(lambda: compress_pdf(pdf_1, mode="acak"), COMPRESS_ERR_UNSUPPORTED_MODE, 400)
+
+    # DPI / Kualitas di luar rentang
+    expect_compress_error(lambda: compress_pdf(pdf_1, mode="kuat", dpi=50), COMPRESS_ERR_INVALID_DPI, 400)
+    expect_compress_error(lambda: compress_pdf(pdf_1, mode="kuat", dpi=250), COMPRESS_ERR_INVALID_DPI, 400)
+    expect_compress_error(lambda: compress_pdf(pdf_1, mode="kuat", quality=20), COMPRESS_ERR_INVALID_QUALITY, 400)
+    expect_compress_error(lambda: compress_pdf(pdf_1, mode="kuat", quality=99), COMPRESS_ERR_INVALID_QUALITY, 400)
+
+    # PDF rusak / terenkripsi
+    rusak = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog\n" + b"x" * 200
+    expect_compress_error(lambda: compress_pdf(rusak, mode="ringan"), COMPRESS_ERR_PDF_UNREADABLE, 422)
+    expect_compress_error(lambda: compress_pdf(make_encrypted_pdf(1), mode="ringan"), COMPRESS_ERR_PDF_ENCRYPTED, 422)
+
+    # Ukuran / halaman lewat batas
+    expect_compress_error(lambda: check_compress_size(COMPRESS_MAX_FILE_BYTES + 1), COMPRESS_ERR_PAYLOAD_TOO_LARGE, 413)
+    banyak = make_pdf(COMPRESS_MAX_PAGES + 1)
+    expect_compress_error(lambda: compress_pdf(banyak, mode="ringan"), COMPRESS_ERR_TOO_MANY_PAGES, 413)
+
+
+def test_http_pdf_compress_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/pdf/compress/limits")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["max_file_bytes"] == 26214400
+    assert data["max_file_mb"] == 25
+    assert data["max_pages"] == 300
+    assert data["dpi_min"] == 72
+    assert data["dpi_max"] == 200
+    assert data["dpi_default"] == 110
+    assert data["quality_min"] == 30
+    assert data["quality_max"] == 95
+    assert data["quality_default"] == 60
+    mode_ids = [m["id"] for m in data["modes"]]
+    assert mode_ids == ["ringan", "sedang", "kuat"]
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_pdf_compress_modes_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    def make_pdf_with_image(pages: int = 1) -> bytes:
+        import fitz
+        doc = fitz.open()
+        for _ in range(pages):
+            page = doc.new_page(width=300, height=300)
+            img_bytes = make_image("JPEG", size=(200, 200), color="blue")
+            rect = fitz.Rect(20, 20, 280, 280)
+            page.insert_image(rect, stream=img_bytes)
+        buf = io.BytesIO()
+        doc.save(buf)
+        data = buf.getvalue()
+        doc.close()
+        return data
+
+    pdf_3 = make_pdf_with_image(pages=3)
+
+    # Mode ringan
+    r_ringan = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "ringan"},
+    )
+    assert r_ringan.status_code == 200, r_ringan.text
+    assert r_ringan.headers["content-type"].startswith("application/pdf")
+    assert 'filename="kompres-pdf.pdf"' in r_ringan.headers.get("Content-Disposition", "")
+    assert r_ringan.headers.get("X-Mode") == "ringan"
+    assert r_ringan.headers.get("X-Keep-Text") == "true"
+    assert r_ringan.headers.get("X-Page-Count") == "3"
+
+    # Mode sedang
+    r_sedang = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "sedang"},
+    )
+    assert r_sedang.status_code == 200, r_sedang.text
+    assert r_sedang.headers["content-type"].startswith("application/pdf")
+    assert r_sedang.headers.get("X-Mode") == "sedang"
+    assert r_sedang.headers.get("X-Keep-Text") == "true"
+
+    # Mode kuat
+    r_kuat = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "kuat", "dpi": "80", "quality": "40"},
+    )
+    assert r_kuat.status_code == 200, r_kuat.text
+    assert r_kuat.headers["content-type"].startswith("application/pdf")
+    assert r_kuat.headers.get("X-Mode") == "kuat"
+    assert r_kuat.headers.get("X-Keep-Text") == "false"
+    assert "no-store" in r_kuat.headers.get("Cache-Control", "")
+
+
+def test_http_pdf_compress_fallback_dan_catatan() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    tiny_pdf = make_pdf(1)
+    # Mode ringan fallback
+    r_tiny = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", tiny_pdf, "application/pdf"))],
+        data={"mode": "ringan"},
+    )
+    assert r_tiny.status_code == 200
+    assert r_tiny.headers.get("X-Used-Original") == "true"
+    assert r_tiny.headers.get("X-Saved-Percent") == "0"
+    assert "Berkas aslinya sudah efisien" in r_tiny.headers.get("X-Notes", "")
+
+    # Mode kuat fallback
+    r_kuat = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", tiny_pdf, "application/pdf"))],
+        data={"mode": "kuat"},
+    )
+    assert r_kuat.status_code == 200
+    assert r_kuat.headers.get("X-Used-Original") == "true"
+    assert "Rasterisasi tidak membuat berkas ini lebih kecil" in r_kuat.headers.get("X-Notes", "")
+
+    # Mode ringan penghematan < 1%
+    doc_clean = pymupdf.open()
+    doc_clean.new_page(width=300, height=300)
+    buf_clean = io.BytesIO()
+    doc_clean.save(
+        buf_clean,
+        garbage=4,
+        deflate=True,
+        deflate_images=True,
+        deflate_fonts=True,
+        clean=True,
+    )
+    clean_bytes = buf_clean.getvalue()
+    doc_clean.close()
+
+    pdf_near = clean_bytes + b"\n%"
+    r_near = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", pdf_near, "application/pdf"))],
+        data={"mode": "ringan"},
+    )
+    assert r_near.status_code == 200
+    assert r_near.headers.get("X-Used-Original") == "false"
+    assert r_near.headers.get("X-Saved-Percent") == "0"
+    assert "Penghematannya sangat kecil" in r_near.headers.get("X-Notes", "")
+
+
+def test_http_pdf_compress_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tanpa berkas -> 400 NO_FILE
+    r_no_file = client.post("/api/pdf/compress", data={"mode": "ringan"})
+    assert r_no_file.status_code == 400, r_no_file.text
+    assert r_no_file.json()["error"]["code"] == COMPRESS_ERR_NO_FILE
+
+    # Berkas kosong -> 400 EMPTY_FILE
+    r_empty = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("kosong.pdf", b"", "application/pdf"))],
+        data={"mode": "ringan"},
+    )
+    assert r_empty.status_code == 400, r_empty.text
+    assert r_empty.json()["error"]["code"] == COMPRESS_ERR_EMPTY_FILE
+
+    # Bukan PDF -> 400 NOT_PDF
+    r_not_pdf = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("catatan.txt", b"halo ini bukan pdf", "text/plain"))],
+        data={"mode": "ringan"},
+    )
+    assert r_not_pdf.status_code == 400, r_not_pdf.text
+    assert r_not_pdf.json()["error"]["code"] == COMPRESS_ERR_NOT_PDF
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    r_bad_mode = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", make_pdf(1), "application/pdf"))],
+        data={"mode": "ngawur"},
+    )
+    assert r_bad_mode.status_code == 400, r_bad_mode.text
+    assert r_bad_mode.json()["error"]["code"] == COMPRESS_ERR_UNSUPPORTED_MODE
+
+    # DPI tidak valid -> 400 INVALID_DPI
+    r_bad_dpi = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", make_pdf(1), "application/pdf"))],
+        data={"mode": "kuat", "dpi": "50"},
+    )
+    assert r_bad_dpi.status_code == 400, r_bad_dpi.text
+    assert r_bad_dpi.json()["error"]["code"] == COMPRESS_ERR_INVALID_DPI
+
+    # Quality tidak valid -> 400 INVALID_QUALITY
+    r_bad_qual = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("dokumen.pdf", make_pdf(1), "application/pdf"))],
+        data={"mode": "kuat", "quality": "999"},
+    )
+    assert r_bad_qual.status_code == 400, r_bad_qual.text
+    assert r_bad_qual.json()["error"]["code"] == COMPRESS_ERR_INVALID_QUALITY
+
+    # PDF rusak -> 422 PDF_UNREADABLE
+    rusak = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog\n" + b"x" * 200
+    r_rusak = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("rusak.pdf", rusak, "application/pdf"))],
+        data={"mode": "ringan"},
+    )
+    assert r_rusak.status_code == 422, r_rusak.text
+    assert r_rusak.json()["error"]["code"] == COMPRESS_ERR_PDF_UNREADABLE
+
+    # PDF terenkripsi -> 422 PDF_ENCRYPTED
+    r_enc = client.post(
+        "/api/pdf/compress",
+        files=[("file", ("rahasia.pdf", make_encrypted_pdf(1), "application/pdf"))],
+        data={"mode": "ringan"},
+    )
+    assert r_enc.status_code == 422, r_enc.text
+    assert r_enc.json()["error"]["code"] == COMPRESS_ERR_PDF_ENCRYPTED
+
+
+def test_http_pdf_compress_regresi_dan_root() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memiliki pdf-compress di daftar alat
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "pdf-compress" in root_data["tools"]
+
+    # Endpoint limits lama tetap 200
+    assert client.get("/api/pdf/merge/limits").status_code == 200
+    assert client.get("/api/pdf/split/limits").status_code == 200
+    assert client.get("/api/pdf/compress/limits").status_code == 200
 
 
 # --- Runner mandiri ---------------------------------------------------------

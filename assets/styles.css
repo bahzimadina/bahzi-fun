@@ -4933,6 +4933,402 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Perkecil PDF (Compress PDF): Halaman sendiri ================= */
+.kompres__page {
+  max-width: 820px;
+  margin: 0 auto;
+}
+.kompres__back {
+  margin-bottom: 1rem;
+}
+.kompres__back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  color: var(--brand-text);
+  text-decoration: none;
+  font-size: .88rem;
+  font-weight: 500;
+  transition: color var(--transition);
+}
+.kompres__back-link:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+.kompres__notice {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  font-size: .88rem;
+  line-height: 1.6;
+}
+.kompres__notice-title {
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 .5rem 0;
+}
+.kompres__notice-list {
+  margin: 0 0 .75rem 1.25rem;
+  padding: 0;
+  color: var(--text-muted);
+}
+.kompres__notice-list li {
+  margin-bottom: .25rem;
+}
+.kompres__limits-desc {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--brand-text);
+  font-family: var(--font-mono);
+}
+.kompres__app {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.kompres__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+.kompres__dropzone {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--code);
+  padding: 2.2rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  min-height: 44px;
+  box-sizing: border-box;
+  transition: border-color var(--transition), background var(--transition);
+}
+.kompres__dropzone:hover,
+.kompres__dropzone--active {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .08);
+}
+.kompres__dropzone:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.kompres__file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+}
+.kompres__drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .45rem;
+}
+.kompres__drop-icon {
+  width: 44px;
+  height: 44px;
+  stroke: var(--brand-text);
+  margin-bottom: .25rem;
+}
+.kompres__drop-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+}
+.kompres__drop-subtitle {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+}
+.kompres__browse-btn {
+  margin-top: .35rem;
+  min-height: 44px;
+  min-width: 44px;
+  pointer-events: auto;
+}
+.kompres__drop-hint {
+  margin: .35rem 0 0 0;
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+.kompres__file-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .85rem 1rem;
+}
+.kompres__file-box[hidden] {
+  display: none;
+}
+.kompres__file-details {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  min-width: 0;
+}
+.kompres__file-badge {
+  display: inline-block;
+  padding: .2rem .5rem;
+  border-radius: 6px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: var(--pink-dark);
+  color: #fff;
+  flex-shrink: 0;
+}
+.kompres__file-text {
+  min-width: 0;
+}
+.kompres__file-name {
+  margin: 0;
+  font-weight: 600;
+  font-size: .9rem;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kompres__file-size {
+  margin: .15rem 0 0 0;
+  font-size: .78rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.kompres__remove-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+.kompres__section {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+}
+.kompres__section-label {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.kompres__mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+.kompres__mode-label {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .75rem 1rem;
+  min-height: 44px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: .84rem;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.kompres__mode-label:hover {
+  border-color: var(--brand);
+  color: var(--text);
+}
+.kompres__mode-label:has(input:checked) {
+  border-color: var(--brand);
+  background: rgba(117, 83, 255, .12);
+  color: #fff;
+}
+.kompres__mode-label input[type="radio"] {
+  accent-color: var(--brand);
+  margin-top: .2rem;
+  min-width: 20px;
+  min-height: 20px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.kompres__mode-label input[type="radio"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.kompres__mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.kompres__mode-name {
+  font-weight: 600;
+  font-size: .92rem;
+  color: #fff;
+}
+.kompres__mode-desc {
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.kompres__field-custom {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.kompres__field-custom[hidden] {
+  display: none;
+}
+.kompres__field-item {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+.kompres__field-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.kompres__field-badge {
+  font-family: var(--font-mono);
+  color: var(--brand-text);
+  font-weight: 700;
+}
+.kompres__field-hint {
+  margin: 0;
+  font-size: .75rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.kompres__actions {
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+.kompres__submit-btn,
+.kompres__reset-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+.kompres__status {
+  width: 100%;
+}
+.kompres__results {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: .5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.kompres__results[hidden] {
+  display: none;
+}
+.kompres__results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.kompres__results-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #fff;
+}
+.kompres__results-meta {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.kompres__summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .5rem;
+  width: 100%;
+}
+.kompres__summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.kompres__summary-label {
+  font-size: .75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.kompres__summary-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+}
+.kompres__summary-value--highlight {
+  color: var(--brand-text);
+}
+.kompres__notes {
+  background: rgba(117, 83, 255, 0.08);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  padding: .75rem 1rem;
+  font-size: .84rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+.kompres__notes[hidden] {
+  display: none;
+}
+.kompres__results-actions {
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+.kompres__download-btn,
+.kompres__copy-btn {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.kompres__privacy-tag {
+  margin: .35rem 0 0 0;
+  font-size: .8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+.kompres__noscript {
+  margin-top: 1.5rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 480px) {
+  .kompres__field-custom {
+    grid-template-columns: 1fr;
+  }
+  .kompres__summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (pointer: coarse) {
   #csv-mode,
   #csv-pemisah,
@@ -4988,6 +5384,10 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
-
-
-
+@media (pointer: coarse) {
+  #kompres-input-dpi,
+  #kompres-input-quality,
+  #kompres-app label {
+    min-height: 44px;
+  }
+}

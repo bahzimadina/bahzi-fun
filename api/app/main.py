@@ -78,6 +78,20 @@ from .pdf_split import (
     inspect_pdf,
     split_pdf,
 )
+from .pdf_compress import (
+    DEFAULT_DPI as COMPRESS_DEFAULT_DPI,
+    DEFAULT_QUALITY as COMPRESS_DEFAULT_QUALITY,
+    MAX_DPI as COMPRESS_MAX_DPI,
+    MAX_FILE_BYTES as COMPRESS_MAX_FILE_BYTES,
+    MAX_PAGES as COMPRESS_MAX_PAGES,
+    MAX_QUALITY as COMPRESS_MAX_QUALITY,
+    MIN_DPI as COMPRESS_MIN_DPI,
+    MIN_QUALITY as COMPRESS_MIN_QUALITY,
+    MODES as COMPRESS_MODES,
+    PdfCompressError,
+    compress_pdf,
+    inspect_pdf as inspect_compress_pdf,
+)
 from .case_convert import (
     CHUNK_SIZE as CC_CHUNK_SIZE,
     MAX_BYTES as CC_MAX_BYTES,
@@ -476,6 +490,17 @@ async def handle_pdf_split_error(request: Request, exc: PdfSplitError) -> JSONRe
     )
 
 
+@app.exception_handler(PdfCompressError)
+async def handle_pdf_compress_error(request: Request, exc: PdfCompressError) -> JSONResponse:
+    """Error kompresi PDF yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("kompres pdf ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(ImageConvertError)
 async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONResponse:
     """Error konversi gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -726,6 +751,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
     elif request.url.path.startswith("/api/image/edit"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/pdf/compress"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     elif request.url.path.startswith("/api/pdf/split"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     else:
@@ -868,6 +895,45 @@ def _pdf_split_limits_payload() -> dict:
         "min_chunk": SPLIT_MIN_CHUNK,
         "max_chunk": SPLIT_MAX_CHUNK,
         "sample_range": "1-3,5",
+    }
+
+
+def _pdf_compress_limits_payload() -> dict:
+    return {
+        "max_file_bytes": COMPRESS_MAX_FILE_BYTES,
+        "max_file_mb": COMPRESS_MAX_FILE_BYTES // (1024 * 1024),
+        "max_pages": COMPRESS_MAX_PAGES,
+        "modes": [
+            {
+                "id": "ringan",
+                "label": "Ringan",
+                "desc": "Bersihkan struktur berkas tanpa mengubah tampilan. Teks tetap utuh dan bisa dipilih.",
+                "keep_text": True,
+            },
+            {
+                "id": "sedang",
+                "label": "Sedang",
+                "desc": "Turunkan resolusi gambar berlebih secara seimbang. Teks tetap utuh dan bisa dipilih.",
+                "keep_text": True,
+            },
+            {
+                "id": "kuat",
+                "label": "Kuat",
+                "desc": "Ubah seluruh halaman menjadi gambar JPEG beresolusi hemat. Teks tidak bisa dipilih lagi. Cocok untuk dokumen hasil pindai atau foto.",
+                "keep_text": False,
+            },
+        ],
+        "dpi_min": COMPRESS_MIN_DPI,
+        "dpi_max": COMPRESS_MAX_DPI,
+        "dpi_default": COMPRESS_DEFAULT_DPI,
+        "quality_min": COMPRESS_MIN_QUALITY,
+        "quality_max": COMPRESS_MAX_QUALITY,
+        "quality_default": COMPRESS_DEFAULT_QUALITY,
+        "processed_on": "server",
+        "note": (
+            "Berkas dikirim ke server, diproses langsung di memori, lalu dibuang setelah "
+            "respons dikirim. Tidak ada berkas yang disimpan di disk."
+        ),
     }
 
 
@@ -1521,6 +1587,81 @@ async def pdf_split_endpoint(
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=media_type, headers=headers)
+
+
+@app.get("/api/pdf/compress/limits")
+async def pdf_compress_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Perkecil PDF — dipakai front-end untuk menampilkan aturan."""
+    return JSONResponse(content=_pdf_compress_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pdf/compress")
+async def pdf_compress_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    mode: str | None = Form(default=None),
+    dpi: str | None = Form(default=None),
+    quality: str | None = Form(default=None),
+):
+    """Perkecil ukuran berkas PDF: mode ringan, sedang, atau kuat."""
+    started = time.perf_counter()
+
+    raw_cl = request.headers.get("content-length")
+    if raw_cl:
+        try:
+            declared = int(raw_cl)
+            if declared > COMPRESS_MAX_FILE_BYTES + CONTENT_LENGTH_SLACK:
+                raise PdfCompressError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+        except ValueError:
+            pass
+
+    if file is None:
+        raise PdfCompressError("NO_FILE", "Tidak ada berkas yang dikirim. Sertakan berkas PDF pada field 'file'.", 400)
+
+    try:
+        data = await _read_capped(file, COMPRESS_MAX_FILE_BYTES)
+    except PdfMergeError:
+        raise PdfCompressError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+
+    if not mode:
+        raise PdfCompressError("UNSUPPORTED_MODE", "Mode kompresi wajib diisi.", 400)
+
+    result = compress_pdf(data, mode, dpi=dpi, quality=quality)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    if result.size_before > 0 and result.size_after < result.size_before:
+        saved_percent = int(round((result.size_before - result.size_after) / result.size_before * 100))
+    else:
+        saved_percent = 0
+
+    logger.info(
+        "kompres selesai: mode=%s byte_sebelum=%d byte_sesudah=%d hemat=%d%% durasi=%.0fms",
+        mode,
+        result.size_before,
+        result.size_after,
+        saved_percent,
+        duration_ms,
+    )
+
+    notes_header = " | ".join(result.notes)
+    if len(notes_header) > 500:
+        notes_header = notes_header[:497] + "..."
+
+    headers = {
+        "Content-Disposition": 'attachment; filename="kompres-pdf.pdf"',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Size-Before": str(result.size_before),
+        "X-Size-After": str(result.size_after),
+        "X-Saved-Percent": str(saved_percent),
+        "X-Page-Count": str(result.page_count),
+        "X-Mode": result.mode,
+        "X-Keep-Text": "true" if result.keep_text else "false",
+        "X-Used-Original": "true" if result.used_original else "false",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+        "X-Notes": notes_header,
+    }
+    return Response(content=result.data, media_type="application/pdf", headers=headers)
 
 
 @app.get("/api/image/convert/limits")
@@ -3065,6 +3206,7 @@ async def root() -> dict:
         "tools": [
             "pdf-merge",
             "pdf-split",
+            "pdf-compress",
             "image-convert",
             "image-edit",
             "word-count",
