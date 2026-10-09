@@ -92,6 +92,22 @@ from .pdf_compress import (
     compress_pdf,
     inspect_pdf as inspect_compress_pdf,
 )
+from .pdf_to_image import (
+    DEFAULT_DPI as PDF_IMG_DEFAULT_DPI,
+    DEFAULT_QUALITY as PDF_IMG_DEFAULT_QUALITY,
+    FORMATS as PDF_IMG_FORMATS,
+    MAX_DPI as PDF_IMG_MAX_DPI,
+    MAX_FILE_BYTES as PDF_IMG_MAX_FILE_BYTES,
+    MAX_OUTPUT_BYTES as PDF_IMG_MAX_OUTPUT_BYTES,
+    MAX_PAGES as PDF_IMG_MAX_PAGES,
+    MAX_PAGE_PIXELS as PDF_IMG_MAX_PAGE_PIXELS,
+    MAX_QUALITY as PDF_IMG_MAX_QUALITY,
+    MIN_DPI as PDF_IMG_MIN_DPI,
+    MIN_QUALITY as PDF_IMG_MIN_QUALITY,
+    PdfToImageError,
+    limits_payload as pdf_to_image_limits_payload,
+    pdf_to_image,
+)
 from .case_convert import (
     CHUNK_SIZE as CC_CHUNK_SIZE,
     MAX_BYTES as CC_MAX_BYTES,
@@ -501,6 +517,17 @@ async def handle_pdf_compress_error(request: Request, exc: PdfCompressError) -> 
     )
 
 
+@app.exception_handler(PdfToImageError)
+async def handle_pdf_to_image_error(request: Request, exc: PdfToImageError) -> JSONResponse:
+    """Error konversi PDF ke gambar yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("pdf ke gambar ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(ImageConvertError)
 async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONResponse:
     """Error konversi gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -751,6 +778,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
     elif request.url.path.startswith("/api/image/edit"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/pdf/to-image"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/compress"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     elif request.url.path.startswith("/api/pdf/split"):
@@ -1662,6 +1691,67 @@ async def pdf_compress_endpoint(
         "X-Notes": notes_header,
     }
     return Response(content=result.data, media_type="application/pdf", headers=headers)
+
+
+@app.get("/api/pdf/to-image/limits")
+async def pdf_to_image_limits() -> JSONResponse:
+    """Batas yang berlaku untuk PDF ke gambar — dipakai front-end untuk menampilkan aturan."""
+    return JSONResponse(content=pdf_to_image_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pdf/to-image")
+async def pdf_to_image_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    format: str | None = Form(default="png"),
+    dpi: str | None = Form(default=None),
+    quality: str | None = Form(default=None),
+):
+    """Ubah setiap halaman berkas PDF menjadi gambar PNG atau JPG."""
+    started = time.perf_counter()
+
+    raw_cl = request.headers.get("content-length")
+    if raw_cl:
+        try:
+            declared = int(raw_cl)
+            if declared > PDF_IMG_MAX_FILE_BYTES + CONTENT_LENGTH_SLACK:
+                raise PdfToImageError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+        except ValueError:
+            pass
+
+    if file is None:
+        raise PdfToImageError("NO_FILE", "Tidak ada berkas yang dikirim. Sertakan berkas PDF pada field 'file'.", 400)
+
+    try:
+        data = await _read_capped(file, PDF_IMG_MAX_FILE_BYTES)
+    except PdfMergeError:
+        raise PdfToImageError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+
+    result = pdf_to_image(data, format=format or "png", dpi=dpi, quality=quality)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "pdf ke gambar selesai: format=%s dpi=%d halaman=%d byte_hasil=%d durasi=%.0fms",
+        result.format,
+        result.dpi,
+        result.page_count,
+        result.size_bytes,
+        duration_ms,
+    )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Page-Count": str(result.page_count),
+        "X-Image-Count": str(result.image_count),
+        "X-Output-Kind": result.output_kind,
+        "X-Image-Format": result.format,
+        "X-Dpi": str(result.dpi),
+        "X-Total-Bytes": str(result.size_bytes),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
 
 
 @app.get("/api/image/convert/limits")
@@ -3207,6 +3297,7 @@ async def root() -> dict:
             "pdf-merge",
             "pdf-split",
             "pdf-compress",
+            "pdf-to-image",
             "image-convert",
             "image-edit",
             "word-count",

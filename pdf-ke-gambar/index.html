@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181225">
+  <meta name="robots" content="index,follow">
+
+  <title>Ubah PDF jadi gambar | bahzi.fun</title>
+  <meta name="description" content="Ubah setiap halaman berkas PDF menjadi gambar PNG atau JPG. Batas 25 MB dan 50 halaman. Berkas diproses di memori server lalu langsung dihapus tanpa disimpan.">
+  <link rel="canonical" href="https://bahzi.fun/pdf-ke-gambar/">
+
+  <!-- Google tag (gtag.js) + Consent Mode v2 -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      wait_for_update: 500
+    });
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-MKL7XG6DH4"></script>
+  <script>
+    gtag('js', new Date());
+    gtag('config', 'G-MKL7XG6DH4');
+  </script>
+
+  <!-- Google AdSense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5901632307149966"
+          crossorigin="anonymous"></script>
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="bahzi.fun">
+  <meta property="og:title" content="Ubah PDF jadi gambar | bahzi.fun">
+  <meta property="og:description" content="Ubah setiap halaman berkas PDF menjadi gambar PNG atau JPG. Batas 25 MB dan 50 halaman. Berkas diproses di memori server lalu langsung dihapus tanpa disimpan.">
+  <meta property="og:url" content="https://bahzi.fun/pdf-ke-gambar/">
+  <meta property="og:locale" content="id_ID">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Ubah PDF jadi gambar | bahzi.fun">
+  <meta name="twitter:description" content="Ubah setiap halaman berkas PDF menjadi gambar PNG atau JPG. Batas 25 MB dan 50 halaman. Berkas diproses di memori server lalu langsung dihapus tanpa disimpan.">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
+
+  <link rel="stylesheet" href="/assets/styles.css?v=__V__">
+  <script src="/assets/tool-pdf-ke-gambar.js?v=__V__" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Lewati ke konten utama</a>
+
+  <!-- Sprite ikon inline -->
+  <svg class="svg-sprite" aria-hidden="true" hidden>
+    <defs>
+      <linearGradient id="bz-gradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fd44b0"></stop>
+        <stop offset="1" stop-color="#7553ff"></stop>
+      </linearGradient>
+    </defs>
+    <symbol id="icon-logo" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="9" fill="url(#bz-gradient)"></rect>
+      <text x="16" y="22" text-anchor="middle" font-size="16" font-weight="700" fill="#150f23">b</text>
+    </symbol>
+    <symbol id="icon-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 19V5M6 11l6-6 6 6"></path>
+    </symbol>
+  </svg>
+
+  <header class="navbar" id="top">
+    <div class="navbar__inner container">
+      <a class="navbar__brand" href="/" aria-label="bahzi.fun: kembali ke beranda">
+        <svg class="wordmark" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
+        <span class="navbar__brand-text">bahzi.fun</span>
+        <span class="navbar__brand-sub">OmniTools</span>
+      </a>
+      <nav class="navbar__nav" aria-label="Navigasi utama">
+        <a class="navbar__link" href="/">Beranda</a>
+        <a class="navbar__link" href="/#alat">Alat</a>
+        <a class="navbar__link" href="/#faq">FAQ</a>
+      </nav>
+      <a class="btn btn--primary btn--sm navbar__cta" href="/#alat">Lihat alat</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="tools section--sub" aria-labelledby="pdfimg-title">
+      <div class="container pdfimg__page">
+        <div class="tools__head">
+          <p class="pdfimg__back"><a class="pdfimg__back-link" href="/">&larr; Kembali ke beranda</a></p>
+          <h1 class="tools__title" id="pdfimg-title">Ubah setiap halaman PDF jadi gambar</h1>
+          <p class="tools__lead">Ekstrak setiap halaman dokumen PDF Anda menjadi gambar PNG atau JPG, bisa diunduh satu per satu atau sekaligus dalam satu berkas.</p>
+        </div>
+
+        <div class="pdfimg__notice">
+          <p class="pdfimg__notice-title">Catatan penting & cara kerjanya:</p>
+          <ul class="pdfimg__notice-list">
+            <li><strong>Pilihan format:</strong> PNG untuk mutu terbaik tanpa kompresi, sedangkan JPG menghasilkan ukuran berkas lebih kecil dan cocok untuk dibagikan.</li>
+            <li><strong>Resolusi (DPI):</strong> Menentukan ketajaman gambar. Nilai DPI lebih tinggi menghasilkan gambar lebih tajam, namun ukuran berkas menjadi lebih besar.</li>
+            <li><strong>Sifat hasil render:</strong> Hasil gambar tidak bisa dicari atau disalin teksnya karena seluruh halaman dirender menjadi gambar statis. Mutu terbaik didapat dari PDF asli digital atau dokumen hasil pindai yang jelas.</li>
+            <li><strong>Dokumen terlindungi:</strong> Dokumen PDF yang terproteksi kata sandi tidak bisa diproses secara otomatis.</li>
+            <li><strong>Privasi terjaga:</strong> Berkas dikirim dan diproses di memori server, lalu langsung dihapus setelah selesai (tidak disimpan di disk server).</li>
+          </ul>
+          <p class="pdfimg__limits-desc" id="pdfimg-limits-desc">Batas berkas: maksimal 25 MB dan 50 halaman per dokumen.</p>
+        </div>
+
+        <div class="container">
+          <aside class="ad-slot" data-ad-slot="atas" aria-label="Iklan"></aside>
+        </div>
+
+        <div class="pdfimg__app panel" id="pdfimg-app">
+          <form id="pdfimg-form" class="pdfimg__form">
+            <!-- Area unggah berkas (drag & drop) -->
+            <div class="pdfimg__dropzone" id="pdfimg-dropzone" tabindex="0" role="region" aria-label="Area pilih berkas PDF">
+              <input type="file" id="pdfimg-file-input" class="pdfimg__file-input" accept="application/pdf" aria-label="Unggah berkas PDF">
+              <div class="pdfimg__drop-content">
+                <svg class="pdfimg__drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <p class="pdfimg__drop-title">Tarik dan letakkan berkas PDF di sini</p>
+                <p class="pdfimg__drop-subtitle">atau</p>
+                <button type="button" class="btn btn--secondary pdfimg__browse-btn" id="pdfimg-browse-btn">Pilih berkas</button>
+                <p class="pdfimg__drop-hint">Format didukung: PDF (maksimal 25 MB &amp; 50 halaman)</p>
+              </div>
+            </div>
+
+            <!-- Ringkasan berkas yang dipilih -->
+            <div class="pdfimg__file-box" id="pdfimg-file-box" hidden>
+              <div class="pdfimg__file-details">
+                <span class="pdfimg__file-badge" id="pdfimg-file-badge">PDF</span>
+                <div class="pdfimg__file-text">
+                  <p class="pdfimg__file-name" id="pdfimg-file-name"></p>
+                  <p class="pdfimg__file-size" id="pdfimg-file-size"></p>
+                </div>
+              </div>
+              <button type="button" class="btn btn--ghost btn--sm pdfimg__remove-btn" id="pdfimg-remove-btn" aria-label="Ganti berkas">Ganti berkas</button>
+            </div>
+
+            <!-- Pilihan format gambar -->
+            <div class="pdfimg__section" id="pdfimg-section-format">
+              <span class="pdfimg__section-label" id="pdfimg-format-heading">Pilihan format gambar:</span>
+              <div class="pdfimg__format-list" id="pdfimg-format-list" role="radiogroup" aria-labelledby="pdfimg-format-heading">
+                <label class="pdfimg__format-label">
+                  <input type="radio" name="pdfimg-format-radio" value="png" id="pdfimg-format-png" checked>
+                  <div class="pdfimg__format-text">
+                    <span class="pdfimg__format-name">PNG — mutu terbaik, berkas lebih besar</span>
+                    <span class="pdfimg__format-desc">Gambar jernih tanpa penurunan kualitas kompresi.</span>
+                  </div>
+                </label>
+                <label class="pdfimg__format-label">
+                  <input type="radio" name="pdfimg-format-radio" value="jpg" id="pdfimg-format-jpg">
+                  <div class="pdfimg__format-text">
+                    <span class="pdfimg__format-name">JPG — berkas lebih kecil</span>
+                    <span class="pdfimg__format-desc">Ukuran berkas lebih ringkas, praktis untuk dibagikan.</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Pengaturan resolusi rendering (DPI) -->
+            <div class="pdfimg__field-item" id="pdfimg-field-dpi">
+              <div class="pdfimg__field-label">
+                <label for="pdfimg-input-dpi">Resolusi rendering</label>
+                <span class="pdfimg__field-badge"><span id="pdfimg-val-dpi">150</span> DPI</span>
+              </div>
+              <input type="range" id="pdfimg-input-dpi" min="72" max="200" value="150">
+              <p class="pdfimg__field-hint">Makin tinggi DPI makin tajam gambarnya, tetapi ukuran berkas bertambah besar.</p>
+            </div>
+
+            <!-- Pengaturan kualitas JPG (hanya tampil bila format JPG) -->
+            <div class="pdfimg__field-item" id="pdfimg-field-quality" hidden>
+              <div class="pdfimg__field-label">
+                <label for="pdfimg-input-quality">Kualitas gambar JPG</label>
+                <span class="pdfimg__field-badge"><span id="pdfimg-val-quality">85</span>%</span>
+              </div>
+              <input type="range" id="pdfimg-input-quality" min="30" max="95" value="85">
+              <p class="pdfimg__field-hint">Makin tinggi persentasenya mutu foto makin bagus, namun ukuran berkas bertambah.</p>
+            </div>
+
+            <!-- Tombol aksi -->
+            <div class="pdfimg__actions">
+              <button type="submit" class="btn btn--primary pdfimg__submit-btn" id="pdfimg-submit-btn" disabled>Ubah jadi gambar</button>
+              <button type="button" class="btn btn--ghost pdfimg__reset-btn" id="pdfimg-reset-btn" disabled>Kosongkan</button>
+            </div>
+          </form>
+
+          <!-- Wadah status proses -->
+          <div class="status pdfimg__status" id="pdfimg-status" aria-live="polite">Pilih berkas PDF untuk memulai.</div>
+
+          <!-- Panel hasil konversi -->
+          <div class="pdfimg__results" id="pdfimg-results" hidden>
+            <div class="pdfimg__results-head">
+              <h2 class="pdfimg__results-title">Hasil</h2>
+              <p class="pdfimg__results-meta" id="pdfimg-results-meta"></p>
+            </div>
+
+            <div class="pdfimg__summary-grid" id="pdfimg-summary-grid">
+              <div class="pdfimg__summary-card">
+                <span class="pdfimg__summary-label">Jumlah halaman</span>
+                <span class="pdfimg__summary-value" id="pdfimg-summary-pages">-</span>
+              </div>
+              <div class="pdfimg__summary-card">
+                <span class="pdfimg__summary-label">Format &amp; Resolusi</span>
+                <span class="pdfimg__summary-value" id="pdfimg-summary-format">-</span>
+              </div>
+              <div class="pdfimg__summary-card">
+                <span class="pdfimg__summary-label">Ukuran berkas</span>
+                <span class="pdfimg__summary-value pdfimg__summary-value--highlight" id="pdfimg-summary-size">-</span>
+              </div>
+            </div>
+
+            <!-- Keterangan khusus ZIP atau pratinjau 1 halaman -->
+            <div class="pdfimg__result-info" id="pdfimg-result-info">
+              <p class="pdfimg__info-text" id="pdfimg-info-text"></p>
+            </div>
+
+            <div class="pdfimg__preview-wrap" id="pdfimg-preview-wrap" hidden>
+              <p class="pdfimg__preview-label">Pratinjau gambar:</p>
+              <div class="pdfimg__preview-box">
+                <img id="pdfimg-preview-img" class="pdfimg__preview-img" alt="Pratinjau halaman PDF">
+              </div>
+            </div>
+
+            <div class="pdfimg__results-actions">
+              <a class="btn btn--primary pdfimg__download-btn" id="pdfimg-download-btn" href="#" role="button" download="halaman-pdf.zip">Unduh gambar</a>
+              <button type="button" class="btn btn--secondary pdfimg__copy-btn" id="pdfimg-copy-btn">Salin ringkasan</button>
+            </div>
+          </div>
+
+          <p class="pdfimg__privacy-tag">Privasi: berkas diproses di memori server lalu langsung dihapus setelah selesai (tidak disimpan).</p>
+        </div>
+
+        <section class="panel" style="margin-top: 1.5rem;" aria-labelledby="cara-pakai-title">
+          <h2 id="cara-pakai-title" style="font-size: 1.05rem; margin-top: 0;">Cara memakai alat PDF ke gambar</h2>
+          <ol style="margin: .5rem 0 0 1.25rem; padding: 0; color: var(--text-muted); line-height: 1.6;">
+            <li>Pilih atau tarik berkas dokumen PDF Anda (maksimal 25 MB dan 50 halaman).</li>
+            <li>Pilih format gambar yang diinginkan (PNG untuk mutu tanpa kompresi atau JPG untuk ukuran lebih kecil), serta sesuaikan nilai resolusi (DPI) dan kualitas jika perlu.</li>
+            <li>Klik tombol <strong>Ubah jadi gambar</strong>, tunggu beberapa saat hingga selesai, lalu unduh berkas gambar tunggal atau berkas ZIP hasil ekspor.</li>
+          </ol>
+        </section>
+
+        <div class="container">
+          <aside class="ad-slot" data-ad-slot="bawah" aria-label="Iklan"></aside>
+        </div>
+
+        <noscript>
+          <div class="panel pdfimg__noscript">
+            <h2>Ubah PDF jadi gambar</h2>
+            <p>Alat ini mengubah setiap halaman dokumen PDF menjadi berkas gambar PNG atau JPG yang siap diunduh. Untuk memilih berkas dan mengatur format gambar, silakan aktifkan JavaScript pada peramban Anda.</p>
+            <p>Batas berkas: maksimal 25 MB dan 50 halaman per dokumen. Berkas diproses langsung di memori server lalu langsung dibuang.</p>
+          </div>
+        </noscript>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner container">
+      <div class="footer__brand">
+        <svg class="wordmark wordmark--sm" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
+        <p class="footer__copy">&copy; 2026 bahzi.fun</p>
+      </div>
+      <nav class="footer__nav" aria-label="Tautan footer">
+        <a class="footer__link" href="/">Beranda</a>
+        <a class="footer__link" href="/#alat">Daftar alat</a>
+        <a class="footer__link" href="/privasi.html">Kebijakan privasi</a>
+      </nav>
+      <a class="footer__top" href="#top" aria-label="Kembali ke atas">
+        <svg aria-hidden="true"><use href="#icon-arrow-up"></use></svg>
+        Kembali ke atas
+      </a>
+    </div>
+    <p class="footer__note container">Penggabung PDF, Pisah PDF, Kompres PDF, PDF ke gambar, Ubah ukuran gambar, Konversi gambar, Edit gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan &amp; periksa JSON, Kalkulator tanggal, Hitung mundur, Kode QR &amp; barcode, Hasilkan bilangan prima, Konverter zona waktu, Alat CSV, Kalkulator listrik, dan Pomodoro Timer sudah bisa dipakai. Sisa 8 alat lain masih disiapkan.</p>
+  </footer>
+
+  <div class="cookiebar" id="cookiebar" hidden>
+    <p class="cookiebar__text">Cookie dipakai untuk statistik kunjungan dan iklan Google.</p>
+    <div class="cookiebar__actions">
+      <button class="btn btn--primary cookiebar__btn" id="cookiebar-ok" type="button">Setuju</button>
+      <button class="btn btn--ghost cookiebar__btn" id="cookiebar-tolak" type="button">Tolak</button>
+    </div>
+    <a class="cookiebar__link" href="/privasi.html">Kebijakan privasi</a>
+  </div>
+</body>
+</html>

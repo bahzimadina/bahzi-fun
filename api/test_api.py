@@ -138,6 +138,41 @@ from app.pdf_compress import (  # noqa: E402
     parse_dpi,
     parse_quality,
 )
+from app.pdf_to_image import (  # noqa: E402
+    DEFAULT_DPI as PDF_IMG_DEFAULT_DPI,
+    DEFAULT_QUALITY as PDF_IMG_DEFAULT_QUALITY,
+    ERR_EMPTY_FILE as PDF_IMG_ERR_EMPTY_FILE,
+    ERR_INVALID_DPI as PDF_IMG_ERR_INVALID_DPI,
+    ERR_INVALID_QUALITY as PDF_IMG_ERR_INVALID_QUALITY,
+    ERR_NO_FILE as PDF_IMG_ERR_NO_FILE,
+    ERR_NOT_PDF as PDF_IMG_ERR_NOT_PDF,
+    ERR_OUTPUT_TOO_LARGE as PDF_IMG_ERR_OUTPUT_TOO_LARGE,
+    ERR_PAGE_TOO_LARGE as PDF_IMG_ERR_PAGE_TOO_LARGE,
+    ERR_PAYLOAD_TOO_LARGE as PDF_IMG_ERR_PAYLOAD_TOO_LARGE,
+    ERR_PDF_EMPTY as PDF_IMG_ERR_PDF_EMPTY,
+    ERR_PDF_ENCRYPTED as PDF_IMG_ERR_PDF_ENCRYPTED,
+    ERR_PDF_UNREADABLE as PDF_IMG_ERR_PDF_UNREADABLE,
+    ERR_TOO_MANY_PAGES as PDF_IMG_ERR_TOO_MANY_PAGES,
+    ERR_UNSUPPORTED_FORMAT as PDF_IMG_ERR_UNSUPPORTED_FORMAT,
+    FORMATS as PDF_IMG_FORMATS,
+    MAX_DPI as PDF_IMG_MAX_DPI,
+    MAX_FILE_BYTES as PDF_IMG_MAX_FILE_BYTES,
+    MAX_OUTPUT_BYTES as PDF_IMG_MAX_OUTPUT_BYTES,
+    MAX_PAGES as PDF_IMG_MAX_PAGES,
+    MAX_PAGE_PIXELS as PDF_IMG_MAX_PAGE_PIXELS,
+    MAX_QUALITY as PDF_IMG_MAX_QUALITY,
+    MIN_DPI as PDF_IMG_MIN_DPI,
+    MIN_QUALITY as PDF_IMG_MIN_QUALITY,
+    PdfToImageError,
+    PdfToImageResult,
+    check_size as check_pdf_to_image_size,
+    is_pdf_bytes as is_pdf_to_image_bytes,
+    limits_payload as pdf_to_image_limits_payload_func,
+    parse_dpi as parse_pdf_to_image_dpi,
+    parse_format as parse_pdf_to_image_format,
+    parse_quality as parse_pdf_to_image_quality,
+    pdf_to_image,
+)
 from app.word_count import (  # noqa: E402
     INVALID_REQUEST as WC_INVALID_REQUEST,
     MAX_BYTES as WC_MAX_BYTES,
@@ -691,6 +726,20 @@ def expect_compress_error(func, code: str, status: int) -> PdfCompressError:
         assert isinstance(body["error"]["message"], str) and body["error"]["message"]
         return exc
     raise AssertionError(f"tidak melempar PdfCompressError {code}")
+
+
+def expect_pdf_to_image_error(func, code: str, status: int) -> PdfToImageError:
+    """Pastikan func() melempar PdfToImageError dengan kode + status yang tepat."""
+    try:
+        func()
+    except PdfToImageError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar PdfToImageError {code}")
 
 
 def expect_word_count_error(func, code: str, status: int) -> WordCountError:
@@ -8035,6 +8084,341 @@ def test_http_pdf_compress_regresi_dan_root() -> None:
     assert client.get("/api/pdf/merge/limits").status_code == 200
     assert client.get("/api/pdf/split/limits").status_code == 200
     assert client.get("/api/pdf/compress/limits").status_code == 200
+
+
+def test_pdf_to_image_logika_dasar() -> None:
+    # Parsing format
+    assert parse_pdf_to_image_format("PNG") == "png"
+    assert parse_pdf_to_image_format("jpg") == "jpg"
+    assert parse_pdf_to_image_format("JPEG") == "jpg"
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_format("gif"), PDF_IMG_ERR_UNSUPPORTED_FORMAT, 400)
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_format(None), PDF_IMG_ERR_UNSUPPORTED_FORMAT, 400)
+
+    # Parsing DPI
+    assert parse_pdf_to_image_dpi(None) == PDF_IMG_DEFAULT_DPI
+    assert parse_pdf_to_image_dpi("") == PDF_IMG_DEFAULT_DPI
+    assert parse_pdf_to_image_dpi("100") == 100
+    assert parse_pdf_to_image_dpi(72) == 72
+    assert parse_pdf_to_image_dpi(200) == 200
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_dpi(50), PDF_IMG_ERR_INVALID_DPI, 400)
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_dpi(201), PDF_IMG_ERR_INVALID_DPI, 400)
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_dpi("abc"), PDF_IMG_ERR_INVALID_DPI, 400)
+
+    # Parsing Quality
+    assert parse_pdf_to_image_quality(None) == PDF_IMG_DEFAULT_QUALITY
+    assert parse_pdf_to_image_quality("") == PDF_IMG_DEFAULT_QUALITY
+    assert parse_pdf_to_image_quality("90") == 90
+    assert parse_pdf_to_image_quality(30) == 30
+    assert parse_pdf_to_image_quality(95) == 95
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_quality(20), PDF_IMG_ERR_INVALID_QUALITY, 400)
+    expect_pdf_to_image_error(lambda: parse_pdf_to_image_quality(100), PDF_IMG_ERR_INVALID_QUALITY, 400)
+
+    # Limits payload
+    payload = pdf_to_image_limits_payload_func()
+    assert payload["max_file_bytes"] == PDF_IMG_MAX_FILE_BYTES
+    assert payload["max_pages"] == PDF_IMG_MAX_PAGES
+    assert payload["min_dpi"] == 72
+    assert payload["max_dpi"] == 200
+    assert payload["default_dpi"] == 150
+    assert payload["min_quality"] == 30
+    assert payload["max_quality"] == 95
+    assert payload["default_quality"] == 85
+    assert payload["formats"] == ["png", "jpg"]
+    assert payload["max_output_bytes"] == PDF_IMG_MAX_OUTPUT_BYTES
+
+
+def test_pdf_to_image_3_halaman_zip_dan_dpi() -> None:
+    import zipfile
+    import pymupdf
+
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page(width=200, height=200)
+        page.draw_rect(pymupdf.Rect(10, 10, 100, 100), color=(1, 0, 0), fill=(0, 1, 0))
+    buf = io.BytesIO()
+    doc.save(buf)
+    pdf_bytes = buf.getvalue()
+    doc.close()
+
+    # Render dengan DPI 72
+    res_72 = pdf_to_image(pdf_bytes, format="png", dpi=72)
+    assert res_72.output_kind == "zip"
+    assert res_72.output_name == "halaman-pdf.zip"
+    assert res_72.page_count == 3
+    assert res_72.image_count == 3
+    assert res_72.mime_type == "application/zip"
+
+    # Periksa isi ZIP
+    with zipfile.ZipFile(io.BytesIO(res_72.data)) as zf:
+        namelist = sorted(zf.namelist())
+        assert namelist == ["halaman-01.png", "halaman-02.png", "halaman-03.png"]
+        img_72 = Image.open(io.BytesIO(zf.read("halaman-01.png")))
+        assert img_72.format == "PNG"
+        w_72, h_72 = img_72.size
+
+    # Render dengan DPI 150 -> resolusi & dimensi piksel harus lebih besar
+    res_150 = pdf_to_image(pdf_bytes, format="png", dpi=150)
+    with zipfile.ZipFile(io.BytesIO(res_150.data)) as zf_150:
+        img_150 = Image.open(io.BytesIO(zf_150.read("halaman-01.png")))
+        assert img_150.format == "PNG"
+        w_150, h_150 = img_150.size
+
+    assert w_150 > w_72
+    assert h_150 > h_72
+    assert len(res_150.data) > len(res_72.data)
+
+
+def test_pdf_to_image_1_halaman_jpg_dan_png() -> None:
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=150, height=150)
+    page.draw_circle(pymupdf.Point(75, 75), 40, color=(0, 0, 1), fill=(1, 1, 0))
+    buf = io.BytesIO()
+    doc.save(buf)
+    pdf_bytes = buf.getvalue()
+    doc.close()
+
+    # 1 halaman JPG -> satu gambar (bukan ZIP), cek magic bytes \xff\xd8
+    res_jpg = pdf_to_image(pdf_bytes, format="jpg", dpi=100, quality=80)
+    assert res_jpg.output_kind == "image"
+    assert res_jpg.output_name == "halaman-1.jpg"
+    assert res_jpg.mime_type == "image/jpeg"
+    assert res_jpg.format == "jpg"
+    assert res_jpg.page_count == 1
+    assert res_jpg.image_count == 1
+    assert res_jpg.data[:2] == b"\xff\xd8"
+    img_jpg = Image.open(io.BytesIO(res_jpg.data))
+    assert img_jpg.format == "JPEG"
+
+    # 1 halaman PNG -> satu gambar (bukan ZIP)
+    res_png = pdf_to_image(pdf_bytes, format="png", dpi=100)
+    assert res_png.output_kind == "image"
+    assert res_png.output_name == "halaman-1.png"
+    assert res_png.mime_type == "image/png"
+    assert res_png.format == "png"
+    assert res_png.data[:8] == b"\x89PNG\r\n\x1a\n"
+    img_png = Image.open(io.BytesIO(res_png.data))
+    assert img_png.format == "PNG"
+
+
+def test_pdf_to_image_logika_galat() -> None:
+    import pymupdf
+
+    pdf_1 = make_pdf(1)
+
+    # Tanpa berkas / berkas kosong / bukan PDF
+    expect_pdf_to_image_error(lambda: pdf_to_image(None), PDF_IMG_ERR_NO_FILE, 400)
+    expect_pdf_to_image_error(lambda: pdf_to_image(b""), PDF_IMG_ERR_EMPTY_FILE, 400)
+    expect_pdf_to_image_error(lambda: pdf_to_image(b"bukan berkas pdf"), PDF_IMG_ERR_NOT_PDF, 400)
+
+    # Format tidak didukung
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_1, format="bmp"), PDF_IMG_ERR_UNSUPPORTED_FORMAT, 400)
+
+    # DPI / Quality di luar rentang
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_1, dpi=50), PDF_IMG_ERR_INVALID_DPI, 400)
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_1, dpi=250), PDF_IMG_ERR_INVALID_DPI, 400)
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_1, format="jpg", quality=20), PDF_IMG_ERR_INVALID_QUALITY, 400)
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_1, format="jpg", quality=100), PDF_IMG_ERR_INVALID_QUALITY, 400)
+
+    # Dokumen melebihi 50 halaman (51 halaman)
+    doc_51 = pymupdf.open()
+    for _ in range(51):
+        doc_51.new_page(width=50, height=50)
+    buf_51 = io.BytesIO()
+    doc_51.save(buf_51)
+    pdf_51 = buf_51.getvalue()
+    doc_51.close()
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_51), PDF_IMG_ERR_TOO_MANY_PAGES, 413)
+
+    # PDF terenkripsi / berpasword
+    doc_enc = pymupdf.open()
+    doc_enc.new_page(width=50, height=50)
+    buf_enc = io.BytesIO()
+    doc_enc.save(buf_enc, encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="rahasia", user_pw="rahasia")
+    pdf_enc = buf_enc.getvalue()
+    doc_enc.close()
+    expect_pdf_to_image_error(lambda: pdf_to_image(pdf_enc), PDF_IMG_ERR_PDF_ENCRYPTED, 422)
+
+    # PDF rusak
+    rusak = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog\n" + b"x" * 200
+    expect_pdf_to_image_error(lambda: pdf_to_image(rusak), PDF_IMG_ERR_PDF_UNREADABLE, 422)
+
+    # Batas ukuran payload
+    expect_pdf_to_image_error(lambda: check_pdf_to_image_size(PDF_IMG_MAX_FILE_BYTES + 1), PDF_IMG_ERR_PAYLOAD_TOO_LARGE, 413)
+
+
+def test_http_pdf_to_image_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/pdf/to-image/limits")
+    assert resp.status_code == 200, resp.text
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert data["max_file_bytes"] == 26214400
+    assert data["max_file_mb"] == 25
+    assert data["max_pages"] == 50
+    assert data["min_dpi"] == 72
+    assert data["max_dpi"] == 200
+    assert data["default_dpi"] == 150
+    assert data["min_quality"] == 30
+    assert data["max_quality"] == 95
+    assert data["default_quality"] == 85
+    assert data["formats"] == ["png", "jpg"]
+    assert data["max_output_bytes"] == 83886080
+
+
+def test_http_pdf_to_image_sukses_dan_galat() -> None:
+    import zipfile
+    import pymupdf
+
+    client = _test_client()
+    if client is None:
+        return
+
+    # Buat PDF 3 halaman
+    doc_3 = pymupdf.open()
+    for _ in range(3):
+        p = doc_3.new_page(width=150, height=150)
+        p.draw_rect(pymupdf.Rect(10, 10, 80, 80), color=(1, 0, 0), fill=(0, 0, 1))
+    buf_3 = io.BytesIO()
+    doc_3.save(buf_3)
+    pdf_3 = buf_3.getvalue()
+    doc_3.close()
+
+    # 1. POST 3 halaman PNG -> ZIP
+    r_zip = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("dokumen.pdf", pdf_3, "application/pdf"))],
+        data={"format": "png", "dpi": "100"},
+    )
+    assert r_zip.status_code == 200, r_zip.text
+    assert r_zip.headers["content-type"].startswith("application/zip")
+    assert 'filename="halaman-pdf.zip"' in r_zip.headers.get("Content-Disposition", "")
+    assert r_zip.headers.get("X-Output-Kind") == "zip"
+    assert r_zip.headers.get("X-Page-Count") == "3"
+    assert r_zip.headers.get("X-Image-Count") == "3"
+    assert r_zip.headers.get("X-Image-Format") == "png"
+    assert r_zip.headers.get("X-Dpi") == "100"
+    assert "no-store" in r_zip.headers.get("Cache-Control", "")
+
+    with zipfile.ZipFile(io.BytesIO(r_zip.content)) as zf:
+        assert sorted(zf.namelist()) == ["halaman-01.png", "halaman-02.png", "halaman-03.png"]
+        img = Image.open(io.BytesIO(zf.read("halaman-01.png")))
+        assert img.format == "PNG"
+
+    # 2. POST 1 halaman JPG -> Single image file
+    doc_1 = pymupdf.open()
+    p1 = doc_1.new_page(width=100, height=100)
+    p1.draw_circle(pymupdf.Point(50, 50), 30, color=(0, 1, 0), fill=(1, 0, 0))
+    buf_1 = io.BytesIO()
+    doc_1.save(buf_1)
+    pdf_1 = buf_1.getvalue()
+    doc_1.close()
+
+    r_jpg = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("satu.pdf", pdf_1, "application/pdf"))],
+        data={"format": "jpg", "dpi": "120", "quality": "90"},
+    )
+    assert r_jpg.status_code == 200, r_jpg.text
+    assert r_jpg.headers["content-type"].startswith("image/jpeg")
+    assert 'filename="halaman-1.jpg"' in r_jpg.headers.get("Content-Disposition", "")
+    assert r_jpg.headers.get("X-Output-Kind") == "image"
+    assert r_jpg.headers.get("X-Page-Count") == "1"
+    assert r_jpg.headers.get("X-Image-Count") == "1"
+    assert r_jpg.content[:2] == b"\xff\xd8"
+
+    # 3. Galat HTTP: tanpa file -> 400 NO_FILE
+    r_no_file = client.post("/api/pdf/to-image", data={"format": "png"})
+    assert r_no_file.status_code == 400
+    assert r_no_file.json()["error"]["code"] == PDF_IMG_ERR_NO_FILE
+
+    # 4. Galat HTTP: bukan PDF -> 400 NOT_PDF
+    r_not_pdf = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("bukan.txt", b"ini cuma teks", "text/plain"))],
+        data={"format": "png"},
+    )
+    assert r_not_pdf.status_code == 400
+    assert r_not_pdf.json()["error"]["code"] == PDF_IMG_ERR_NOT_PDF
+
+    # 5. Galat HTTP: format tidak didukung -> 400 UNSUPPORTED_FORMAT
+    r_bad_fmt = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("dokumen.pdf", pdf_1, "application/pdf"))],
+        data={"format": "webp"},
+    )
+    assert r_bad_fmt.status_code == 400
+    assert r_bad_fmt.json()["error"]["code"] == PDF_IMG_ERR_UNSUPPORTED_FORMAT
+
+    # 6. Galat HTTP: DPI tidak valid -> 400 INVALID_DPI
+    r_bad_dpi = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("dokumen.pdf", pdf_1, "application/pdf"))],
+        data={"dpi": "50"},
+    )
+    assert r_bad_dpi.status_code == 400
+    assert r_bad_dpi.json()["error"]["code"] == PDF_IMG_ERR_INVALID_DPI
+
+    # 7. Galat HTTP: Kualitas tidak valid -> 400 INVALID_QUALITY
+    r_bad_qual = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("dokumen.pdf", pdf_1, "application/pdf"))],
+        data={"format": "jpg", "quality": "10"},
+    )
+    assert r_bad_qual.status_code == 400
+    assert r_bad_qual.json()["error"]["code"] == PDF_IMG_ERR_INVALID_QUALITY
+
+    # 8. Galat HTTP: PDF terenkripsi -> 422 PDF_ENCRYPTED
+    doc_enc = pymupdf.open()
+    doc_enc.new_page(width=50, height=50)
+    buf_enc = io.BytesIO()
+    doc_enc.save(buf_enc, encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="rahasia", user_pw="rahasia")
+    pdf_enc = buf_enc.getvalue()
+    doc_enc.close()
+
+    r_enc = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("terkunci.pdf", pdf_enc, "application/pdf"))],
+    )
+    assert r_enc.status_code == 422
+    assert r_enc.json()["error"]["code"] == PDF_IMG_ERR_PDF_ENCRYPTED
+
+    # 9. Galat HTTP: lebih dari 50 halaman -> 413 TOO_MANY_PAGES
+    doc_51 = pymupdf.open()
+    for _ in range(51):
+        doc_51.new_page(width=50, height=50)
+    buf_51 = io.BytesIO()
+    doc_51.save(buf_51)
+    pdf_51 = buf_51.getvalue()
+    doc_51.close()
+
+    r_too_many = client.post(
+        "/api/pdf/to-image",
+        files=[("file", ("banyak.pdf", pdf_51, "application/pdf"))],
+    )
+    assert r_too_many.status_code == 413
+    assert r_too_many.json()["error"]["code"] == PDF_IMG_ERR_TOO_MANY_PAGES
+
+
+def test_http_pdf_to_image_regresi_dan_root() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memiliki pdf-to-image di daftar alat
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "pdf-to-image" in root_data["tools"]
+
+    # Endpoint limits lama tetap 200
+    assert client.get("/api/pdf/merge/limits").status_code == 200
+    assert client.get("/api/pdf/split/limits").status_code == 200
+    assert client.get("/api/pdf/compress/limits").status_code == 200
+    assert client.get("/api/image/convert/limits").status_code == 200
 
 
 # --- Runner mandiri ---------------------------------------------------------
