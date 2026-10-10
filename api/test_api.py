@@ -387,6 +387,31 @@ from app.json_tool import (
     limits_payload as json_limits_payload_func,
     proses_json,
 )
+from app.xml_tool import (
+    CHUNK_SIZE as XT_CHUNK_SIZE,
+    DOCTYPE_NOT_SUPPORTED as XT_DOCTYPE_NOT_SUPPORTED,
+    INDENTS as XT_INDENTS,
+    INVALID_BOOLEAN as XT_INVALID_BOOLEAN,
+    INVALID_INDENT as XT_INVALID_INDENT,
+    INVALID_REQUEST as XT_INVALID_REQUEST,
+    INVALID_XML as XT_INVALID_XML,
+    MAX_BYTES as XT_MAX_BYTES,
+    MAX_CHARS as XT_MAX_CHARS,
+    MAX_DEPTH as XT_MAX_DEPTH,
+    MAX_ELEMENTS as XT_MAX_ELEMENTS,
+    MODES as XT_MODES,
+    NO_TEXT as XT_NO_TEXT,
+    PAYLOAD_TOO_LARGE as XT_PAYLOAD_TOO_LARGE,
+    TOO_DEEP as XT_TOO_DEEP,
+    TOO_LONG as XT_TOO_LONG,
+    TOO_MANY_ELEMENTS as XT_TOO_MANY_ELEMENTS,
+    UNSUPPORTED_MODE as XT_UNSUPPORTED_MODE,
+    XmlToolError,
+    limits_payload as xml_limits_payload_func,
+    parse_limits as xml_parse_limits_func,
+    process as xml_process,
+    proses_xml,
+)
 from app.date_calc import (
     DIRECTIONS as DC_DIRECTIONS,
     HARI as DC_HARI,
@@ -4367,6 +4392,211 @@ def test_http_json_root_endpoint_dan_regresi() -> None:
     # Regresi endpoint lain
     health_resp = client.get("/health")
     assert health_resp.status_code == 200
+
+    pc_limits = client.get("/api/percent-calc/limits")
+    assert pc_limits.status_code == 200
+
+
+# --- Uji logika dan HTTP Rapikan & periksa XML (XML Tools) --------------------
+def test_http_xml_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/xml/limits")
+    assert resp.status_code == 200, resp.text
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert data["max_bytes"] == XT_MAX_BYTES
+    assert data["max_chars"] == XT_MAX_CHARS
+    assert data["max_depth"] == XT_MAX_DEPTH
+    assert data["max_elements"] == XT_MAX_ELEMENTS
+    assert isinstance(data["modes"], list)
+    assert len(data["modes"]) == 4
+    assert isinstance(data["indents"], list)
+    assert len(data["indents"]) == 3
+
+
+def test_http_xml_modes_berhasil() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # rapikan indent 2
+    raw_xml = '<root><buku id="1"><judul>Laskar</judul></buku></root>'
+    resp_rapikan = client.post(
+        "/api/xml",
+        data={"teks": raw_xml, "mode": "rapikan", "indent": "2"},
+    )
+    assert resp_rapikan.status_code == 200, resp_rapikan.text
+    data_r = resp_rapikan.json()
+    assert "\n" in data_r["keluaran"]["teks"]
+    assert "no-store" in resp_rapikan.headers.get("Cache-Control", "")
+    assert resp_rapikan.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in resp_rapikan.headers
+    assert data_r["statistik"]["akar"] == "root"
+    assert data_r["statistik"]["elemen"] == 3
+    assert data_r["statistik"]["atribut"] == 1
+    assert data_r["teks"] == data_r["keluaran"]["teks"]
+
+    # rapikan indent tab
+    resp_tab = client.post(
+        "/api/xml",
+        data={"teks": raw_xml, "mode": "rapikan", "indent": "tab"},
+    )
+    assert resp_tab.status_code == 200, resp_tab.text
+    data_tab = resp_tab.json()
+    lines_tab = data_tab["keluaran"]["teks"].splitlines()
+    assert any(line.startswith("\t") for line in lines_tab)
+
+    # padatkan
+    sample = '<root>\n  <buku id="1">\n    <judul>Laskar</judul>\n  </buku>\n</root>'
+    resp_padat = client.post(
+        "/api/xml",
+        data={"teks": sample, "mode": "padatkan"},
+    )
+    assert resp_padat.status_code == 200, resp_padat.text
+    data_p = resp_padat.json()
+    out_padat = data_p["keluaran"]["teks"]
+    assert len(out_padat.splitlines()) == 1
+    assert out_padat == '<root><buku id="1"><judul>Laskar</judul></buku></root>'
+
+    # periksa (teks tidak berubah)
+    messy = '  <root><item>123</item></root>  '
+    resp_periksa = client.post(
+        "/api/xml",
+        data={"teks": messy, "mode": "periksa"},
+    )
+    assert resp_periksa.status_code == 200, resp_periksa.text
+    assert resp_periksa.json()["keluaran"]["teks"] == messy
+
+    # ke_json (atribut, #text, tag bersaudara jadi daftar)
+    sample_json = (
+        '<toko nama="Buku Cemerlang">'
+        '<buku id="1">Laskar Pelangi</buku>'
+        '<buku id="2">Filosofi Teras</buku>'
+        '<pemilik>Budi</pemilik>'
+        '</toko>'
+    )
+    resp_json = client.post(
+        "/api/xml",
+        data={"teks": sample_json, "mode": "ke_json", "indent": "2", "urutkan_kunci": "ya"},
+    )
+    assert resp_json.status_code == 200, resp_json.text
+    data_j = resp_json.json()
+    parsed_json = json.loads(data_j["keluaran"]["teks"])
+    assert "toko" in parsed_json
+    toko = parsed_json["toko"]
+    assert toko["@nama"] == "Buku Cemerlang"
+    assert isinstance(toko["buku"], list)
+    assert len(toko["buku"]) == 2
+    assert toko["buku"][0]["@id"] == "1"
+    assert toko["buku"][0]["#text"] == "Laskar Pelangi"
+    assert toko["buku"][1]["@id"] == "2"
+    assert toko["buku"][1]["#text"] == "Filosofi Teras"
+    assert toko["pemilik"]["#text"] == "Budi"
+
+    # non-ASCII
+    non_ascii = '<item nama="Ayu - café">Toko buku &amp; pustaka</item>'
+    resp_na = client.post(
+        "/api/xml",
+        data={"teks": non_ascii, "mode": "rapikan"},
+    )
+    assert resp_na.status_code == 200, resp_na.text
+    assert "Ayu - café" in resp_na.json()["keluaran"]["teks"]
+
+
+def test_http_xml_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Field teks kurang -> 400 INVALID_REQUEST
+    resp_missing = client.post("/api/xml", data={"mode": "rapikan"})
+    assert resp_missing.status_code == 400, resp_missing.text
+    assert resp_missing.json()["error"]["code"] == XT_INVALID_REQUEST
+
+    # Teks kosong -> 400 NO_TEXT
+    resp_empty = client.post("/api/xml", data={"teks": "   ", "mode": "rapikan"})
+    assert resp_empty.status_code == 400, resp_empty.text
+    assert resp_empty.json()["error"]["code"] == XT_NO_TEXT
+
+    # Bukan XML -> 400 INVALID_XML dan pesan memuat "baris" serta "posisi"
+    resp_invalid = client.post("/api/xml", data={"teks": "halo dunia", "mode": "rapikan"})
+    assert resp_invalid.status_code == 400, resp_invalid.text
+    err_inv = resp_invalid.json()["error"]
+    assert err_inv["code"] == XT_INVALID_XML
+    assert "baris" in err_inv["message"]
+    assert "posisi" in err_inv
+    assert "baris" in err_inv["posisi"]
+    assert "kolom" in err_inv["posisi"]
+
+    # XML terpotong / rusak -> 400 INVALID_XML
+    resp_cut = client.post("/api/xml", data={"teks": "<root><buku></root>", "mode": "rapikan"})
+    assert resp_cut.status_code == 400, resp_cut.text
+    assert resp_cut.json()["error"]["code"] == XT_INVALID_XML
+    assert "posisi" in resp_cut.json()["error"]
+
+    # Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    resp_bad_mode = client.post("/api/xml", data={"teks": "<root/>", "mode": "aneh"})
+    assert resp_bad_mode.status_code == 400, resp_bad_mode.text
+    assert resp_bad_mode.json()["error"]["code"] == XT_UNSUPPORTED_MODE
+
+    # Indent tidak dikenal -> 400 INVALID_INDENT
+    resp_bad_indent = client.post("/api/xml", data={"teks": "<root/>", "indent": "8"})
+    assert resp_bad_indent.status_code == 400, resp_bad_indent.text
+    assert resp_bad_indent.json()["error"]["code"] == XT_INVALID_INDENT
+
+    # Boolean urutkan_kunci tidak dikenal -> 400 INVALID_BOOLEAN
+    resp_bad_bool = client.post("/api/xml", data={"teks": "<root/>", "urutkan_kunci": "kadang"})
+    assert resp_bad_bool.status_code == 400, resp_bad_bool.text
+    assert resp_bad_bool.json()["error"]["code"] == XT_INVALID_BOOLEAN
+
+    # DOCTYPE tidak didukung -> 400 DOCTYPE_NOT_SUPPORTED
+    resp_doctype = client.post(
+        "/api/xml",
+        data={"teks": '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY foo "bar">]><x>&foo;</x>'},
+    )
+    assert resp_doctype.status_code == 400, resp_doctype.text
+    assert resp_doctype.json()["error"]["code"] == XT_DOCTYPE_NOT_SUPPORTED
+
+    # Terlalu panjang -> 413 TOO_LONG
+    long_payload = "<root>" + "<a>1</a>" * (XT_MAX_CHARS // 6) + "</root>"
+    resp_long = client.post("/api/xml", data={"teks": long_payload})
+    assert resp_long.status_code == 413, resp_long.text
+    assert resp_long.json()["error"]["code"] == XT_TOO_LONG
+
+    # Bersarang sangat dalam -> 400 TOO_DEEP
+    deep_payload = "<x>" * (XT_MAX_DEPTH + 5) + "isi" + "</x>" * (XT_MAX_DEPTH + 5)
+    resp_deep = client.post("/api/xml", data={"teks": deep_payload})
+    assert resp_deep.status_code == 400, resp_deep.text
+    assert resp_deep.json()["error"]["code"] == XT_TOO_DEEP
+
+    # Bukan multipart/form-data -> 400 INVALID_REQUEST
+    resp_bad_req = client.post("/api/xml", json={"teks": "<root/>"})
+    assert resp_bad_req.status_code == 400, resp_bad_req.text
+    assert resp_bad_req.json()["error"]["code"] == XT_INVALID_REQUEST
+
+
+def test_http_xml_root_endpoint_dan_regresi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root endpoint berisi "xml"
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "xml" in root_data["tools"]
+    assert "json" in root_data["tools"]
+    assert "percent-calc" in root_data["tools"]
+
+    # Regresi endpoint lain
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200
+
+    json_limits = client.get("/api/json/limits")
+    assert json_limits.status_code == 200
 
     pc_limits = client.get("/api/percent-calc/limits")
     assert pc_limits.status_code == 200

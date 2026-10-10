@@ -271,6 +271,31 @@ from .json_tool import (
     limits_payload as JT_LIMITS_PAYLOAD,
     proses_json,
 )
+from .xml_tool import (
+    CHUNK_SIZE as XT_CHUNK_SIZE,
+    DOCTYPE_NOT_SUPPORTED as XT_DOCTYPE_NOT_SUPPORTED,
+    INDENTS as XT_INDENTS,
+    INVALID_BOOLEAN as XT_INVALID_BOOLEAN,
+    INVALID_INDENT as XT_INVALID_INDENT,
+    INVALID_REQUEST as XT_INVALID_REQUEST,
+    INVALID_XML as XT_INVALID_XML,
+    MAX_BYTES as XT_MAX_BYTES,
+    MAX_CHARS as XT_MAX_CHARS,
+    MAX_DEPTH as XT_MAX_DEPTH,
+    MAX_ELEMENTS as XT_MAX_ELEMENTS,
+    MODES as XT_MODES,
+    NO_TEXT as XT_NO_TEXT,
+    PAYLOAD_TOO_LARGE as XT_PAYLOAD_TOO_LARGE,
+    TOO_DEEP as XT_TOO_DEEP,
+    TOO_LONG as XT_TOO_LONG,
+    TOO_MANY_ELEMENTS as XT_TOO_MANY_ELEMENTS,
+    UNSUPPORTED_MODE as XT_UNSUPPORTED_MODE,
+    XmlToolError,
+    limits_payload as XT_LIMITS_PAYLOAD,
+    parse_limits as XT_PARSE_LIMITS,
+    process as XT_PROCESS,
+    proses_xml,
+)
 from .date_calc import (
     DIRECTIONS as DC_DIRECTIONS,
     INVALID_AMOUNT as DC_INVALID_AMOUNT,
@@ -664,6 +689,20 @@ async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONRe
     )
 
 
+@app.exception_handler(XmlToolError)
+async def handle_xml_tool_error(request: Request, exc: XmlToolError) -> JSONResponse:
+    """Error alat XML yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("alat xml ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    content = exc.to_dict()
+    if exc.detail and "posisi" not in content.get("error", {}):
+        content.setdefault("error", {})["posisi"] = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(DateCalcError)
 async def handle_date_calc_error(request: Request, exc: DateCalcError) -> JSONResponse:
     """Error kalkulator tanggal yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -791,6 +830,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/json"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
+    elif request.url.path.startswith("/api/xml"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks' dan 'mode'."
     elif request.url.path.startswith("/api/case"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text' dan 'mode'."
     elif request.url.path.startswith("/api/word-count"):
@@ -1330,6 +1371,27 @@ def _reject_oversized_json_content_length(request: Request) -> None:
 
 def _json_limits_payload() -> dict:
     return JT_LIMITS_PAYLOAD()
+
+
+def _reject_oversized_xml_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat XML."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > XT_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise XmlToolError(
+            XT_PAYLOAD_TOO_LARGE,
+            "Ukuran kiriman melebihi batas 1 MB.",
+            413,
+        )
+
+
+def _xml_limits_payload() -> dict:
+    return XT_LIMITS_PAYLOAD()
 
 
 def _reject_oversized_date_content_length(request: Request) -> None:
@@ -2677,6 +2739,82 @@ async def json_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/xml/limits")
+async def xml_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Rapikan & periksa XML."""
+    return JSONResponse(content=_xml_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/xml")
+async def xml_endpoint(
+    request: Request,
+    teks: str = Form(default=None),
+    text: str = Form(default=None),
+    mode: str = Form(default="rapikan"),
+    indent: str = Form(default="2"),
+    urutkan_kunci: str = Form(default="false"),
+):
+    """Rapikan, padatkan, periksa XML, atau ubah XML jadi JSON di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_xml_content_length(request)
+
+    form = await request.form()
+    if teks is None and "teks" in form:
+        teks = form.get("teks")
+    if teks is None and "text" in form:
+        teks = form.get("text")
+    if "mode" in form:
+        mode = form.get("mode")
+    if "indent" in form:
+        indent = form.get("indent")
+    if "urutkan_kunci" in form:
+        urutkan_kunci = form.get("urutkan_kunci")
+
+    if teks is None:
+        raise XmlToolError(
+            XT_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks'.",
+            400,
+        )
+
+    if (
+        isinstance(teks, UploadFile)
+        or isinstance(mode, UploadFile)
+        or isinstance(indent, UploadFile)
+        or isinstance(urutkan_kunci, UploadFile)
+    ):
+        raise XmlToolError(
+            XT_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    result = proses_xml(
+        teks=teks,
+        mode=mode,
+        indent=indent,
+        urutkan_kunci=urutkan_kunci,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat isi teks pengguna ke log - cukup mode, chars masuk/keluar, dan durasi.
+    logger.info(
+        "proses xml selesai: mode=%s chars_in=%d chars_out=%d durasi=%.0fms",
+        result["mode"],
+        result["masukan"]["chars"],
+        result["keluaran"]["chars"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/date-calc/limits")
 async def date_calc_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Kalkulator Tanggal."""
@@ -3400,6 +3538,7 @@ async def root() -> dict:
             "unit-convert",
             "percent-calc",
             "json",
+            "xml",
             "date-calc",
             "countdown",
             "qr",

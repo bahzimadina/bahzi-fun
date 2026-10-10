@@ -6258,3 +6258,23 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
     min-height: 44px;
   }
 }
+
+@media (pointer: coarse) {
+  #xml-input,
+  #xml-output,
+  #xml-mode,
+  #xml-indent,
+  #xml-btn-contoh,
+  #xml-submit,
+  #xml-clear,
+  #xml-copy,
+  #xml-download,
+  #xml-close,
+  #xml-panel label,
+  #xml-panel .js__switch-label,
+  #xml-panel .js__switch-label input {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
