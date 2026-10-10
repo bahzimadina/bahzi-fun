@@ -39,12 +39,13 @@ COPY ocr/ /usr/share/nginx/html/ocr/
 COPY pisah-pdf/ /usr/share/nginx/html/pisah-pdf/
 COPY kompres-pdf/ /usr/share/nginx/html/kompres-pdf/
 COPY pdf-ke-gambar/ /usr/share/nginx/html/pdf-ke-gambar/
+COPY editor-pdf/ /usr/share/nginx/html/editor-pdf/
 
 # Cache-busting otomatis: ganti penanda __V__ dengan hash isi aset.
 # Setiap kali CSS/JS berubah, hash berubah -> URL aset berubah -> cache Cloudflare/browser tidak basi.
 # Nilai versi harus mencakup semua skrip alat supaya perbaikan satu alat pun ikut memaksa cache diperbarui.
 RUN V=$(cat /usr/share/nginx/html/assets/styles.css /usr/share/nginx/html/assets/app.js /usr/share/nginx/html/assets/tool-*.js | md5sum | cut -c1-10) \
-    && sed -i "s/__V__/$V/g" /usr/share/nginx/html/index.html /usr/share/nginx/html/privasi.html /usr/share/nginx/html/ocr/index.html /usr/share/nginx/html/pisah-pdf/index.html /usr/share/nginx/html/kompres-pdf/index.html /usr/share/nginx/html/pdf-ke-gambar/index.html \
+    && sed -i "s/__V__/$V/g" /usr/share/nginx/html/index.html /usr/share/nginx/html/privasi.html /usr/share/nginx/html/ocr/index.html /usr/share/nginx/html/pisah-pdf/index.html /usr/share/nginx/html/kompres-pdf/index.html /usr/share/nginx/html/pdf-ke-gambar/index.html /usr/share/nginx/html/editor-pdf/index.html \
     && echo "asset version: $V" \
     && grep -o 'assets/[a-z]*\.\(css\|js\)?v=[a-z0-9]*' /usr/share/nginx/html/index.html
 

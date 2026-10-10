@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181225">
+  <meta name="robots" content="index,follow">
+
+  <title>PDF Editor: Putar, hapus, susun ulang halaman PDF | bahzi.fun</title>
+  <meta name="description" content="Putar sudut halaman, hapus halaman tertentu, atau susun ulang urutan dokumen PDF langsung di browser. Batas 25 MB dan 300 halaman. Berkas diproses di memori layanan lalu langsung dihapus.">
+  <link rel="canonical" href="https://bahzi.fun/editor-pdf/">
+
+  <!-- Google tag (gtag.js) + Consent Mode v2 -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      wait_for_update: 500
+    });
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-MKL7XG6DH4"></script>
+  <script>
+    gtag('js', new Date());
+    gtag('config', 'G-MKL7XG6DH4');
+  </script>
+
+  <!-- Google AdSense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5901632307149966"
+          crossorigin="anonymous"></script>
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="bahzi.fun">
+  <meta property="og:title" content="PDF Editor: Putar, hapus, susun ulang halaman PDF | bahzi.fun">
+  <meta property="og:description" content="Putar sudut halaman, hapus halaman tertentu, atau susun ulang urutan dokumen PDF langsung di browser. Batas 25 MB dan 300 halaman. Berkas diproses di memori layanan lalu langsung dihapus.">
+  <meta property="og:url" content="https://bahzi.fun/editor-pdf/">
+  <meta property="og:locale" content="id_ID">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="PDF Editor: Putar, hapus, susun ulang halaman PDF | bahzi.fun">
+  <meta name="twitter:description" content="Putar sudut halaman, hapus halaman tertentu, atau susun ulang urutan dokumen PDF langsung di browser. Batas 25 MB dan 300 halaman. Berkas diproses di memori layanan lalu langsung dihapus.">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fd44b0'/%3E%3Cstop offset='1' stop-color='%237553ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-weight='700' fill='%23150f23' font-family='sans-serif'%3Eb%3C/text%3E%3C/svg%3E">
+
+  <link rel="stylesheet" href="/assets/styles.css?v=__V__">
+  <script src="/assets/tool-pdf-edit.js?v=__V__" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Lewati ke konten utama</a>
+
+  <!-- Sprite ikon inline -->
+  <svg class="svg-sprite" aria-hidden="true" hidden>
+    <defs>
+      <linearGradient id="bz-gradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fd44b0"></stop>
+        <stop offset="1" stop-color="#7553ff"></stop>
+      </linearGradient>
+    </defs>
+    <symbol id="icon-logo" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="9" fill="url(#bz-gradient)"></rect>
+      <text x="16" y="22" text-anchor="middle" font-size="16" font-weight="700" fill="#150f23">b</text>
+    </symbol>
+    <symbol id="icon-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 19V5M6 11l6-6 6 6"></path>
+    </symbol>
+  </svg>
+
+  <header class="navbar" id="top">
+    <div class="navbar__inner container">
+      <a class="navbar__brand" href="/" aria-label="bahzi.fun: kembali ke beranda">
+        <svg class="wordmark" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
+        <span class="navbar__brand-text">bahzi.fun</span>
+        <span class="navbar__brand-sub">OmniTools</span>
+      </a>
+      <nav class="navbar__nav" aria-label="Navigasi utama">
+        <a class="navbar__link" href="/">Beranda</a>
+        <a class="navbar__link" href="/#alat">Alat</a>
+        <a class="navbar__link" href="/#faq">FAQ</a>
+      </nav>
+      <a class="btn btn--primary btn--sm navbar__cta" href="/#alat">Lihat alat</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="tools section--sub" aria-labelledby="pdfedit-title">
+      <div class="container pdfedit__page">
+        <div class="tools__head">
+          <p class="pdfedit__back"><a class="pdfedit__back-link" href="/">&larr; Kembali ke beranda</a></p>
+          <h1 class="tools__title" id="pdfedit-title">PDF Editor</h1>
+          <p class="tools__lead">Putar orientasi halaman, hapus halaman yang tidak terpakai, atau susun ulang urutan halaman PDF Anda dengan cepat dan mudah.</p>
+        </div>
+
+        <section class="panel" style="margin-bottom: 1.5rem;" aria-labelledby="langkah-title">
+          <h2 id="langkah-title" style="font-size: 1.05rem; margin-top: 0;">Langkah pakai</h2>
+          <ol style="margin: .5rem 0 0 1.25rem; padding: 0; color: var(--text-muted); line-height: 1.6;">
+            <li><strong>Pilih berkas PDF</strong> dari perangkat Anda (maksimal 25 MB dan 300 halaman).</li>
+            <li><strong>Pilih yang mau diubah</strong>: putar sudut halaman, hapus halaman tertentu, atau susun ulang urutan nomor halamannya.</li>
+            <li><strong>Proses lalu unduh</strong> berkas dokumen PDF hasil suntingan Anda.</li>
+          </ol>
+        </section>
+
+        <div class="container">
+          <aside class="ad-slot" data-ad-slot="atas" aria-label="Iklan"></aside>
+        </div>
+
+        <div class="pdfedit__app panel" id="pdfedit-app">
+          <form id="pdfedit-form" class="pdfedit__form">
+            <!-- Area pilih berkas (drag and drop) -->
+            <div class="pdfedit__dropzone" id="pdfedit-dropzone" tabindex="0" role="region" aria-label="Area pilih berkas PDF">
+              <input type="file" id="pdfedit-file-input" class="pdfedit__file-input" accept="application/pdf,.pdf" aria-label="Unggah berkas PDF">
+              <div class="pdfedit__drop-content">
+                <svg class="pdfedit__drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <p class="pdfedit__drop-title">Tarik dan letakkan berkas PDF di sini</p>
+                <p class="pdfedit__drop-subtitle">atau</p>
+                <button type="button" class="btn btn--secondary pdfedit__browse-btn" id="pdfedit-browse-btn">Pilih berkas</button>
+                <p class="pdfedit__drop-hint" id="pdfedit-drop-hint">Format didukung: PDF (maksimal 25 MB &amp; 300 halaman)</p>
+              </div>
+            </div>
+
+            <!-- Ringkasan berkas yang dipilih -->
+            <div class="pdfedit__file-box" id="pdfedit-file-box" hidden>
+              <div class="pdfedit__file-details">
+                <span class="pdfedit__file-badge" id="pdfedit-file-badge">PDF</span>
+                <div class="pdfedit__file-text">
+                  <p class="pdfedit__file-name" id="pdfedit-file-name"></p>
+                  <p class="pdfedit__file-size" id="pdfedit-file-size"></p>
+                  <p class="pdfedit__file-pages" id="pdfedit-file-pages"></p>
+                </div>
+              </div>
+              <button type="button" class="btn btn--ghost btn--sm pdfedit__remove-btn" id="pdfedit-remove-btn" aria-label="Ganti berkas">Ganti berkas</button>
+            </div>
+
+            <!-- Pilihan mode penyuntingan (dibangun dinamis dari limits) -->
+            <div class="pdfedit__section" id="pdfedit-section-mode">
+              <span class="pdfedit__section-label" id="pdfedit-mode-heading">Pilih tindakan yang mau dilakukan:</span>
+              <div class="pdfedit__mode-list" id="pdfedit-mode-list" role="radiogroup" aria-labelledby="pdfedit-mode-heading">
+                <!-- Diisi dari respons limits -->
+              </div>
+            </div>
+
+            <!-- Panel Mode: Putar -->
+            <div class="pdfedit__panel-mode" id="pdfedit-panel-putar">
+              <div class="pdfedit__field-item">
+                <span class="pdfedit__field-label">Sudut putaran:</span>
+                <div class="pdfedit__angle-group" id="pdfedit-angle-group" role="radiogroup" aria-label="Sudut rotasi">
+                  <label class="pdfedit__angle-label">
+                    <input type="radio" name="pdfedit-angle-radio" value="90" checked>
+                    <span>90 derajat searah jarum jam</span>
+                  </label>
+                  <label class="pdfedit__angle-label">
+                    <input type="radio" name="pdfedit-angle-radio" value="180">
+                    <span>180 derajat</span>
+                  </label>
+                  <label class="pdfedit__angle-label">
+                    <input type="radio" name="pdfedit-angle-radio" value="270">
+                    <span>270 derajat (90 berlawanan jarum jam)</span>
+                  </label>
+                </div>
+              </div>
+              <div class="pdfedit__field-item">
+                <label class="pdfedit__field-label" for="pdfedit-input-pages-rotate">Halaman yang diputar (opsional):</label>
+                <input type="text" id="pdfedit-input-pages-rotate" class="pdfedit__input-text" placeholder="Kosongkan untuk semua halaman, atau mis. 2 atau 1-3">
+                <p class="pdfedit__field-hint">Kosongkan jika ingin memutar seluruh dokumen, atau tulis nomor halaman tertentu.</p>
+              </div>
+            </div>
+
+            <!-- Panel Mode: Hapus -->
+            <div class="pdfedit__panel-mode" id="pdfedit-panel-hapus" hidden>
+              <div class="pdfedit__field-item">
+                <label class="pdfedit__field-label" for="pdfedit-input-pages-delete">Nomor halaman yang ingin dihapus:</label>
+                <input type="text" id="pdfedit-input-pages-delete" class="pdfedit__input-text" placeholder="contoh: 2, atau 1-3">
+                <p class="pdfedit__field-hint">Tulis nomor atau rentang halaman yang akan dibuang (contoh: 2, atau 1-3, 5). Sisakan minimal satu halaman.</p>
+              </div>
+            </div>
+
+            <!-- Panel Mode: Susun ulang (urutkan) -->
+            <div class="pdfedit__panel-mode" id="pdfedit-panel-urutkan" hidden>
+              <div class="pdfedit__field-item">
+                <label class="pdfedit__field-label" for="pdfedit-input-order">Urutan baru halaman:</label>
+                <input type="text" id="pdfedit-input-order" class="pdfedit__input-text" placeholder="contoh: 3, 1, 2">
+                <p class="pdfedit__field-hint">Tulis urutan lengkap nomor halaman 1 sampai N dipisahkan koma.</p>
+                <div class="pdfedit__order-actions">
+                  <button type="button" class="btn btn--secondary btn--sm pdfedit__helper-btn" id="pdfedit-btn-auto-order">Isi otomatis berurutan</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tombol aksi form -->
+            <div class="pdfedit__actions">
+              <button type="submit" class="btn btn--primary pdfedit__submit-btn" id="pdfedit-submit-btn" disabled>Proses dokumen</button>
+              <button type="button" class="btn btn--ghost pdfedit__reset-btn" id="pdfedit-reset-btn" disabled>Kosongkan</button>
+            </div>
+          </form>
+
+          <!-- Wadah status proses -->
+          <div class="status pdfedit__status" id="pdfedit-status" aria-live="polite">Pilih berkas PDF untuk memulai.</div>
+
+          <!-- Panel hasil proses -->
+          <div class="pdfedit__results" id="pdfedit-results" hidden>
+            <div class="pdfedit__results-head">
+              <h2 class="pdfedit__results-title">Hasil suntingan</h2>
+              <p class="pdfedit__results-meta" id="pdfedit-results-meta"></p>
+            </div>
+
+            <div class="pdfedit__summary-grid" id="pdfedit-summary-grid">
+              <div class="pdfedit__summary-card">
+                <span class="pdfedit__summary-label">Halaman awal</span>
+                <span class="pdfedit__summary-value" id="pdfedit-summary-source">-</span>
+              </div>
+              <div class="pdfedit__summary-card">
+                <span class="pdfedit__summary-label">Halaman hasil</span>
+                <span class="pdfedit__summary-value" id="pdfedit-summary-result">-</span>
+              </div>
+              <div class="pdfedit__summary-card">
+                <span class="pdfedit__summary-label">Halaman disunting</span>
+                <span class="pdfedit__summary-value pdfedit__summary-value--highlight" id="pdfedit-summary-affected">-</span>
+              </div>
+            </div>
+
+            <div class="pdfedit__result-info" id="pdfedit-result-info">
+              <p class="pdfedit__info-text" id="pdfedit-info-text"></p>
+            </div>
+
+            <div class="pdfedit__results-actions">
+              <a class="btn btn--primary pdfedit__download-btn" id="pdfedit-download-btn" href="#" role="button" download="editor-pdf.pdf">Unduh PDF</a>
+              <button type="button" class="btn btn--secondary pdfedit__copy-btn" id="pdfedit-copy-btn">Salin ringkasan</button>
+            </div>
+          </div>
+
+          <p class="pdfedit__privacy-tag">Privasi: berkas diproses di layanan lalu langsung dihapus, tidak disimpan.</p>
+        </div>
+
+        <!-- Bagian Yang Perlu Kamu Tahu -->
+        <section class="panel pdfedit__notice" style="margin-top: 1.5rem;" aria-labelledby="notice-title">
+          <h2 class="pdfedit__notice-title" id="notice-title">Yang perlu kamu tahu</h2>
+          <ul class="pdfedit__notice-list" id="pdfedit-notice-list">
+            <li>Tulisan di dalam halaman tidak bisa diubah, ini hanya mengatur halaman.</li>
+            <li>Hasil terbaik dari PDF yang tidak terkunci. PDF yang dilindungi kata sandi belum didukung.</li>
+            <li>Maksimal 300 halaman dan 25 MB per berkas.</li>
+            <li>Berkas diproses di layanan lalu langsung dihapus, tidak disimpan.</li>
+          </ul>
+          <p class="pdfedit__limits-desc" id="pdfedit-limits-desc">Batas berkas: maksimal 25 MB dan 300 halaman per dokumen.</p>
+        </section>
+
+        <div class="container">
+          <aside class="ad-slot" data-ad-slot="bawah" aria-label="Iklan"></aside>
+        </div>
+
+        <noscript>
+          <div class="panel pdfedit__noscript">
+            <h2>Penyunting Halaman PDF</h2>
+            <p>Alat ini memungkinkan Anda memutar sudut halaman, menghapus halaman yang tidak dibutuhkan, atau menyusun ulang susunan halaman PDF. Untuk menjalankan proses penyuntingan, silakan aktifkan JavaScript pada peramban Anda.</p>
+            <p>Batas berkas: maksimal 25 MB dan 300 halaman per dokumen. Berkas diproses langsung di memori layanan lalu segera dibuang.</p>
+          </div>
+        </noscript>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner container">
+      <div class="footer__brand">
+        <svg class="wordmark wordmark--sm" aria-hidden="true" focusable="false"><use href="#icon-logo"></use></svg>
+        <p class="footer__copy">&copy; 2026 bahzi.fun</p>
+      </div>
+      <nav class="footer__nav" aria-label="Tautan footer">
+        <a class="footer__link" href="/">Beranda</a>
+        <a class="footer__link" href="/#alat">Daftar alat</a>
+        <a class="footer__link" href="/privasi.html">Kebijakan privasi</a>
+      </nav>
+      <a class="footer__top" href="#top" aria-label="Kembali ke atas">
+        <svg aria-hidden="true"><use href="#icon-arrow-up"></use></svg>
+        Kembali ke atas
+      </a>
+    </div>
+    <p class="footer__note container">Penggabung PDF, Pisah PDF, Kompres PDF, PDF ke gambar, PDF Editor, Ubah ukuran gambar, Konversi gambar, Edit gambar, Hitung kata, Pengubah huruf, Ambil teks dari gambar, Base64, Hapus baris duplikat, Acak urutan daftar, Rapikan teks, Konversi satuan, Kalkulator persen, Rapikan &amp; periksa JSON, Kalkulator tanggal, Hitung mundur, Kode QR &amp; barcode, Hasilkan bilangan prima, Konverter zona waktu, Alat CSV, Kalkulator listrik, dan Pomodoro Timer sudah bisa dipakai. Sisa 7 alat lain masih disiapkan.</p>
+  </footer>
+
+  <div class="cookiebar" id="cookiebar" hidden>
+    <p class="cookiebar__text">Cookie dipakai untuk statistik kunjungan dan iklan Google.</p>
+    <div class="cookiebar__actions">
+      <button class="btn btn--primary cookiebar__btn" id="cookiebar-ok" type="button">Setuju</button>
+      <button class="btn btn--ghost cookiebar__btn" id="cookiebar-tolak" type="button">Tolak</button>
+    </div>
+    <a class="cookiebar__link" href="/privasi.html">Kebijakan privasi</a>
+  </div>
+</body>
+</html>

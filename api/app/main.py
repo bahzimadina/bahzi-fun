@@ -108,6 +108,16 @@ from .pdf_to_image import (
     limits_payload as pdf_to_image_limits_payload,
     pdf_to_image,
 )
+from .pdf_edit import (
+    ANGLES as EDIT_PDF_ANGLES,
+    MAX_FILE_BYTES as EDIT_PDF_MAX_FILE_BYTES,
+    MAX_PAGES as EDIT_PDF_MAX_PAGES,
+    MODES as EDIT_PDF_MODES,
+    PdfEditError,
+    PdfEditResult,
+    edit_pdf,
+    limits_payload as pdf_edit_limits_payload,
+)
 from .case_convert import (
     CHUNK_SIZE as CC_CHUNK_SIZE,
     MAX_BYTES as CC_MAX_BYTES,
@@ -528,6 +538,17 @@ async def handle_pdf_to_image_error(request: Request, exc: PdfToImageError) -> J
     )
 
 
+@app.exception_handler(PdfEditError)
+async def handle_pdf_edit_error(request: Request, exc: PdfEditError) -> JSONResponse:
+    """Error penyuntingan PDF yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("pdf edit ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(ImageConvertError)
 async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONResponse:
     """Error konversi gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -780,6 +801,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/pdf/to-image"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
+    elif request.url.path.startswith("/api/pdf/edit"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     elif request.url.path.startswith("/api/pdf/compress"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     elif request.url.path.startswith("/api/pdf/split"):
@@ -1749,6 +1772,72 @@ async def pdf_to_image_endpoint(
         "X-Image-Format": result.format,
         "X-Dpi": str(result.dpi),
         "X-Total-Bytes": str(result.size_bytes),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
+@app.get("/api/pdf/edit/limits")
+async def pdf_edit_limits() -> JSONResponse:
+    """Batas yang berlaku untuk PDF Editor."""
+    return JSONResponse(content=pdf_edit_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pdf/edit")
+async def pdf_edit_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    mode: str | None = Form(default=None),
+    pages: str | None = Form(default=None),
+    order: str | None = Form(default=None),
+    angle: str | None = Form(default=None),
+):
+    """Putar, hapus, susun ulang halaman PDF, atau lihat informasi dokumen."""
+    started = time.perf_counter()
+
+    raw_cl = request.headers.get("content-length")
+    if raw_cl:
+        try:
+            declared = int(raw_cl)
+            if declared > EDIT_PDF_MAX_FILE_BYTES + CONTENT_LENGTH_SLACK:
+                raise PdfEditError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+        except ValueError:
+            pass
+
+    if file is None:
+        raise PdfEditError("NO_FILE", "Tidak ada berkas yang dikirim. Sertakan berkas PDF pada field 'file'.", 400)
+
+    try:
+        data = await _read_capped(file, EDIT_PDF_MAX_FILE_BYTES)
+    except PdfMergeError:
+        raise PdfEditError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+
+    if not mode:
+        raise PdfEditError("UNSUPPORTED_MODE", "Mode penyuntingan wajib diisi.", 400)
+
+    result = edit_pdf(data, mode=mode, pages=pages, order=order, angle=angle)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    if isinstance(result, dict):
+        logger.info("pdf edit info selesai: halaman=%d durasi=%.0fms", result.get("page_count", 0), duration_ms)
+        return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
+
+    logger.info(
+        "pdf edit selesai: mode=%s halaman_asal=%d halaman_hasil=%d dipengaruhi=%d durasi=%.0fms",
+        mode,
+        result.source_pages,
+        result.result_pages,
+        result.affected_pages,
+        duration_ms,
+    )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Source-Pages": str(result.source_pages),
+        "X-Result-Pages": str(result.result_pages),
+        "X-Affected-Pages": str(result.affected_pages),
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=result.mime_type, headers=headers)
@@ -3298,6 +3387,7 @@ async def root() -> dict:
             "pdf-split",
             "pdf-compress",
             "pdf-to-image",
+            "pdf-edit",
             "image-convert",
             "image-edit",
             "word-count",

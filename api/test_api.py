@@ -173,6 +173,33 @@ from app.pdf_to_image import (  # noqa: E402
     parse_quality as parse_pdf_to_image_quality,
     pdf_to_image,
 )
+from app.pdf_edit import (  # noqa: E402
+    ANGLES as EDIT_PDF_ANGLES,
+    ERR_EMPTY_FILE as EDIT_PDF_ERR_EMPTY_FILE,
+    ERR_INVALID_ANGLE as EDIT_PDF_ERR_INVALID_ANGLE,
+    ERR_INVALID_PAGES as EDIT_PDF_ERR_INVALID_PAGES,
+    ERR_NO_FILE as EDIT_PDF_ERR_NO_FILE,
+    ERR_NO_PAGES_LEFT as EDIT_PDF_ERR_NO_PAGES_LEFT,
+    ERR_NOT_PDF as EDIT_PDF_ERR_NOT_PDF,
+    ERR_PAYLOAD_TOO_LARGE as EDIT_PDF_ERR_PAYLOAD_TOO_LARGE,
+    ERR_PDF_ENCRYPTED as EDIT_PDF_ERR_PDF_ENCRYPTED,
+    ERR_PDF_UNREADABLE as EDIT_PDF_ERR_PDF_UNREADABLE,
+    ERR_TOO_MANY_PAGES as EDIT_PDF_ERR_TOO_MANY_PAGES,
+    ERR_UNSUPPORTED_MODE as EDIT_PDF_ERR_UNSUPPORTED_MODE,
+    MAX_FILE_BYTES as EDIT_PDF_MAX_FILE_BYTES,
+    MAX_PAGES as EDIT_PDF_MAX_PAGES,
+    MODES as EDIT_PDF_MODES,
+    PdfEditError,
+    PdfEditResult,
+    check_size as check_pdf_edit_size,
+    edit_pdf,
+    get_pdf_info,
+    is_pdf_bytes as is_pdf_edit_bytes,
+    limits_payload as pdf_edit_limits_payload_func,
+    parse_angle as parse_pdf_edit_angle,
+    parse_order as parse_pdf_edit_order,
+    parse_page_range as parse_pdf_edit_page_range,
+)
 from app.word_count import (  # noqa: E402
     INVALID_REQUEST as WC_INVALID_REQUEST,
     MAX_BYTES as WC_MAX_BYTES,
@@ -8419,6 +8446,399 @@ def test_http_pdf_to_image_regresi_dan_root() -> None:
     assert client.get("/api/pdf/split/limits").status_code == 200
     assert client.get("/api/pdf/compress/limits").status_code == 200
     assert client.get("/api/image/convert/limits").status_code == 200
+
+
+# --- Uji PDF Editor (Putar, Hapus, Susun Ulang) ------------------------------
+def _make_pdf_with_text(pages: int, prefix: str = "Halaman") -> bytes:
+    """Buat berkas PDF di memori dengan teks nomor halaman tertentu."""
+    doc = pymupdf.open()
+    for i in range(1, pages + 1):
+        p = doc.new_page(width=300, height=400)
+        p.insert_text((50, 100), f"{prefix} {i}")
+    buf = io.BytesIO()
+    doc.save(buf)
+    data = buf.getvalue()
+    doc.close()
+    return data
+
+
+def test_pdf_edit_logika_murni() -> None:
+    """Uji logika murni pdf_edit tanpa HTTP."""
+    # 1. limits_payload
+    payload = pdf_edit_limits_payload_func()
+    assert payload["max_bytes"] == EDIT_PDF_MAX_FILE_BYTES
+    assert payload["max_mb"] == 25
+    assert payload["max_pages"] == 300
+    assert payload["angles"] == [90, 180, 270]
+    assert payload["timeout_seconds"] == 30
+    assert isinstance(payload["notes"], list) and len(payload["notes"]) == 4
+    mode_ids = [m["id"] for m in payload["modes"]]
+    assert "info" in mode_ids
+    assert "putar" in mode_ids
+    assert "hapus" in mode_ids
+    assert "urutkan" in mode_ids
+
+    # 2. parse_angle
+    assert parse_pdf_edit_angle(None) == 90
+    assert parse_pdf_edit_angle("90") == 90
+    assert parse_pdf_edit_angle(180) == 180
+    assert parse_pdf_edit_angle(270) == 270
+    assert parse_pdf_edit_angle(-90) == -90
+    assert parse_pdf_edit_angle("-180") == -180
+    assert parse_pdf_edit_angle(-270) == -270
+
+    for invalid_angle in [45, 0, 360, "abc", True, False]:
+        try:
+            parse_pdf_edit_angle(invalid_angle)
+            assert False, f"Sudut {invalid_angle} harus ditolak"
+        except PdfEditError as exc:
+            assert exc.code == EDIT_PDF_ERR_INVALID_ANGLE
+            assert exc.status_code == 400
+
+    # 3. parse_page_range
+    assert parse_pdf_edit_page_range("2", 5) == [2]
+    assert parse_pdf_edit_page_range("1-3", 5) == [1, 2, 3]
+    assert parse_pdf_edit_page_range("1,3,5", 5) == [1, 3, 5]
+    assert parse_pdf_edit_page_range("4, 1-2, 5", 5) == [1, 2, 4, 5]
+    assert parse_pdf_edit_page_range("", 5, required=False) == [1, 2, 3, 4, 5]
+
+    for bad_range in ["", "0", "6", "1-0", "4-2", "abc", "1,,2", "-"]:
+        try:
+            parse_pdf_edit_page_range(bad_range, 5, required=True)
+            assert False, f"Rentang {bad_range} harus ditolak"
+        except PdfEditError as exc:
+            assert exc.code == EDIT_PDF_ERR_INVALID_PAGES
+            assert exc.status_code == 400
+
+    # 4. parse_order
+    assert parse_pdf_edit_order("3,1,2", 3) == [3, 1, 2]
+    assert parse_pdf_edit_order(" 1, 2, 3 ", 3) == [1, 2, 3]
+
+    for bad_order in ["", "1,2", "1,2,2", "1,2,4", "3,2,0", "a,b,c", "1"]:
+        try:
+            parse_pdf_edit_order(bad_order, 3)
+            assert False, f"Urutan {bad_order} harus ditolak"
+        except PdfEditError as exc:
+            assert exc.code == EDIT_PDF_ERR_INVALID_PAGES
+            assert exc.status_code == 400
+
+    # 5. edit_pdf logika langsung
+    pdf_5 = _make_pdf_with_text(5)
+
+    # Info
+    info = edit_pdf(pdf_5, mode="info")
+    assert isinstance(info, dict)
+    assert info["page_count"] == 5
+    assert len(info["page_sizes"]) == 5
+    assert info["rotation"] == [0, 0, 0, 0, 0]
+
+    # Putar
+    res_putar = edit_pdf(pdf_5, mode="putar", angle=90)
+    assert isinstance(res_putar, PdfEditResult)
+    assert res_putar.source_pages == 5
+    assert res_putar.result_pages == 5
+    assert res_putar.affected_pages == 5
+
+    # Hapus
+    res_hapus = edit_pdf(pdf_5, mode="hapus", pages="2,4")
+    assert isinstance(res_hapus, PdfEditResult)
+    assert res_hapus.source_pages == 5
+    assert res_hapus.result_pages == 3
+    assert res_hapus.affected_pages == 2
+
+    # Hapus semua (harus gagal NO_PAGES_LEFT)
+    try:
+        edit_pdf(pdf_5, mode="hapus", pages="1-5")
+        assert False, "Hapus semua halaman harus gagal"
+    except PdfEditError as exc:
+        assert exc.code == EDIT_PDF_ERR_NO_PAGES_LEFT
+        assert exc.status_code == 400
+
+    # Urutkan
+    pdf_3 = _make_pdf_with_text(3)
+    res_urutkan = edit_pdf(pdf_3, mode="urutkan", order="3,1,2")
+    assert isinstance(res_urutkan, PdfEditResult)
+    assert res_urutkan.source_pages == 3
+    assert res_urutkan.result_pages == 3
+
+
+def test_http_pdf_edit_limits_dan_info() -> None:
+    """Uji endpoint GET limits dan POST mode info."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. GET /api/pdf/edit/limits
+    r_limits = client.get("/api/pdf/edit/limits")
+    assert r_limits.status_code == 200, r_limits.text
+    assert "no-store" in r_limits.headers.get("Cache-Control", "")
+    data_limits = r_limits.json()
+    assert data_limits["max_bytes"] == 26214400
+    assert data_limits["max_mb"] == 25
+    assert data_limits["max_pages"] == 300
+    assert data_limits["angles"] == [90, 180, 270]
+    assert len(data_limits["notes"]) == 4
+
+    # 2. Mode info pada PDF 5 halaman buatan PyMuPDF
+    pdf_5 = _make_pdf_with_text(5)
+    r_info = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("dokumen5.pdf", pdf_5, "application/pdf"))],
+        data={"mode": "info"},
+    )
+    assert r_info.status_code == 200, r_info.text
+    assert "no-store" in r_info.headers.get("Cache-Control", "")
+    data_info = r_info.json()
+    assert data_info["page_count"] == 5
+    assert data_info["encrypted"] is False
+    assert len(data_info["page_sizes"]) == 5
+    assert data_info["rotation"] == [0, 0, 0, 0, 0]
+
+
+def test_http_pdf_edit_mode_putar() -> None:
+    """Uji POST mode putar: semua halaman dan halaman tertentu."""
+    client = _test_client()
+    if client is None:
+        return
+
+    pdf_5 = _make_pdf_with_text(5)
+
+    # Putar semua halaman 90 derajat (pages kosong)
+    r_rot_all = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("lima.pdf", pdf_5, "application/pdf"))],
+        data={"mode": "putar", "angle": "90"},
+    )
+    assert r_rot_all.status_code == 200, r_rot_all.text
+    assert r_rot_all.headers["content-type"].startswith("application/pdf")
+    assert 'filename="editor-pdf.pdf"' in r_rot_all.headers.get("Content-Disposition", "")
+    assert "no-store" in r_rot_all.headers.get("Cache-Control", "")
+    assert r_rot_all.headers.get("X-Source-Pages") == "5"
+    assert r_rot_all.headers.get("X-Result-Pages") == "5"
+    assert r_rot_all.headers.get("X-Affected-Pages") == "5"
+    assert r_rot_all.headers.get("X-Processing-Ms") is not None
+
+    # Verifikasi dengan PyMuPDF: semua halaman rotasi 90
+    doc_res = pymupdf.open(stream=r_rot_all.content, filetype="pdf")
+    assert len(doc_res) == 5
+    for p in doc_res:
+        assert p.rotation == 90
+    doc_res.close()
+
+    # Putar halaman 2 sebesar 180 derajat
+    r_rot_p2 = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("lima.pdf", pdf_5, "application/pdf"))],
+        data={"mode": "putar", "angle": "180", "pages": "2"},
+    )
+    assert r_rot_p2.status_code == 200, r_rot_p2.text
+    assert r_rot_p2.headers.get("X-Source-Pages") == "5"
+    assert r_rot_p2.headers.get("X-Result-Pages") == "5"
+    assert r_rot_p2.headers.get("X-Affected-Pages") == "1"
+
+    # Verifikasi dengan PyMuPDF: hanya halaman 2 rotasi 180, lain 0
+    doc_res2 = pymupdf.open(stream=r_rot_p2.content, filetype="pdf")
+    assert len(doc_res2) == 5
+    assert doc_res2[0].rotation == 0
+    assert doc_res2[1].rotation == 180
+    assert doc_res2[2].rotation == 0
+    assert doc_res2[3].rotation == 0
+    assert doc_res2[4].rotation == 0
+    doc_res2.close()
+
+
+def test_http_pdf_edit_mode_hapus() -> None:
+    """Uji POST mode hapus: hapus halaman 2 dan 4 dari PDF 5 halaman."""
+    client = _test_client()
+    if client is None:
+        return
+
+    pdf_5 = _make_pdf_with_text(5, prefix="Nomor")
+
+    r_del = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("lima.pdf", pdf_5, "application/pdf"))],
+        data={"mode": "hapus", "pages": "2,4"},
+    )
+    assert r_del.status_code == 200, r_del.text
+    assert r_del.headers.get("X-Source-Pages") == "5"
+    assert r_del.headers.get("X-Result-Pages") == "3"
+    assert r_del.headers.get("X-Affected-Pages") == "2"
+
+    # Verifikasi dengan PyMuPDF: sisa 3 halaman (Nomor 1, Nomor 3, Nomor 5)
+    doc_del = pymupdf.open(stream=r_del.content, filetype="pdf")
+    assert len(doc_del) == 3
+    assert "Nomor 1" in doc_del[0].get_text()
+    assert "Nomor 3" in doc_del[1].get_text()
+    assert "Nomor 5" in doc_del[2].get_text()
+    doc_del.close()
+
+
+def test_http_pdf_edit_mode_urutkan() -> None:
+    """Uji POST mode urutkan: susun ulang 3,1,2 dari PDF 3 halaman."""
+    client = _test_client()
+    if client is None:
+        return
+
+    pdf_3 = _make_pdf_with_text(3, prefix="Urutan")
+
+    r_ord = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("tiga.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "urutkan", "order": "3,1,2"},
+    )
+    assert r_ord.status_code == 200, r_ord.text
+    assert r_ord.headers.get("X-Source-Pages") == "3"
+    assert r_ord.headers.get("X-Result-Pages") == "3"
+
+    # Verifikasi dengan PyMuPDF: urutan halaman 3, 1, 2
+    doc_ord = pymupdf.open(stream=r_ord.content, filetype="pdf")
+    assert len(doc_ord) == 3
+    assert "Urutan 3" in doc_ord[0].get_text()
+    assert "Urutan 1" in doc_ord[1].get_text()
+    assert "Urutan 2" in doc_ord[2].get_text()
+    doc_ord.close()
+
+
+def test_http_pdf_edit_jalur_galat() -> None:
+    """Uji seluruh jalur galat: tanpa berkas, bukan PDF, mode asing, sudut, urutan, kunci, dsb."""
+    client = _test_client()
+    if client is None:
+        return
+
+    pdf_3 = _make_pdf_with_text(3)
+
+    # 1. Tanpa berkas
+    r_no_file = client.post("/api/pdf/edit", data={"mode": "putar"})
+    assert r_no_file.status_code == 400
+    assert r_no_file.json()["error"]["code"] == EDIT_PDF_ERR_NO_FILE
+
+    # 2. Berkas kosong
+    r_empty = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("k.pdf", b"", "application/pdf"))],
+        data={"mode": "putar"},
+    )
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == EDIT_PDF_ERR_EMPTY_FILE
+
+    # 3. Bukan PDF
+    r_not_pdf = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("teks.txt", b"bukan berkas pdf asli", "text/plain"))],
+        data={"mode": "putar"},
+    )
+    assert r_not_pdf.status_code == 400
+    assert r_not_pdf.json()["error"]["code"] == EDIT_PDF_ERR_NOT_PDF
+
+    # 4. Mode asing
+    r_bad_mode = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("dok.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "potong_ajaib"},
+    )
+    assert r_bad_mode.status_code == 400
+    assert r_bad_mode.json()["error"]["code"] == EDIT_PDF_ERR_UNSUPPORTED_MODE
+
+    # 5. Halaman di luar rentang
+    r_out_range = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("dok.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "hapus", "pages": "99"},
+    )
+    assert r_out_range.status_code == 400
+    assert r_out_range.json()["error"]["code"] == EDIT_PDF_ERR_INVALID_PAGES
+
+    # 6. Hapus semua halaman (NO_PAGES_LEFT)
+    r_del_all = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("dok.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "hapus", "pages": "1-3"},
+    )
+    assert r_del_all.status_code == 400
+    assert r_del_all.json()["error"]["code"] == EDIT_PDF_ERR_NO_PAGES_LEFT
+
+    # 7. Urutan tidak lengkap
+    r_inc_order = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("dok.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "urutkan", "order": "1,2"},
+    )
+    assert r_inc_order.status_code == 400
+    assert r_inc_order.json()["error"]["code"] == EDIT_PDF_ERR_INVALID_PAGES
+
+    # 8. Sudut 45 (tidak valid)
+    r_bad_angle = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("dok.pdf", pdf_3, "application/pdf"))],
+        data={"mode": "putar", "angle": "45"},
+    )
+    assert r_bad_angle.status_code == 400
+    assert r_bad_angle.json()["error"]["code"] == EDIT_PDF_ERR_INVALID_ANGLE
+
+    # 9. PDF terkunci
+    doc_lock = pymupdf.open()
+    doc_lock.new_page(width=50, height=50)
+    buf_lock = io.BytesIO()
+    doc_lock.save(buf_lock, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="rahasia123", owner_pw="rahasia123")
+    pdf_locked = buf_lock.getvalue()
+    doc_lock.close()
+
+    r_lock = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("terkunci.pdf", pdf_locked, "application/pdf"))],
+        data={"mode": "putar"},
+    )
+    assert r_lock.status_code == 422
+    assert r_lock.json()["error"]["code"] == EDIT_PDF_ERR_PDF_ENCRYPTED
+
+    # 10. PDF 301 halaman (> 300)
+    doc_301 = pymupdf.open()
+    for _ in range(301):
+        doc_301.new_page(width=30, height=30)
+    buf_301 = io.BytesIO()
+    doc_301.save(buf_301)
+    pdf_301 = buf_301.getvalue()
+    doc_301.close()
+
+    r_301 = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("panjang.pdf", pdf_301, "application/pdf"))],
+        data={"mode": "info"},
+    )
+    assert r_301.status_code == 413
+    assert r_301.json()["error"]["code"] == EDIT_PDF_ERR_TOO_MANY_PAGES
+
+    # 11. Data 26 MB (> 25 MB)
+    large_pdf = b"%PDF-" + b"0" * (26 * 1024 * 1024)
+    r_large = client.post(
+        "/api/pdf/edit",
+        files=[("file", ("raksasa.pdf", large_pdf, "application/pdf"))],
+        data={"mode": "info"},
+    )
+    assert r_large.status_code == 413
+    assert r_large.json()["error"]["code"] == EDIT_PDF_ERR_PAYLOAD_TOO_LARGE
+
+
+def test_http_pdf_edit_root_dan_regresi() -> None:
+    """Uji bahwa root endpoint memuat pdf-edit dan endpoint lama tetap berfungsi."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memiliki pdf-edit di daftar alat
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "pdf-edit" in root_data["tools"]
+    assert "pdf-to-image" in root_data["tools"]
+
+    # Endpoint limits lama dan baru
+    assert client.get("/api/pdf/edit/limits").status_code == 200
+    assert client.get("/api/pdf/to-image/limits").status_code == 200
+    assert client.get("/api/pdf/compress/limits").status_code == 200
+    assert client.get("/api/pdf/split/limits").status_code == 200
+    assert client.get("/api/pdf/merge/limits").status_code == 200
 
 
 # --- Runner mandiri ---------------------------------------------------------
