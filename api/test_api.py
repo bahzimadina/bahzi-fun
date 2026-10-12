@@ -630,6 +630,24 @@ from app.listrik import (
     limits_payload as listrik_limits_payload_func,
     parse_number as parse_listrik_number,
 )
+from app.video_trim import (
+    ALLOWED_FORMATS as VIDEO_TRIM_ALLOWED_FORMATS,
+    MAX_BYTES as VIDEO_TRIM_MAX_BYTES,
+    MAX_CLIP_SECONDS as VIDEO_TRIM_MAX_CLIP_SECONDS,
+    MAX_DURATION_SECONDS as VIDEO_TRIM_MAX_DURATION_SECONDS,
+    MAX_OUTPUT_BYTES as VIDEO_TRIM_MAX_OUTPUT_BYTES,
+    MIN_CLIP_SECONDS as VIDEO_TRIM_MIN_CLIP_SECONDS,
+    MODES as VIDEO_TRIM_MODES,
+    TrimResult,
+    VideoTrimError,
+    deteksi_format as video_deteksi_format,
+    durasi_berkas as video_durasi_berkas,
+    limits_payload as video_trim_limits_payload,
+    nama_keluaran as video_nama_keluaran,
+    parse_waktu as video_parse_waktu,
+    potong as video_potong,
+    probe as video_probe,
+)
 
 
 SKIPPED: list[str] = []
@@ -9062,6 +9080,7 @@ def test_http_pdf_edit_root_dan_regresi() -> None:
     root_data = root_resp.json()
     assert "pdf-edit" in root_data["tools"]
     assert "pdf-to-image" in root_data["tools"]
+    assert "video-trim" in root_data["tools"]
 
     # Endpoint limits lama dan baru
     assert client.get("/api/pdf/edit/limits").status_code == 200
@@ -9069,6 +9088,401 @@ def test_http_pdf_edit_root_dan_regresi() -> None:
     assert client.get("/api/pdf/compress/limits").status_code == 200
     assert client.get("/api/pdf/split/limits").status_code == 200
     assert client.get("/api/pdf/merge/limits").status_code == 200
+
+
+def make_test_video(duration: int = 3, format_name: str = "mp4", with_audio: bool = True) -> bytes:
+    """Buat video pendek di memori memakai ffmpeg untuk keperluan uji."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    if shutil.which("ffmpeg") is None:
+        return b""
+
+    out_ext = "." + format_name
+    with tempfile.NamedTemporaryFile(delete=False, suffix=out_ext, dir="/tmp") as tf:
+        out_path = tf.name
+
+    try:
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"testsrc=duration={duration}:size=160x120:rate=10",
+        ]
+        if with_audio:
+            cmd.extend(["-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}", "-shortest"])
+
+        if format_name in ("webm", "mkv"):
+            cmd.extend(["-c:v", "libvpx"])
+            if with_audio:
+                cmd.extend(["-c:a", "libvorbis"])
+            else:
+                cmd.append("-an")
+        else:
+            cmd.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            if with_audio:
+                cmd.extend(["-c:a", "aac"])
+            else:
+                cmd.append("-an")
+
+        cmd.append(out_path)
+        res = subprocess.run(cmd, capture_output=True, timeout=30)
+        if res.returncode != 0:
+            return b""
+        with open(out_path, "rb") as f:
+            return f.read()
+    finally:
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+
+def test_video_trim_limits_payload() -> None:
+    """Uji payload batas operasional video trimmer."""
+    payload = video_trim_limits_payload()
+    wajib = [
+        "max_bytes",
+        "max_duration_seconds",
+        "min_clip_seconds",
+        "max_clip_seconds",
+        "max_output_bytes",
+        "allowed_formats",
+        "modes",
+        "output_format",
+        "catatan",
+    ]
+    for k in wajib:
+        assert k in payload, f"Kunci {k} harus ada dalam limits_payload"
+
+    assert payload["max_bytes"] == VIDEO_TRIM_MAX_BYTES
+    assert payload["max_duration_seconds"] == VIDEO_TRIM_MAX_DURATION_SECONDS
+    assert payload["min_clip_seconds"] == VIDEO_TRIM_MIN_CLIP_SECONDS
+    assert payload["max_clip_seconds"] == VIDEO_TRIM_MAX_CLIP_SECONDS
+    assert payload["max_output_bytes"] == VIDEO_TRIM_MAX_OUTPUT_BYTES
+    assert payload["allowed_formats"] == ["MP4", "MOV", "WEBM", "MKV"]
+    assert len(payload["modes"]) == 2
+    assert payload["modes"][0]["id"] == "cepat"
+    assert payload["modes"][1]["id"] == "presisi"
+
+
+def test_video_trim_deteksi_format() -> None:
+    """Uji deteksi format video berdasarkan magic bytes."""
+    # MP4 (ftyp bukan qt  )
+    mp4_bytes = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32
+    assert video_deteksi_format(mp4_bytes, "video.mp4") == "mp4"
+
+    # MOV (ftyp qt  )
+    mov_bytes = b"\x00\x00\x00\x1cftypqt  \x00\x00\x02\x00" + b"\x00" * 32
+    assert video_deteksi_format(mov_bytes, "video.mov") == "mov"
+
+    # WebM (EBML dengan webm)
+    webm_bytes = b"\x1a\x45\xdf\xa3" + b"\x00" * 8 + b"webm" + b"\x00" * 32
+    assert video_deteksi_format(webm_bytes, "video.webm") == "webm"
+
+    # MKV (EBML dengan matroska)
+    mkv_bytes = b"\x1a\x45\xdf\xa3" + b"\x00" * 8 + b"matroska" + b"\x00" * 32
+    assert video_deteksi_format(mkv_bytes, "video.mkv") == "mkv"
+
+    # Berkas bukan video
+    assert video_deteksi_format(b"%PDF-1.4\n1 0 obj", "doc.pdf") is None
+    assert video_deteksi_format(b"Halo dunia bukan video", "teks.txt") is None
+
+    # Berkas kosong harus melempar EMPTY_FILE
+    try:
+        video_deteksi_format(b"", "empty.mp4")
+        assert False, "Harus melempar VideoTrimError EMPTY_FILE"
+    except VideoTrimError as exc:
+        assert exc.code == "EMPTY_FILE"
+        assert exc.status_code == 400
+
+
+def test_video_trim_parse_waktu() -> None:
+    """Uji parsing waktu dalam berbagai format."""
+    # Format valid
+    assert video_parse_waktu("12", "Waktu mulai") == 12.0
+    assert video_parse_waktu("12.5", "Waktu mulai") == 12.5
+    assert video_parse_waktu("0:12", "Waktu mulai") == 12.0
+    assert video_parse_waktu("00:01:02", "Waktu mulai") == 62.0
+    assert video_parse_waktu(15, "Waktu mulai") == 15.0
+    assert video_parse_waktu(15.75, "Waktu mulai") == 15.75
+
+    # Format tidak valid
+    kasus_gagal = ["", "abc", "-3", "1:99", "-1:20", None, 90000, "25:00:00"]
+    for k in kasus_gagal:
+        try:
+            video_parse_waktu(k, "Waktu mulai")
+            assert False, f"Kasus {k} harus ditolak"
+        except VideoTrimError as exc:
+            assert exc.code == "INVALID_TIME"
+            assert exc.status_code == 400
+            assert "Waktu mulai" in exc.message
+
+
+def test_video_trim_nama_keluaran() -> None:
+    """Uji penentuan nama berkas keluaran."""
+    assert video_nama_keluaran("presisi", "mp4") == "potongan.mp4"
+    assert video_nama_keluaran("presisi", "webm") == "potongan.mp4"
+    assert video_nama_keluaran("cepat", "mp4") == "potongan.mp4"
+    assert video_nama_keluaran("cepat", "mov") == "potongan.mp4"
+    assert video_nama_keluaran("cepat", "webm") == "potongan.webm"
+    assert video_nama_keluaran("cepat", "mkv") == "potongan.webm"
+
+
+def test_video_trim_logika_galat() -> None:
+    """Uji berbagai kondisi galat pada pemotongan video."""
+    # Berkas kosong
+    try:
+        video_potong(b"", "video.mp4", 0, 2, "cepat")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "EMPTY_FILE"
+        assert exc.status_code == 400
+
+    # Berkas terlalu besar
+    try:
+        video_potong(b"x" * (VIDEO_TRIM_MAX_BYTES + 1), "video.mp4", 0, 2, "cepat")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "FILE_TOO_LARGE"
+        assert exc.status_code == 413
+
+    # Format tidak didukung
+    try:
+        video_potong(b"%PDF-1.4 dokumen palsu", "doc.pdf", 0, 2, "cepat")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "UNSUPPORTED_FORMAT"
+        assert exc.status_code == 400
+
+    # Mode tidak dikenal
+    try:
+        video_potong(b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32, "video.mp4", 0, 2, "ultra")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "UNSUPPORTED_MODE"
+        assert exc.status_code == 400
+
+
+def test_video_trim_potong_cepat_dan_presisi() -> None:
+    """Uji pemotongan video mode cepat dan presisi menggunakan ffmpeg."""
+    import shutil
+    if shutil.which("ffmpeg") is None:
+        try:
+            import pytest
+            pytest.skip("ffmpeg tidak ditemukan di PATH")
+        except ImportError:
+            SKIPPED.append("uji potong video dilewati: ffmpeg tidak ada di PATH")
+            return
+
+    video_data = make_test_video(duration=4, format_name="mp4", with_audio=True)
+    if not video_data:
+        SKIPPED.append("pembuatan video uji gagal")
+        return
+
+    # Probe berhasil
+    info = video_probe(video_data, "mp4")
+    assert info["ada_video"] is True
+    assert info["ada_audio"] is True
+    assert info["durasi"] > 0
+
+    # Mode cepat
+    res_cepat = video_potong(video_data, "video.mp4", mulai=0, akhir=2, mode="cepat")
+    assert isinstance(res_cepat, TrimResult)
+    assert len(res_cepat.data) > 0
+    assert res_cepat.output_name == "potongan.mp4"
+    assert res_cepat.mime_type == "video/mp4"
+    assert res_cepat.mode == "cepat"
+    # Mode cepat melaporkan durasi nyata berkas hasil (bisa sedikit lebih
+    # panjang dari yang diminta karena menempel ke titik kunci).
+    assert 2.0 <= res_cepat.clip_seconds < 3.0
+
+    # Mode presisi
+    res_presisi = video_potong(video_data, "video.mp4", mulai="00:01", akhir="00:03", mode="presisi")
+    assert isinstance(res_presisi, TrimResult)
+    assert len(res_presisi.data) > 0
+    assert res_presisi.output_name == "potongan.mp4"
+    assert res_presisi.mime_type == "video/mp4"
+    assert res_presisi.mode == "presisi"
+    assert res_presisi.clip_seconds == 2.0
+
+    # Galat: rentang terbalik (akhir <= mulai)
+    try:
+        video_potong(video_data, "video.mp4", mulai=3, akhir=1, mode="cepat")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "INVALID_RANGE"
+        assert exc.status_code == 400
+
+    # Galat: potongan terlalu pendek (< 1 detik)
+    try:
+        video_potong(video_data, "video.mp4", mulai=1, akhir=1.5, mode="cepat")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "CLIP_TOO_SHORT"
+        assert exc.status_code == 400
+
+    # Galat: potongan terlalu panjang (> 120 detik)
+    try:
+        video_potong(video_data, "video.mp4", mulai=0, akhir=130, mode="cepat")
+        assert False
+    except VideoTrimError as exc:
+        assert exc.code == "CLIP_TOO_LONG"
+        assert exc.status_code == 400
+
+
+def test_video_trim_durasi_nyata_mode_cepat() -> None:
+    """Uji mode cepat melaporkan durasi nyata berkas hasil, bukan durasi yang diminta."""
+    import shutil
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        try:
+            import pytest
+            pytest.skip("ffmpeg/ffprobe tidak ditemukan di PATH")
+        except ImportError:
+            SKIPPED.append("uji durasi nyata mode cepat dilewati: ffmpeg/ffprobe tidak ada di PATH")
+            return
+
+    import subprocess
+    import tempfile
+
+    # Video uji 6 detik dengan titik kunci rapat (tiap 15 frame pada 15 fps = tiap 1 detik)
+    out_path = None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", dir="/tmp") as tf:
+        out_path = tf.name
+    try:
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "testsrc=duration=6:size=160x120:rate=15",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-shortest",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-g", "15", "-keyint_min", "15", "-sc_threshold", "0",
+            "-c:a", "aac",
+            out_path,
+        ]
+        res = subprocess.run(cmd, capture_output=True, timeout=30)
+        if res.returncode != 0:
+            SKIPPED.append("pembuatan video uji titik kunci rapat gagal")
+            return
+        with open(out_path, "rb") as f:
+            video_data = f.read()
+    finally:
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+    if not video_data:
+        SKIPPED.append("pembuatan video uji titik kunci rapat gagal")
+        return
+
+    result = video_potong(video_data, "uji.mp4", 1, 4, "cepat")
+    assert isinstance(result, TrimResult)
+    assert result.output_name == "potongan.mp4"
+    assert len(result.data) > 0
+
+    hasil_path = None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", dir="/tmp") as tf:
+        hasil_path = tf.name
+        tf.write(result.data)
+    try:
+        durasi_nyata = video_durasi_berkas(hasil_path)
+    finally:
+        if os.path.exists(hasil_path):
+            try:
+                os.remove(hasil_path)
+            except OSError:
+                pass
+
+    assert durasi_nyata is not None
+    assert abs(result.clip_seconds - durasi_nyata) <= 0.2
+    assert abs(result.clip_seconds - 3.0) <= 0.5
+
+
+def test_http_video_trim_endpoint_dan_regresi() -> None:
+    """Uji HTTP endpoint Video Trimmer via TestClient."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memuat video-trim
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "video-trim" in root_data["tools"]
+
+    # Limits endpoint
+    limits_resp = client.get("/api/video/trim/limits")
+    assert limits_resp.status_code == 200
+    lim_data = limits_resp.json()
+    assert lim_data["max_bytes"] == VIDEO_TRIM_MAX_BYTES
+    assert lim_data["max_duration_seconds"] == VIDEO_TRIM_MAX_DURATION_SECONDS
+
+    # POST tanpa file -> 400 EMPTY_FILE
+    r_nofile = client.post("/api/video/trim", data={"mulai": "0", "akhir": "2", "mode": "cepat"})
+    assert r_nofile.status_code == 400
+    assert r_nofile.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file kosong -> 400 EMPTY_FILE
+    r_empty = client.post(
+        "/api/video/trim",
+        files=[("file", ("kosong.mp4", b"", "video/mp4"))],
+        data={"mulai": "0", "akhir": "2", "mode": "cepat"},
+    )
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file terlalu besar -> 413 FILE_TOO_LARGE
+    r_large = client.post(
+        "/api/video/trim",
+        files=[("file", ("besar.mp4", b"0" * (VIDEO_TRIM_MAX_BYTES + 10), "video/mp4"))],
+        data={"mulai": "0", "akhir": "2", "mode": "cepat"},
+    )
+    assert r_large.status_code == 413
+    assert r_large.json()["error"]["code"] == "FILE_TOO_LARGE"
+
+    # POST mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    r_mode = client.post(
+        "/api/video/trim",
+        files=[("file", ("video.mp4", b"dummy", "video/mp4"))],
+        data={"mulai": "0", "akhir": "2", "mode": "aneh"},
+    )
+    assert r_mode.status_code == 400
+    assert r_mode.json()["error"]["code"] == "UNSUPPORTED_MODE"
+
+    # Uji potong video nyata bila ffmpeg tersedia
+    import shutil
+    if shutil.which("ffmpeg") is not None:
+        video_data = make_test_video(duration=3, format_name="mp4", with_audio=True)
+        if video_data:
+            # Mode cepat
+            r_ok_cepat = client.post(
+                "/api/video/trim",
+                files=[("file", ("sample.mp4", video_data, "video/mp4"))],
+                data={"mulai": "0", "akhir": "2", "mode": "cepat"},
+            )
+            assert r_ok_cepat.status_code == 200
+            assert r_ok_cepat.headers["Cache-Control"] == "no-store"
+            assert "potongan.mp4" in r_ok_cepat.headers["Content-Disposition"]
+            # Mode cepat melaporkan durasi nyata berkas hasil (bisa sedikit
+            # lebih panjang dari yang diminta karena menempel ke titik kunci).
+            clip_seconds_cepat = float(r_ok_cepat.headers["X-Clip-Seconds"])
+            assert 2.0 <= clip_seconds_cepat < 3.0
+            assert r_ok_cepat.headers["X-Mode"] == "cepat"
+            assert int(r_ok_cepat.headers["X-Output-Bytes"]) > 0
+            assert int(r_ok_cepat.headers["X-Processing-Ms"]) >= 0
+            assert len(r_ok_cepat.content) > 0
+
+            # Mode presisi
+            r_ok_presisi = client.post(
+                "/api/video/trim",
+                files=[("file", ("sample.mp4", video_data, "video/mp4"))],
+                data={"mulai": "0.5", "akhir": "2", "mode": "presisi"},
+            )
+            assert r_ok_presisi.status_code == 200
+            assert r_ok_presisi.headers["X-Clip-Seconds"] == "1.5"
+            assert r_ok_presisi.headers["X-Mode"] == "presisi"
+            assert len(r_ok_presisi.content) > 0
 
 
 # --- Runner mandiri ---------------------------------------------------------

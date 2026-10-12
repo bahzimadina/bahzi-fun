@@ -457,6 +457,19 @@ from .listrik import (
     hitung_listrik,
     limits_payload as listrik_limits_payload_func,
 )
+from .video_trim import (
+    ALLOWED_FORMATS as VIDEO_TRIM_ALLOWED_FORMATS,
+    MAX_BYTES as VIDEO_TRIM_MAX_BYTES,
+    MAX_CLIP_SECONDS as VIDEO_TRIM_MAX_CLIP_SECONDS,
+    MAX_DURATION_SECONDS as VIDEO_TRIM_MAX_DURATION_SECONDS,
+    MAX_OUTPUT_BYTES as VIDEO_TRIM_MAX_OUTPUT_BYTES,
+    MIN_CLIP_SECONDS as VIDEO_TRIM_MIN_CLIP_SECONDS,
+    MODES as VIDEO_TRIM_MODES,
+    TrimResult,
+    VideoTrimError,
+    limits_payload as video_trim_limits_payload,
+    potong as potong_video,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -515,14 +528,31 @@ if _cors_origins:
             "X-Result-Pages",
             "X-First-Page",
             "X-Last-Page",
+            "X-Clip-Seconds",
+            "X-Output-Bytes",
+            "X-Mode",
         ],
     )
 
 # Batasi satu proses OCR sekaligus di tingkat modul
 _ocr_semaphore = threading.Semaphore(1)
 
+# Batasi satu proses pemotongan video sekaligus di tingkat modul
+_video_trim_semaphore = threading.Semaphore(1)
+
 
 # --- Handler error -----------------------------------------------------------
+@app.exception_handler(VideoTrimError)
+async def handle_video_trim_error(request: Request, exc: VideoTrimError) -> JSONResponse:
+    """Error pemotongan video yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("potong video ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(PdfMergeError)
 async def handle_pdf_error(request: Request, exc: PdfMergeError) -> JSONResponse:
     """Error yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -798,7 +828,9 @@ async def handle_listrik_error(request: Request, exc: ListrikError) -> JSONRespo
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
-    if request.url.path.startswith("/api/listrik"):
+    if request.url.path.startswith("/api/video/trim"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file', 'mulai', 'akhir', dan 'mode'."
+    elif request.url.path.startswith("/api/listrik"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/csv"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks' dan 'mode'."
@@ -3513,6 +3545,72 @@ async def pomodoro_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/video/trim/limits")
+async def video_trim_limits() -> JSONResponse:
+    """Batas yang berlaku untuk pemotongan video."""
+    return JSONResponse(content=video_trim_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/video/trim")
+async def video_trim_endpoint(
+    request: Request,
+    file: UploadFile | None = File(None),
+    mulai: str = Form(""),
+    akhir: str = Form(""),
+    mode: str = Form(""),
+) -> Response:
+    """Potong klip video di server memakai ffmpeg."""
+    started = time.perf_counter()
+
+    if file is None:
+        raise VideoTrimError("EMPTY_FILE", "Berkas video belum dipilih.", 400)
+
+    data = await file.read()
+    if not data or len(data) == 0:
+        raise VideoTrimError("EMPTY_FILE", "Berkas video kosong.", 400)
+
+    if len(data) > VIDEO_TRIM_MAX_BYTES:
+        raise VideoTrimError(
+            "FILE_TOO_LARGE",
+            f"Ukuran berkas melebihi batas {VIDEO_TRIM_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+    if not _video_trim_semaphore.acquire(blocking=False):
+        raise VideoTrimError("BUSY", "Server sedang memotong video lain. Coba lagi sebentar lagi.", 503)
+
+    try:
+        result = await run_in_threadpool(
+            potong_video,
+            data,
+            file.filename or "",
+            mulai,
+            akhir,
+            mode,
+        )
+    finally:
+        _video_trim_semaphore.release()
+
+    durasi_proses_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "potong video selesai: mode=%s detik=%.1f byte=%d durasi=%.0fms",
+        result.mode,
+        result.clip_seconds,
+        len(result.data),
+        durasi_proses_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "X-Clip-Seconds": f"{result.clip_seconds:.1f}",
+        "X-Output-Bytes": str(len(result.data)),
+        "X-Mode": result.mode,
+        "X-Processing-Ms": str(int(durasi_proses_ms)),
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -3547,6 +3645,7 @@ async def root() -> dict:
             "csv",
             "listrik",
             "pomodoro",
+            "video-trim",
         ],
     }
 
