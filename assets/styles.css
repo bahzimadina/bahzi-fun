@@ -6617,13 +6617,306 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: 1.5rem;
 }
 
+/* --- Ekstrak Audio (Ambil Audio dari Video) --- */
+.eka__page {
+  padding-bottom: 2rem;
+}
+
+.eka__back {
+  margin: 0 0 .75rem;
+}
+
+.eka__back-link {
+  color: var(--brand-text);
+  text-decoration: none;
+  font-size: .88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  min-height: 44px;
+}
+
+.eka__back-link:hover {
+  text-decoration: underline;
+}
+
+.eka__app {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.eka__pesan-galat {
+  background: rgba(200, 56, 82, 0.12);
+  border: 1px solid var(--pink-dark);
+  color: #ff9cb2;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+.eka__drop {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-card);
+  padding: 2rem 1.25rem;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface);
+  transition: border-color var(--transition), background var(--transition);
+  outline: none;
+}
+
+.eka__drop:hover,
+.eka__drop:focus-visible,
+.eka__drop--active {
+  border-color: var(--brand);
+  background: var(--surface-2);
+}
+
+.eka__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.eka__drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .75rem;
+}
+
+.eka__drop-icon {
+  width: 44px;
+  height: 44px;
+  color: var(--brand-text);
+}
+
+.eka__drop-text {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.eka__pilih-btn {
+  min-height: 44px;
+  min-width: 120px;
+}
+
+.eka__drop-sub {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.eka__sumber-wrap {
+  margin-top: 1.25rem;
+  text-align: center;
+}
+
+.eka__video-sumber {
+  width: 100%;
+  max-height: 380px;
+  background: #000;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.eka__form {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.eka__format-section {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.eka__label {
+  font-size: .88rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.eka__format-pilihan {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+@media (max-width: 768px) {
+  .eka__format-pilihan {
+    grid-template-columns: 1fr;
+  }
+}
+
+.eka__format-label {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+  padding: .85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  min-height: 44px;
+}
+
+.eka__format-label:hover {
+  background: var(--surface-2);
+}
+
+.eka__format-label input[type="radio"] {
+  margin-top: .2rem;
+  accent-color: var(--brand);
+  min-width: 18px;
+  min-height: 18px;
+}
+
+.eka__format-konten {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+
+.eka__format-judul {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.eka__format-desc {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.eka__tombol-aksi {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.eka__btn-proses,
+.eka__btn-reset {
+  min-height: 44px;
+  min-width: 120px;
+}
+
+.eka__status {
+  margin: 0;
+}
+
+.eka__batas {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+}
+
+.eka__hasil {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.eka__hasil-judul {
+  margin: 0 0 .85rem;
+  font-size: 1.05rem;
+}
+
+.eka__hasil-audio-wrap {
+  margin-bottom: .85rem;
+}
+
+.eka__audio-hasil {
+  width: 100%;
+  height: 44px;
+  border-radius: var(--radius);
+}
+
+.eka__info {
+  font-size: .84rem;
+  color: var(--text);
+  background: rgba(117, 83, 255, 0.08);
+  border: 1px solid var(--brand);
+  padding: .65rem .85rem;
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+  word-break: break-word;
+}
+
+.eka__hasil-aksi {
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+
+.eka__btn-unduh {
+  min-height: 44px;
+  min-width: 120px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.eka__btn-mulai-lagi {
+  min-height: 44px;
+  min-width: 100px;
+}
+
+.eka__privasi-tag {
+  margin: 1.25rem 0 0;
+  font-size: .78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.eka__notice-title {
+  font-size: 1.05rem;
+  margin-top: 0;
+}
+
+.eka__notice-list {
+  margin: .5rem 0 0 1.25rem;
+  padding: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.eka__noscript {
+  margin-top: 1.5rem;
+}
+
 @media (pointer: coarse) {
   #ptv-app input,
   #ptv-app button,
   #ptv-app label,
-  #ptv-unduh {
+  #ptv-unduh,
+  #eka-app input,
+  #eka-app button,
+  #eka-app label,
+  #eka-unduh,
+  #eka-mulai-lagi {
     min-height: 44px;
   }
 }
+
 
 

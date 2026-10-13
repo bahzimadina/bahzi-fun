@@ -648,6 +648,18 @@ from app.video_trim import (
     potong as video_potong,
     probe as video_probe,
 )
+from app.audio_extract import (
+    ALLOWED_FORMATS as AUDIO_EXTRACT_ALLOWED_FORMATS,
+    MAX_BYTES as AUDIO_EXTRACT_MAX_BYTES,
+    MAX_DURATION_SECONDS as AUDIO_EXTRACT_MAX_DURATION_SECONDS,
+    MAX_OUTPUT_BYTES as AUDIO_EXTRACT_MAX_OUTPUT_BYTES,
+    OUTPUTS as AUDIO_EXTRACT_OUTPUTS,
+    AudioExtractError,
+    ExtractResult,
+    ambil_audio,
+    limits_payload as audio_extract_limits_payload,
+    probe as audio_probe,
+)
 
 
 SKIPPED: list[str] = []
@@ -9483,6 +9495,243 @@ def test_http_video_trim_endpoint_dan_regresi() -> None:
             assert r_ok_presisi.headers["X-Clip-Seconds"] == "1.5"
             assert r_ok_presisi.headers["X-Mode"] == "presisi"
             assert len(r_ok_presisi.content) > 0
+
+
+def test_audio_extract_limits_payload() -> None:
+    """Uji payload batas operasional audio extract."""
+    payload = audio_extract_limits_payload()
+    wajib = [
+        "max_bytes",
+        "max_duration_seconds",
+        "max_output_bytes",
+        "allowed_formats",
+        "outputs",
+        "catatan",
+    ]
+    for key in wajib:
+        assert key in payload
+
+    assert payload["max_bytes"] == AUDIO_EXTRACT_MAX_BYTES
+    assert payload["max_duration_seconds"] == AUDIO_EXTRACT_MAX_DURATION_SECONDS
+    assert payload["max_output_bytes"] == AUDIO_EXTRACT_MAX_OUTPUT_BYTES
+    assert "MP4" in payload["allowed_formats"]
+    assert "MOV" in payload["allowed_formats"]
+    assert "WEBM" in payload["allowed_formats"]
+    assert "MKV" in payload["allowed_formats"]
+
+    outputs = payload["outputs"]
+    assert len(outputs) == 3
+    ids = [o["id"] for o in outputs]
+    assert ids == ["mp3", "m4a", "wav"]
+    for o in outputs:
+        assert "id" in o
+        assert "label" in o
+        assert "desc" in o
+        assert "mime" in o
+        assert "ext" in o
+
+
+def test_audio_extract_logika_galat() -> None:
+    """Uji berbagai kondisi galat pada ekstraksi audio."""
+    # Berkas kosong
+    try:
+        ambil_audio(b"", "video.mp4", "mp3")
+        assert False, "Harusnya melempar EMPTY_FILE"
+    except AudioExtractError as exc:
+        assert exc.code == "EMPTY_FILE"
+        assert exc.status_code == 400
+
+    # Berkas terlalu besar
+    try:
+        ambil_audio(b"0" * (AUDIO_EXTRACT_MAX_BYTES + 1), "video.mp4", "mp3")
+        assert False, "Harusnya melempar FILE_TOO_LARGE"
+    except AudioExtractError as exc:
+        assert exc.code == "FILE_TOO_LARGE"
+        assert exc.status_code == 413
+
+    # Format video tidak didukung (PDF / teks)
+    try:
+        ambil_audio(b"%PDF-1.4 dokumen palsu", "doc.pdf", "mp3")
+        assert False, "Harusnya melempar UNSUPPORTED_FORMAT"
+    except AudioExtractError as exc:
+        assert exc.code == "UNSUPPORTED_FORMAT"
+        assert exc.status_code == 400
+
+    try:
+        ambil_audio(b"Teks biasa tanpa video", "catatan.txt", "mp3")
+        assert False, "Harusnya melempar UNSUPPORTED_FORMAT"
+    except AudioExtractError as exc:
+        assert exc.code == "UNSUPPORTED_FORMAT"
+        assert exc.status_code == 400
+
+    # Format tujuan ngawur
+    try:
+        ambil_audio(b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32, "video.mp4", "ngawur")
+        assert False, "Harusnya melempar UNSUPPORTED_OUTPUT"
+    except AudioExtractError as exc:
+        assert exc.code == "UNSUPPORTED_OUTPUT"
+        assert exc.status_code == 400
+
+
+def test_audio_extract_nyata_dan_format() -> None:
+    """Uji ekstraksi audio nyata untuk MP3, M4A, dan WAV menggunakan ffmpeg."""
+    import shutil
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        try:
+            import pytest
+            pytest.skip("ffmpeg / ffprobe tidak ditemukan di PATH")
+        except ImportError:
+            SKIPPED.append("uji ekstraksi audio dilewati: ffmpeg/ffprobe tidak ada di PATH")
+            return
+
+    video_data = make_test_video(duration=3, format_name="mp4", with_audio=True)
+    if not video_data:
+        SKIPPED.append("pembuatan video uji gagal")
+        return
+
+    # 1. MP3
+    res_mp3 = ambil_audio(video_data, "sample.mp4", "mp3")
+    assert res_mp3.output_name == "suara.mp3"
+    assert res_mp3.mime_type == "audio/mpeg"
+    assert res_mp3.format_id == "mp3"
+    assert len(res_mp3.data) > 0
+    # Cek magic bytes MP3 (ID3v2 atau sync frame 0xFF Ex)
+    is_mp3 = (res_mp3.data[:3] == b"ID3") or (
+        len(res_mp3.data) >= 2 and res_mp3.data[0] == 0xFF and (res_mp3.data[1] & 0xE0) == 0xE0
+    )
+    assert is_mp3, "Magic bytes MP3 tidak sesuai"
+    assert abs(res_mp3.audio_seconds - 3.0) <= 0.5
+
+    # 2. M4A
+    res_m4a = ambil_audio(video_data, "sample.mp4", "m4a")
+    assert res_m4a.output_name == "suara.m4a"
+    assert res_m4a.mime_type == "audio/mp4"
+    assert res_m4a.format_id == "m4a"
+    assert len(res_m4a.data) > 0
+    # Cek magic bytes M4A (ftyp pada offset 4)
+    assert len(res_m4a.data) >= 8 and res_m4a.data[4:8] == b"ftyp", "Magic bytes M4A (ftyp) tidak sesuai"
+    assert abs(res_m4a.audio_seconds - 3.0) <= 0.5
+
+    # 3. WAV
+    res_wav = ambil_audio(video_data, "sample.mp4", "wav")
+    assert res_wav.output_name == "suara.wav"
+    assert res_wav.mime_type == "audio/wav"
+    assert res_wav.format_id == "wav"
+    assert len(res_wav.data) > 0
+    # Cek magic bytes WAV (RIFF + WAVE)
+    assert len(res_wav.data) >= 12 and res_wav.data[:4] == b"RIFF" and res_wav.data[8:12] == b"WAVE", "Magic bytes WAV tidak sesuai"
+    assert abs(res_wav.audio_seconds - 3.0) <= 0.5
+
+
+def test_audio_extract_tanpa_audio() -> None:
+    """Uji video tanpa track audio harus menghasilkan galat NO_AUDIO_STREAM."""
+    import shutil
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        try:
+            import pytest
+            pytest.skip("ffmpeg / ffprobe tidak ditemukan di PATH")
+        except ImportError:
+            SKIPPED.append("uji video tanpa audio dilewati: ffmpeg/ffprobe tidak ada di PATH")
+            return
+
+    video_tanpa_audio = make_test_video(duration=2, format_name="mp4", with_audio=False)
+    if not video_tanpa_audio:
+        SKIPPED.append("pembuatan video uji tanpa audio gagal")
+        return
+
+    try:
+        ambil_audio(video_tanpa_audio, "silent.mp4", "mp3")
+        assert False, "Harusnya melempar NO_AUDIO_STREAM"
+    except AudioExtractError as exc:
+        assert exc.code == "NO_AUDIO_STREAM"
+        assert exc.status_code == 400
+
+
+def test_http_audio_extract_endpoint_dan_regresi() -> None:
+    """Uji HTTP endpoint Ekstrak Audio via TestClient dan cek regresi."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memuat audio-extract
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "audio-extract" in root_data["tools"]
+
+    # Limits endpoint
+    limits_resp = client.get("/api/audio/extract/limits")
+    assert limits_resp.status_code == 200
+    lim_data = limits_resp.json()
+    assert lim_data["max_bytes"] == AUDIO_EXTRACT_MAX_BYTES
+    assert lim_data["max_duration_seconds"] == AUDIO_EXTRACT_MAX_DURATION_SECONDS
+    assert len(lim_data["outputs"]) == 3
+
+    # POST tanpa file -> 400 EMPTY_FILE
+    r_nofile = client.post("/api/audio/extract", data={"format": "mp3"})
+    assert r_nofile.status_code == 400
+    assert r_nofile.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file kosong -> 400 EMPTY_FILE
+    r_empty = client.post(
+        "/api/audio/extract",
+        files=[("file", ("kosong.mp4", b"", "video/mp4"))],
+        data={"format": "mp3"},
+    )
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file terlalu besar -> 413 FILE_TOO_LARGE
+    r_large = client.post(
+        "/api/audio/extract",
+        files=[("file", ("besar.mp4", b"0" * (AUDIO_EXTRACT_MAX_BYTES + 10), "video/mp4"))],
+        data={"format": "mp3"},
+    )
+    assert r_large.status_code == 413
+    assert r_large.json()["error"]["code"] == "FILE_TOO_LARGE"
+
+    # POST format video salah -> 400 UNSUPPORTED_FORMAT
+    r_bad_video = client.post(
+        "/api/audio/extract",
+        files=[("file", ("bukan_video.txt", b"bukan berkas video", "text/plain"))],
+        data={"format": "mp3"},
+    )
+    assert r_bad_video.status_code == 400
+    assert r_bad_video.json()["error"]["code"] == "UNSUPPORTED_FORMAT"
+
+    # POST format tujuan tidak dikenal -> 400 UNSUPPORTED_OUTPUT
+    mp4_dummy = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32
+    r_bad_fmt = client.post(
+        "/api/audio/extract",
+        files=[("file", ("sample.mp4", mp4_dummy, "video/mp4"))],
+        data={"format": "ngawur"},
+    )
+    assert r_bad_fmt.status_code == 400
+    assert r_bad_fmt.json()["error"]["code"] == "UNSUPPORTED_OUTPUT"
+
+    # Uji ekstraksi audio nyata bila ffmpeg tersedia
+    import shutil
+    if shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None:
+        video_data = make_test_video(duration=3, format_name="mp4", with_audio=True)
+        if video_data:
+            r_ok = client.post(
+                "/api/audio/extract",
+                files=[("file", ("sample.mp4", video_data, "video/mp4"))],
+                data={"format": "mp3"},
+            )
+            assert r_ok.status_code == 200
+            assert r_ok.headers["Cache-Control"] == "no-store"
+            assert "suara.mp3" in r_ok.headers["Content-Disposition"]
+            assert float(r_ok.headers["X-Audio-Seconds"]) > 0
+            assert int(r_ok.headers["X-Output-Bytes"]) > 0
+            assert r_ok.headers["X-Output-Format"] == "mp3"
+            assert int(r_ok.headers["X-Processing-Ms"]) >= 0
+            assert len(r_ok.content) > 0
+
+    # Regresi endpoint lain
+    assert client.get("/api/video/trim/limits").status_code == 200
+    assert client.get("/api/pdf/merge/limits").status_code == 200
+    assert client.get("/health").status_code == 200
 
 
 # --- Runner mandiri ---------------------------------------------------------

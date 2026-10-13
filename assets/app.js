@@ -31,8 +31,8 @@
         { name: 'Image Converter', desc: 'Konversi format gambar (PNG, JPG, WebP, SVG) di server.', status: 'available', action: 'image-converter' },
         { name: 'Image Editor', desc: 'Potong, putar, dan balik gambar lalu unduh hasilnya.', status: 'available', action: 'image-editor' },
         { name: 'Video Trimmer', desc: 'Ambil bagian tertentu dari sebuah klip video, lalu unduh hasilnya.', status: 'available', href: '/potong-video/' },
-        { name: 'Video Reverser', desc: 'Balik urutan frame video secara lokal.', status: 'soon' },
-        { name: 'Extract Audio', desc: 'Ambil trek audio dari file video di browser.', status: 'soon' }
+        { name: 'Ambil audio dari video', desc: 'Simpan suara dari sebuah video menjadi berkas MP3, M4A, atau WAV.', status: 'available', href: '/ekstrak-audio/' },
+        { name: 'Video Reverser', desc: 'Balik urutan frame video secara lokal.', status: 'soon' }
       ]
     },
     {

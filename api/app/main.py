@@ -470,6 +470,17 @@ from .video_trim import (
     limits_payload as video_trim_limits_payload,
     potong as potong_video,
 )
+from .audio_extract import (
+    ALLOWED_FORMATS as AUDIO_ALLOWED_FORMATS,
+    MAX_BYTES as AUDIO_MAX_BYTES,
+    MAX_DURATION_SECONDS as AUDIO_MAX_DURATION_SECONDS,
+    MAX_OUTPUT_BYTES as AUDIO_MAX_OUTPUT_BYTES,
+    OUTPUTS as AUDIO_OUTPUTS,
+    AudioExtractError,
+    ExtractResult,
+    ambil_audio,
+    limits_payload as audio_limits_payload,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -529,6 +540,7 @@ if _cors_origins:
             "X-First-Page",
             "X-Last-Page",
             "X-Clip-Seconds",
+            "X-Audio-Seconds",
             "X-Output-Bytes",
             "X-Mode",
         ],
@@ -540,8 +552,22 @@ _ocr_semaphore = threading.Semaphore(1)
 # Batasi satu proses pemotongan video sekaligus di tingkat modul
 _video_trim_semaphore = threading.Semaphore(1)
 
+# Batasi satu proses ekstraksi audio sekaligus di tingkat modul
+_audio_extract_semaphore = threading.Semaphore(1)
+
 
 # --- Handler error -----------------------------------------------------------
+@app.exception_handler(AudioExtractError)
+async def handle_audio_extract_error(request: Request, exc: AudioExtractError) -> JSONResponse:
+    """Error ekstraksi audio yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("ambil audio ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(VideoTrimError)
 async def handle_video_trim_error(request: Request, exc: VideoTrimError) -> JSONResponse:
     """Error pemotongan video yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -3611,6 +3637,68 @@ async def video_trim_endpoint(
     return Response(content=result.data, media_type=result.mime_type, headers=headers)
 
 
+@app.get("/api/audio/extract/limits")
+async def audio_extract_limits() -> JSONResponse:
+    """Batas yang berlaku untuk ekstraksi audio dari video."""
+    return JSONResponse(content=audio_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/audio/extract")
+async def audio_extract_endpoint(
+    request: Request,
+    file: UploadFile | None = File(None),
+    format: str = Form(""),
+) -> Response:
+    """Ambil audio dari video memakai ffmpeg."""
+    started = time.perf_counter()
+
+    if file is None:
+        raise AudioExtractError("EMPTY_FILE", "Berkas video belum dipilih.", 400)
+
+    data = await file.read()
+    if not data or len(data) == 0:
+        raise AudioExtractError("EMPTY_FILE", "Berkas video kosong.", 400)
+
+    if len(data) > AUDIO_MAX_BYTES:
+        raise AudioExtractError(
+            "FILE_TOO_LARGE",
+            f"Ukuran berkas melebihi batas {AUDIO_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+    if not _audio_extract_semaphore.acquire(blocking=False):
+        raise AudioExtractError("BUSY", "Server sedang memproses audio lain. Coba lagi sebentar lagi.", 503)
+
+    try:
+        result = await run_in_threadpool(
+            ambil_audio,
+            data,
+            file.filename or "",
+            format,
+        )
+    finally:
+        _audio_extract_semaphore.release()
+
+    durasi_proses_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "ambil audio selesai: format=%s detik=%.1f byte=%d durasi=%.0fms",
+        result.format_id,
+        result.audio_seconds,
+        len(result.data),
+        durasi_proses_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "X-Audio-Seconds": f"{result.audio_seconds:.1f}",
+        "X-Output-Bytes": str(len(result.data)),
+        "X-Output-Format": result.format_id,
+        "X-Processing-Ms": str(int(durasi_proses_ms)),
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -3646,6 +3734,7 @@ async def root() -> dict:
             "listrik",
             "pomodoro",
             "video-trim",
+            "audio-extract",
         ],
     }
 
