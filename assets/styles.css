@@ -6904,6 +6904,290 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: 1.5rem;
 }
 
+/* --- Balik Video (Video Reverser) --- */
+.bkv__page {
+  padding-bottom: 2rem;
+}
+
+.bkv__back {
+  margin: 0 0 .75rem;
+}
+
+.bkv__back-link {
+  color: var(--brand-text);
+  text-decoration: none;
+  font-size: .88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  min-height: 44px;
+}
+
+.bkv__back-link:hover {
+  text-decoration: underline;
+}
+
+.bkv__app {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.bkv__pesan-galat {
+  background: rgba(200, 56, 82, 0.12);
+  border: 1px solid var(--pink-dark);
+  color: #ff9cb2;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+.bkv__drop {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-card);
+  padding: 2rem 1.25rem;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface);
+  transition: border-color var(--transition), background var(--transition);
+  outline: none;
+}
+
+.bkv__drop:hover,
+.bkv__drop:focus-visible,
+.bkv__drop--active {
+  border-color: var(--brand);
+  background: var(--surface-2);
+}
+
+.bkv__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.bkv__drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .75rem;
+}
+
+.bkv__drop-icon {
+  width: 44px;
+  height: 44px;
+  color: var(--brand-text);
+}
+
+.bkv__drop-text {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.bkv__pilih-btn {
+  min-height: 44px;
+  min-width: 120px;
+}
+
+.bkv__drop-sub {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.bkv__sumber-wrap {
+  margin-top: 1.25rem;
+  text-align: center;
+}
+
+.bkv__video-sumber,
+.bkv__video-hasil {
+  width: 100%;
+  max-height: 380px;
+  background: #000;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.bkv__form {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.bkv__opsi-section {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.bkv__label {
+  font-size: .88rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.bkv__grid-pilihan {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+@media (max-width: 640px) {
+  .bkv__grid-pilihan {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bkv__opsi-label {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+  padding: .85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  min-height: 44px;
+  min-width: 0;
+}
+
+.bkv__opsi-label:hover {
+  background: var(--surface-2);
+}
+
+.bkv__opsi-label input[type="radio"] {
+  margin-top: .2rem;
+  accent-color: var(--brand);
+  min-width: 18px;
+  min-height: 18px;
+}
+
+.bkv__opsi-konten {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+
+.bkv__opsi-judul {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bkv__opsi-desc {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.bkv__tombol-aksi {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.bkv__btn-proses,
+.bkv__btn-reset {
+  min-height: 44px;
+  min-width: 120px;
+}
+
+.bkv__status {
+  margin: 0;
+}
+
+.bkv__batas {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+}
+
+.bkv__hasil {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.bkv__hasil-judul {
+  margin: 0 0 .85rem;
+  font-size: 1.05rem;
+}
+
+.bkv__hasil-video-wrap {
+  margin-bottom: .85rem;
+  text-align: center;
+}
+
+.bkv__info {
+  font-size: .84rem;
+  color: var(--text);
+  background: rgba(117, 83, 255, 0.08);
+  border: 1px solid var(--brand);
+  padding: .65rem .85rem;
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+  word-break: break-word;
+}
+
+.bkv__hasil-aksi {
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+
+.bkv__btn-unduh {
+  min-height: 44px;
+  min-width: 120px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.bkv__btn-tutup {
+  min-height: 44px;
+  min-width: 100px;
+}
+
+.bkv__privasi-tag {
+  margin: 1.25rem 0 0;
+  font-size: .78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.bkv__notice-title {
+  font-size: 1.05rem;
+  margin-top: 0;
+}
+
+.bkv__notice-list {
+  margin: .5rem 0 0 1.25rem;
+  padding: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.bkv__noscript {
+  margin-top: 1.5rem;
+}
+
 @media (pointer: coarse) {
   #ptv-app input,
   #ptv-app button,
@@ -6913,7 +7197,12 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #eka-app button,
   #eka-app label,
   #eka-unduh,
-  #eka-mulai-lagi {
+  #eka-mulai-lagi,
+  #bkv-app input,
+  #bkv-app button,
+  #bkv-app label,
+  #bkv-unduh,
+  #bkv-tutup {
     min-height: 44px;
   }
 }

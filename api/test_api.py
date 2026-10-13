@@ -660,6 +660,19 @@ from app.audio_extract import (
     limits_payload as audio_extract_limits_payload,
     probe as audio_probe,
 )
+from app.video_reverse import (
+    ALLOWED_FORMATS as VIDEO_REVERSE_ALLOWED_FORMATS,
+    KECEPATAN as VIDEO_REVERSE_KECEPATAN,
+    MAX_BYTES as VIDEO_REVERSE_MAX_BYTES,
+    MAX_DURATION_SECONDS as VIDEO_REVERSE_MAX_DURATION_SECONDS,
+    MAX_OUTPUT_BYTES as VIDEO_REVERSE_MAX_OUTPUT_BYTES,
+    SUARA as VIDEO_REVERSE_SUARA,
+    ReverseError,
+    ReverseResult,
+    balik_video,
+    limits_payload as video_reverse_limits_payload,
+    probe as video_reverse_probe,
+)
 
 
 SKIPPED: list[str] = []
@@ -9731,6 +9744,272 @@ def test_http_audio_extract_endpoint_dan_regresi() -> None:
     # Regresi endpoint lain
     assert client.get("/api/video/trim/limits").status_code == 200
     assert client.get("/api/pdf/merge/limits").status_code == 200
+    assert client.get("/health").status_code == 200
+
+
+def test_video_reverse_limits_payload() -> None:
+    """Uji payload batas pembalik video (kunci, batas 25 MB & 60 detik, opsi kecepatan dan suara)."""
+    payload = video_reverse_limits_payload()
+    assert payload["max_bytes"] == 25 * 1024 * 1024
+    assert payload["max_duration_seconds"] == 60
+    assert payload["max_output_bytes"] == 100 * 1024 * 1024
+    assert set(payload["allowed_formats"]) == {"MP4", "MOV", "WEBM", "MKV"}
+    assert len(payload["kecepatan"]) == 3
+    kecepatan_ids = [opt["id"] for opt in payload["kecepatan"]]
+    assert kecepatan_ids == ["0.5", "1", "2"]
+    assert len(payload["suara"]) == 2
+    suara_ids = [opt["id"] for opt in payload["suara"]]
+    assert suara_ids == ["ikut", "bisukan"]
+    assert "catatan" in payload
+    assert len(payload["catatan"]) > 0
+
+
+def test_video_reverse_logika_galat() -> None:
+    """Uji jalur penolakan galat untuk video kosong, terlalu besar, format salah, opsi salah, dan durasi melebihi batas."""
+    # Data kosong / None
+    try:
+        balik_video(b"", "video.mp4")
+        assert False, "Harusnya melempar EMPTY_FILE"
+    except ReverseError as exc:
+        assert exc.code == "EMPTY_FILE"
+        assert exc.status_code == 400
+
+    # Data melebihi MAX_BYTES
+    try:
+        balik_video(b"0" * (VIDEO_REVERSE_MAX_BYTES + 10), "video.mp4")
+        assert False, "Harusnya melempar FILE_TOO_LARGE"
+    except ReverseError as exc:
+        assert exc.code == "FILE_TOO_LARGE"
+        assert exc.status_code == 413
+
+    # Berkas teks (bukan video)
+    try:
+        balik_video(b"Ini teks biasa bukan video", "video.mp4")
+        assert False, "Harusnya melempar UNSUPPORTED_FORMAT"
+    except ReverseError as exc:
+        assert exc.code == "UNSUPPORTED_FORMAT"
+        assert exc.status_code == 400
+
+    # Opsi kecepatan ngawur
+    try:
+        dummy_mp4 = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32
+        balik_video(dummy_mp4, "video.mp4", kecepatan="99")
+        assert False, "Harusnya melempar UNSUPPORTED_SPEED"
+    except ReverseError as exc:
+        assert exc.code == "UNSUPPORTED_SPEED"
+        assert exc.status_code == 400
+
+    # Opsi suara ngawur
+    try:
+        dummy_mp4 = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32
+        balik_video(dummy_mp4, "video.mp4", suara="ngawur")
+        assert False, "Harusnya melempar UNSUPPORTED_AUDIO_MODE"
+    except ReverseError as exc:
+        assert exc.code == "UNSUPPORTED_AUDIO_MODE"
+        assert exc.status_code == 400
+
+    # Durasi melebihi batas (diuji dengan monkeypatch konstanta MAX_DURATION_SECONDS = 1)
+    import app.video_reverse as vr_mod
+    original_max = vr_mod.MAX_DURATION_SECONDS
+    try:
+        vr_mod.MAX_DURATION_SECONDS = 1
+        video_data = make_test_video(duration=3, format_name="mp4", with_audio=False)
+        if video_data:
+            try:
+                balik_video(video_data, "video.mp4")
+                assert False, "Harusnya melempar VIDEO_TOO_LONG"
+            except ReverseError as exc:
+                assert exc.code == "VIDEO_TOO_LONG"
+                assert exc.status_code == 400
+    finally:
+        vr_mod.MAX_DURATION_SECONDS = original_max
+
+
+def test_video_reverse_nyata_sukses_dan_frame() -> None:
+    """Uji sukses nyata balik video 3 detik mp4 bersuara, cek magic bytes, durasi, dan frame terbalik."""
+    import shutil
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        try:
+            import pytest
+            pytest.skip("ffmpeg / ffprobe tidak ditemukan di PATH")
+        except ImportError:
+            SKIPPED.append("uji balik video dilewati: ffmpeg/ffprobe tidak ada di PATH")
+            return
+
+    video_data = make_test_video(duration=3, format_name="mp4", with_audio=True)
+    if not video_data:
+        SKIPPED.append("pembuatan video uji gagal")
+        return
+
+    res = balik_video(video_data, "sample.mp4", suara="ikut", kecepatan="1")
+    assert res.output_name == "video-dibalik.mp4"
+    assert res.mime_type == "video/mp4"
+    assert res.audio_mode == "ikut"
+    assert res.speed == "1"
+    assert len(res.data) >= 8
+    # Magic bytes mp4: 'ftyp' pada offset 4
+    assert res.data[4:8] == b"ftyp", "Magic bytes MP4 (ftyp) tidak sesuai"
+    assert 2.5 <= res.result_seconds <= 3.5
+
+    # Verifikasi isi video terbalik via frame perbandingan
+    import subprocess
+    import tempfile
+    def extract_frame_bmp(data: bytes, frame_idx: int) -> bytes:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", dir="/tmp") as tf:
+            tf.write(data)
+            p = tf.name
+        try:
+            cmd = [
+                "ffmpeg", "-nostdin", "-loglevel", "error",
+                "-i", p,
+                "-vf", f"select=eq(n\\,{frame_idx})",
+                "-frames:v", "1",
+                "-f", "image2",
+                "-c:v", "bmp",
+                "-",
+            ]
+            return subprocess.run(cmd, capture_output=True, check=True).stdout
+        finally:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    # Ambil frame pertama dan terakhir (30 frame @ 10fps: index 0 dan 29)
+    from PIL import Image, ImageChops
+    bmp_src_0 = extract_frame_bmp(video_data, 0)
+    bmp_src_last = extract_frame_bmp(video_data, 29)
+    bmp_rev_0 = extract_frame_bmp(res.data, 0)
+    bmp_rev_last = extract_frame_bmp(res.data, 29)
+
+    im_src_0 = Image.open(io.BytesIO(bmp_src_0))
+    im_src_last = Image.open(io.BytesIO(bmp_src_last))
+    im_rev_0 = Image.open(io.BytesIO(bmp_rev_0))
+    im_rev_last = Image.open(io.BytesIO(bmp_rev_last))
+
+    def diff_score(i1: Image.Image, i2: Image.Image) -> float:
+        d = ImageChops.difference(i1, i2).convert("L")
+        raw = d.tobytes()
+        return sum(raw) / max(len(raw), 1)
+
+    # Frame pertama video hasil harus mirip frame terakhir sumber
+    diff_rev0_srclast = diff_score(im_rev_0, im_src_last)
+    # Frame pertama video hasil harus berbeda jauh dari frame pertama sumber
+    diff_rev0_src0 = diff_score(im_rev_0, im_src_0)
+
+    assert diff_rev0_srclast < 5.0, f"Frame pertama hasil harus mirip frame terakhir sumber (diff={diff_rev0_srclast})"
+    assert diff_rev0_src0 > 15.0, f"Frame pertama hasil harus beda dari frame pertama sumber (diff={diff_rev0_src0})"
+
+
+def test_video_reverse_kecepatan() -> None:
+    """Uji balik video dengan kecepatan 2x, mode tanpa suara, dan video tanpa audio."""
+    import shutil
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        try:
+            import pytest
+            pytest.skip("ffmpeg / ffprobe tidak ditemukan di PATH")
+        except ImportError:
+            SKIPPED.append("uji kecepatan balik video dilewati: ffmpeg/ffprobe tidak ada di PATH")
+            return
+
+    video_data = make_test_video(duration=3, format_name="mp4", with_audio=True)
+    if not video_data:
+        SKIPPED.append("pembuatan video uji gagal")
+        return
+
+    # 1. Kecepatan 2x -> result_seconds kira-kira setengah durasi sumber
+    res_2x = balik_video(video_data, "sample.mp4", suara="ikut", kecepatan="2")
+    assert res_2x.speed == "2"
+    assert 1.2 <= res_2x.result_seconds <= 2.3
+
+    # 2. Mode bisukan -> tanpa suara
+    res_mute = balik_video(video_data, "sample.mp4", suara="bisukan", kecepatan="1")
+    assert res_mute.audio_mode == "tanpa suara"
+
+    # 3. Video sumber tanpa track audio -> otomatis tanpa suara (tidak ada suara)
+    video_tanpa_audio = make_test_video(duration=2, format_name="mp4", with_audio=False)
+    if video_tanpa_audio:
+        res_no_audio = balik_video(video_tanpa_audio, "silent.mp4", suara="ikut", kecepatan="1")
+        assert res_no_audio.audio_mode == "tidak ada suara"
+
+
+def test_http_video_reverse_endpoint_dan_regresi() -> None:
+    """Uji HTTP endpoint Balik Video via TestClient dan verifikasi regresi."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root memuat video-reverse
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "video-reverse" in root_data["tools"]
+
+    # Limits endpoint
+    limits_resp = client.get("/api/video/reverse/limits")
+    assert limits_resp.status_code == 200
+    lim_data = limits_resp.json()
+    assert lim_data["max_bytes"] == VIDEO_REVERSE_MAX_BYTES
+    assert lim_data["max_duration_seconds"] == VIDEO_REVERSE_MAX_DURATION_SECONDS
+    assert len(lim_data["kecepatan"]) == 3
+    assert len(lim_data["suara"]) == 2
+
+    # POST tanpa file -> 400 EMPTY_FILE
+    r_nofile = client.post("/api/video/reverse", data={"kecepatan": "1", "suara": "ikut"})
+    assert r_nofile.status_code == 400
+    assert r_nofile.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file kosong -> 400 EMPTY_FILE
+    r_empty = client.post(
+        "/api/video/reverse",
+        files=[("file", ("kosong.mp4", b"", "video/mp4"))],
+        data={"kecepatan": "1", "suara": "ikut"},
+    )
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file terlalu besar -> 413 FILE_TOO_LARGE
+    r_large = client.post(
+        "/api/video/reverse",
+        files=[("file", ("besar.mp4", b"0" * (VIDEO_REVERSE_MAX_BYTES + 10), "video/mp4"))],
+        data={"kecepatan": "1", "suara": "ikut"},
+    )
+    assert r_large.status_code == 413
+    assert r_large.json()["error"]["code"] == "FILE_TOO_LARGE"
+
+    # POST format video salah -> 400 UNSUPPORTED_FORMAT
+    r_bad = client.post(
+        "/api/video/reverse",
+        files=[("file", ("catatan.txt", b"bukan video", "text/plain"))],
+        data={"kecepatan": "1", "suara": "ikut"},
+    )
+    assert r_bad.status_code == 400
+    assert r_bad.json()["error"]["code"] == "UNSUPPORTED_FORMAT"
+
+    # Uji balik video nyata via endpoint HTTP bila ffmpeg tersedia
+    import shutil
+    if shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None:
+        video_data = make_test_video(duration=3, format_name="mp4", with_audio=True)
+        if video_data:
+            r_ok = client.post(
+                "/api/video/reverse",
+                files=[("file", ("sample.mp4", video_data, "video/mp4"))],
+                data={"kecepatan": "1", "suara": "ikut"},
+            )
+            assert r_ok.status_code == 200
+            assert r_ok.headers["Cache-Control"] == "no-store"
+            assert "video-dibalik.mp4" in r_ok.headers["Content-Disposition"]
+            assert float(r_ok.headers["X-Source-Seconds"]) > 0
+            assert float(r_ok.headers["X-Result-Seconds"]) > 0
+            assert r_ok.headers["X-Audio-Mode"] == "ikut"
+            assert r_ok.headers["X-Speed"] == "1"
+            assert int(r_ok.headers["X-Processing-Ms"]) >= 0
+            assert len(r_ok.content) > 0
+
+    # Regresi endpoint lain
+    assert client.get("/api/audio/extract/limits").status_code == 200
+    assert client.get("/api/video/trim/limits").status_code == 200
     assert client.get("/health").status_code == 200
 
 

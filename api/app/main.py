@@ -481,6 +481,12 @@ from .audio_extract import (
     ambil_audio,
     limits_payload as audio_limits_payload,
 )
+from .video_reverse import (
+    MAX_BYTES as VIDEO_REVERSE_MAX_BYTES,
+    ReverseError,
+    balik_video,
+    limits_payload as video_reverse_limits_payload,
+)
 
 
 SERVICE_NAME = "omnitools-api"
@@ -555,8 +561,22 @@ _video_trim_semaphore = threading.Semaphore(1)
 # Batasi satu proses ekstraksi audio sekaligus di tingkat modul
 _audio_extract_semaphore = threading.Semaphore(1)
 
+# Batasi satu proses pembalikan video sekaligus di tingkat modul
+_video_reverse_semaphore = threading.Semaphore(1)
+
 
 # --- Handler error -----------------------------------------------------------
+@app.exception_handler(ReverseError)
+async def handle_video_reverse_error(request: Request, exc: ReverseError) -> JSONResponse:
+    """Error pembalikan video yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("balik video ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(AudioExtractError)
 async def handle_audio_extract_error(request: Request, exc: AudioExtractError) -> JSONResponse:
     """Error ekstraksi audio yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -3699,6 +3719,72 @@ async def audio_extract_endpoint(
     return Response(content=result.data, media_type=result.mime_type, headers=headers)
 
 
+@app.get("/api/video/reverse/limits")
+async def video_reverse_limits() -> JSONResponse:
+    """Batas yang berlaku untuk pembalikan video."""
+    return JSONResponse(content=video_reverse_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/video/reverse")
+async def video_reverse_endpoint(
+    request: Request,
+    file: UploadFile | None = File(None),
+    suara: str = Form("ikut"),
+    kecepatan: str = Form("1"),
+) -> Response:
+    """Putar video mundur memakai ffmpeg."""
+    started = time.perf_counter()
+
+    if file is None:
+        raise ReverseError("EMPTY_FILE", "Berkas video belum dipilih.", 400)
+
+    data = await file.read()
+    if not data or len(data) == 0:
+        raise ReverseError("EMPTY_FILE", "Berkas video kosong.", 400)
+
+    if len(data) > VIDEO_REVERSE_MAX_BYTES:
+        raise ReverseError(
+            "FILE_TOO_LARGE",
+            f"Ukuran berkas melebihi batas {VIDEO_REVERSE_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+    if not _video_reverse_semaphore.acquire(blocking=False):
+        raise ReverseError("BUSY", "Server sedang membalik video lain. Coba lagi sebentar lagi.", 503)
+
+    try:
+        result = await run_in_threadpool(
+            balik_video,
+            data,
+            file.filename or "",
+            suara,
+            kecepatan,
+        )
+    finally:
+        _video_reverse_semaphore.release()
+
+    durasi_proses_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "balik video selesai: kecepatan=%s suara=%s byte=%d detik=%.1f durasi=%.0fms",
+        result.speed,
+        result.audio_mode,
+        len(result.data),
+        result.result_seconds,
+        durasi_proses_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "X-Source-Seconds": f"{result.source_seconds:.1f}",
+        "X-Result-Seconds": f"{result.result_seconds:.1f}",
+        "X-Audio-Mode": result.audio_mode,
+        "X-Speed": result.speed,
+        "X-Processing-Ms": str(int(durasi_proses_ms)),
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
 @app.get("/")
 async def root() -> dict:
     """Info singkat service (bukan halaman web)."""
@@ -3735,6 +3821,7 @@ async def root() -> dict:
             "pomodoro",
             "video-trim",
             "audio-extract",
+            "video-reverse",
         ],
     }
 
