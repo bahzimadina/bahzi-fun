@@ -224,6 +224,25 @@ from .text_formatter import (
     TextFormatterError,
     format_text,
 )
+from .text_summary import (
+    FORMAT_PILIHAN as TS_FORMAT_PILIHAN,
+    INVALID_FORMAT as TS_INVALID_FORMAT,
+    INVALID_RATIO as TS_INVALID_RATIO,
+    INVALID_REQUEST as TS_INVALID_REQUEST,
+    MAX_BYTES as TS_MAX_BYTES,
+    MAX_CHARS as TS_MAX_CHARS,
+    MIN_KALIMAT as TS_MIN_KALIMAT,
+    NO_TEXT as TS_NO_TEXT,
+    NOT_TEXT as TS_NOT_TEXT,
+    RASIO_DEFAULT as TS_RASIO_DEFAULT,
+    RASIO_MAX as TS_RASIO_MAX,
+    RASIO_MIN as TS_RASIO_MIN,
+    TOO_LONG as TS_TOO_LONG,
+    TOO_SHORT as TS_TOO_SHORT,
+    TextSummaryError,
+    summarize_text,
+    text_summary_limits_payload,
+)
 from .unit_convert import (
     CATEGORIES as UC_CATEGORIES,
     INVALID_REQUEST as UC_INVALID_REQUEST,
@@ -729,6 +748,17 @@ async def handle_text_formatter_error(request: Request, exc: TextFormatterError)
     )
 
 
+@app.exception_handler(TextSummaryError)
+async def handle_text_summary_error(request: Request, exc: TextSummaryError) -> JSONResponse:
+    """Error ringkas teks yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("ringkas teks ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(UnitConvertError)
 async def handle_unit_convert_error(request: Request, exc: UnitConvertError) -> JSONResponse:
     """Error konversi satuan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -895,6 +925,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/list-shuffler"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/text-formatter"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
+    elif request.url.path.startswith("/api/text/summary"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/unit-convert"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
@@ -1328,6 +1360,23 @@ def _reject_oversized_text_formatter_content_length(request: Request) -> None:
             TF_TOO_LONG,
             "Ukuran permintaan melebihi batas 1 MB.",
             413,
+        )
+
+
+def _reject_oversized_text_summary_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas ringkas teks."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > TS_MAX_BYTES + 64 * 1024:
+        raise TextSummaryError(
+            TS_TOO_LONG,
+            "Ukuran permintaan melebihi batas 1 MB.",
+            400,
         )
 
 
@@ -2605,6 +2654,68 @@ async def text_formatter_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/text/summary/limits")
+async def text_summary_limits() -> JSONResponse:
+    """Batas operasional untuk Ringkas Teks."""
+    return JSONResponse(content=text_summary_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/text/summary")
+async def text_summary_endpoint(
+    request: Request,
+    text: str = Form(default=None),
+    rasio: str = Form(default=None),
+    format: str = Form(default=None),
+):
+    """Ringkas teks panjang secara ekstraktif di memori server."""
+    started = time.perf_counter()
+
+    _reject_oversized_text_summary_content_length(request)
+
+    form = await request.form()
+    if text is None:
+        if "text" in form:
+            val = form.get("text")
+            if isinstance(val, UploadFile):
+                raise TextSummaryError(TS_NOT_TEXT, "Field 'text' harus berupa teks string.", 400)
+            text = val
+        else:
+            raise TextSummaryError(
+                TS_INVALID_REQUEST,
+                "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'.",
+                400,
+            )
+    elif isinstance(text, UploadFile):
+        raise TextSummaryError(TS_NOT_TEXT, "Field 'text' harus berupa teks string.", 400)
+
+    if rasio is None and "rasio" in form:
+        rasio = form.get("rasio")
+    if format is None and "format" in form:
+        format = form.get("format")
+
+    result = await run_in_threadpool(
+        summarize_text,
+        text,
+        rasio,
+        format,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "ringkas teks selesai: kalimat_in=%d kalimat_out=%d durasi=%.0fms",
+        result["kalimat"]["masukan"],
+        result["kalimat"]["ringkasan"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/unit-convert/limits")
 async def unit_convert_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Konverter Satuan."""
@@ -3807,6 +3918,7 @@ async def root() -> dict:
             "remove-duplicates",
             "list-shuffler",
             "text-formatter",
+            "text-summary",
             "unit-convert",
             "percent-calc",
             "json",

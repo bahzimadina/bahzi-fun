@@ -333,6 +333,26 @@ from app.text_formatter import (  # noqa: E402
     parse_tab_width as parse_text_formatter_tab_width,
     validate_text as validate_text_formatter_text,
 )
+from app.text_summary import (  # noqa: E402
+    FORMAT_PILIHAN as TS_FORMAT_PILIHAN,
+    INVALID_FORMAT as TS_INVALID_FORMAT,
+    INVALID_RATIO as TS_INVALID_RATIO,
+    INVALID_REQUEST as TS_INVALID_REQUEST,
+    MAX_BYTES as TS_MAX_BYTES,
+    MAX_CHARS as TS_MAX_CHARS,
+    MIN_KALIMAT as TS_MIN_KALIMAT,
+    NO_TEXT as TS_NO_TEXT,
+    NOT_TEXT as TS_NOT_TEXT,
+    RASIO_DEFAULT as TS_RASIO_DEFAULT,
+    RASIO_MAX as TS_RASIO_MAX,
+    RASIO_MIN as TS_RASIO_MIN,
+    TOO_LONG as TS_TOO_LONG,
+    TOO_SHORT as TS_TOO_SHORT,
+    TextSummaryError,
+    extract_sentences,
+    summarize_text,
+    text_summary_limits_payload,
+)
 from app.unit_convert import (  # noqa: E402
     CATEGORIES as UC_CATEGORIES,
     INVALID_REQUEST as UC_INVALID_REQUEST,
@@ -9876,12 +9896,39 @@ def test_video_reverse_nyata_sukses_dan_frame() -> None:
                 except OSError:
                     pass
 
-    # Ambil frame pertama dan terakhir (30 frame @ 10fps: index 0 dan 29)
+    def count_frames(data: bytes) -> int:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", dir="/tmp") as tf:
+            tf.write(data)
+            p = tf.name
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-count_frames",
+                "-show_entries", "stream=nb_read_frames",
+                "-of", "csv=p=0",
+                p,
+            ]
+            out = subprocess.run(cmd, capture_output=True, check=True).stdout
+            return int(out.decode().strip())
+        finally:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    # Hitung jumlah frame nyata (jangan asumsikan 30 frame @ 10fps)
+    src_frame_count = count_frames(video_data)
+    rev_frame_count = count_frames(res.data)
+    assert src_frame_count >= 2, f"Video sumber harus punya minimal 2 frame (terbaca={src_frame_count})"
+    assert rev_frame_count >= 2, f"Video hasil harus punya minimal 2 frame (terbaca={rev_frame_count})"
+
     from PIL import Image, ImageChops
     bmp_src_0 = extract_frame_bmp(video_data, 0)
-    bmp_src_last = extract_frame_bmp(video_data, 29)
+    bmp_src_last = extract_frame_bmp(video_data, src_frame_count - 1)
     bmp_rev_0 = extract_frame_bmp(res.data, 0)
-    bmp_rev_last = extract_frame_bmp(res.data, 29)
+    bmp_rev_last = extract_frame_bmp(res.data, rev_frame_count - 1)
 
     im_src_0 = Image.open(io.BytesIO(bmp_src_0))
     im_src_last = Image.open(io.BytesIO(bmp_src_last))
@@ -9900,6 +9947,10 @@ def test_video_reverse_nyata_sukses_dan_frame() -> None:
 
     assert diff_rev0_srclast < 5.0, f"Frame pertama hasil harus mirip frame terakhir sumber (diff={diff_rev0_srclast})"
     assert diff_rev0_src0 > 15.0, f"Frame pertama hasil harus beda dari frame pertama sumber (diff={diff_rev0_src0})"
+
+    # Frame terakhir video hasil harus mirip frame pertama sumber
+    diff_revlast_src0 = diff_score(im_rev_last, im_src_0)
+    assert diff_revlast_src0 < 5.0, f"Frame terakhir hasil harus mirip frame pertama sumber (diff={diff_revlast_src0})"
 
 
 def test_video_reverse_kecepatan() -> None:
@@ -10011,6 +10062,351 @@ def test_http_video_reverse_endpoint_dan_regresi() -> None:
     assert client.get("/api/audio/extract/limits").status_code == 200
     assert client.get("/api/video/trim/limits").status_code == 200
     assert client.get("/health").status_code == 200
+
+
+SAMPLE_ARTICLE_22 = (
+    "Pemerintah Indonesia terus berkomitmen mempercepat digitalisasi layanan publik di seluruh pelosok negeri. "
+    "Program ini bertujuan untuk mempermudah akses warga terhadap dokumen kependudukan dan administrasi pemerintahan. "
+    "Kementerian Komunikasi dan Informatika secara bertahap membangun menara pemancar internet di berbagai desa tertinggal. "
+    "Akses konektivitas yang andal menjadi fondasi utama bagi kemajuan ekonomi dan pendidikan di daerah. "
+    "Dengan jaringan yang stabil, para pelajar dapat mengikuti kegiatan belajar mengajar secara daring tanpa hambatan. "
+    "Selain infrastruktur fisik, pemerintah juga giat menyelenggarakan lokakarya literasi digital untuk masyarakat luas. "
+    "Pelatihan ini mengedukasi warga agar cakap menyaring informasi hoaks dan menjaga keamanan data pribadi. "
+    "Pusat Data Nasional kini tengah dibangun untuk memusatkan integrasi server kementerian dan lembaga. "
+    "Pemusatan fasilitas teknologi ini dipercaya mampu menghemat anggaran belanja pengadaan peladen negara. "
+    "Keamanan informasi kedaulatan data diperkuat melalui standar enkripsi modern berstandar internasional. "
+    "Sektor kesehatan juga merasakan dampak positif berupa sistem rekam medis elektronik yang saling terhubung. "
+    "Pasien tidak lagi harus membawa berkas fisik ketika berpindah fasilitas layanan kesehatan. "
+    "Di bidang perpajakan, pelaporan surat pemberitahuan tahunan kini hampir seluruhnya berlangsung secara elektronik. "
+    "Inovasi digital ini mendongkrak kepatuhan wajib pajak dan mendongkrak penerimaan kas negara. "
+    "Pelaku usaha mikro kecil dan menengah turut didorong merambah ekosistem lokapasar digital. "
+    "Penjualan daring terbukti memperluas pangsa pasar produk lokal hingga ke mancanegara. "
+    "Pemerintah memberikan subsidi ongkos kirim dan pendampingan pemasaran visual bagi pedagang kecil. "
+    "Tantangan geografis negara kepulauan membutuhkan kolaborasi lintas kementerian yang sangat solid. "
+    "Pemerintah daerah diharapkan tanggap menindaklanjuti program pemerintah pusat demi pemerataan teknologi. "
+    "Penerapan tanda tangan elektronik pada dokumen resmi mempercepat birokrasi perizinan usaha. "
+    "Masa depan ekonomi digital Indonesia diprediksi akan menjadi salah satu motor ekonomi utama di Asia Tenggara. "
+    "Evaluasi rutin dan pemeliharaan infrastruktur secara berkelanjutan menjadi kunci keberhasilan jangka panjang."
+)
+
+
+# --- Uji unit logika murni Text Summary ---------------------------------------
+def test_text_summary_logika_murni() -> None:
+    """Uji logika murni fungsi summarize_text dan limits payload."""
+    limits = text_summary_limits_payload()
+    assert limits["max_chars"] == TS_MAX_CHARS
+    assert limits["max_bytes"] == TS_MAX_BYTES
+    assert limits["max_mb"] == 1
+    assert limits["min_kalimat"] == TS_MIN_KALIMAT
+    assert limits["rasio_min"] == TS_RASIO_MIN
+    assert limits["rasio_max"] == TS_RASIO_MAX
+    assert limits["rasio_default"] == TS_RASIO_DEFAULT
+    assert limits["format"] == ["paragraf", "poin"]
+
+    res = summarize_text(SAMPLE_ARTICLE_22, rasio=30, format="paragraf")
+    assert res["kalimat"]["masukan"] == 22
+    assert res["kalimat"]["ringkasan"] == 7
+    assert res["kalimat"]["ringkasan"] < res["kalimat"]["masukan"]
+    assert res["karakter"]["ringkasan"] < res["karakter"]["masukan"]
+    assert res["karakter"]["hemat_persen"] > 0
+    assert len(res["kata_kunci"]) > 0
+    assert res["waktu_baca_detik"] >= 1
+
+
+# --- Uji HTTP TestClient untuk Text Summary -----------------------------------
+def test_http_text_summary_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/text/summary/limits")
+    assert response.status_code == 200, response.text
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    body = response.json()
+    assert body["max_chars"] == TS_MAX_CHARS
+    assert body["max_bytes"] == TS_MAX_BYTES
+    assert body["max_mb"] == 1
+    assert body["min_kalimat"] == TS_MIN_KALIMAT
+    assert body["rasio_min"] == TS_RASIO_MIN
+    assert body["rasio_max"] == TS_RASIO_MAX
+    assert body["rasio_default"] == TS_RASIO_DEFAULT
+    assert body["format"] == ["paragraf", "poin"]
+
+
+def test_http_text_summary_sukses_artikel_20_kalimat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/text/summary",
+        data={
+            "text": SAMPLE_ARTICLE_22,
+            "rasio": "30",
+            "format": "paragraf",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    body = response.json()
+
+    for key in ("ringkasan", "format", "rasio", "kalimat", "karakter", "kata", "waktu_baca_detik", "kata_kunci"):
+        assert key in body, f"Kunci {key} wajib ada di respons"
+
+    assert len(body["ringkasan"]) < len(SAMPLE_ARTICLE_22)
+    assert body["kalimat"]["ringkasan"] < body["kalimat"]["masukan"]
+    assert body["kalimat"]["masukan"] >= 20
+
+    for s in body["ringkasan"].split("\n\n"):
+        for sent in s.split(". "):
+            cleaned = sent.strip()
+            if cleaned and not cleaned.endswith("."):
+                cleaned += "."
+            if cleaned:
+                assert cleaned in SAMPLE_ARTICLE_22, f"Kalimat ringkasan '{cleaned}' harus ada di teks asli"
+
+    assert body["karakter"]["masukan"] == len(SAMPLE_ARTICLE_22)
+    assert body["karakter"]["ringkasan"] == len(body["ringkasan"])
+    assert body["karakter"]["hemat_persen"] > 0
+    assert body["kata"]["masukan"] > 0
+    assert body["kata"]["ringkasan"] > 0
+    assert body["waktu_baca_detik"] >= 1
+    assert isinstance(body["kata_kunci"], list)
+
+
+def test_http_text_summary_format_poin() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/text/summary",
+        data={
+            "text": SAMPLE_ARTICLE_22,
+            "rasio": "30",
+            "format": "poin",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["format"] == "poin"
+    lines = [line.strip() for line in body["ringkasan"].split("\n") if line.strip()]
+    assert len(lines) > 0
+    for line in lines:
+        assert line.startswith("- "), f"Setiap baris hasil poin harus berawalan '- ', didapat: {line}"
+
+
+def test_http_text_summary_teks_kosong_dan_spasi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp_empty = client.post("/api/text/summary", data={"text": ""})
+    assert resp_empty.status_code == 400, resp_empty.text
+    assert resp_empty.json()["error"]["code"] == TS_NO_TEXT
+
+    resp_spaces = client.post("/api/text/summary", data={"text": "   \n\t   \n  "})
+    assert resp_spaces.status_code == 400, resp_spaces.text
+    assert resp_spaces.json()["error"]["code"] == TS_NO_TEXT
+
+
+def test_http_text_summary_kurang_dari_tiga_kalimat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp_two = client.post("/api/text/summary", data={"text": "Ini kalimat pertama. Ini kalimat kedua."})
+    assert resp_two.status_code == 400, resp_two.text
+    assert resp_two.json()["error"]["code"] == TS_TOO_SHORT
+
+    long_no_punct = "Kata " * 300
+    resp_no_punct = client.post("/api/text/summary", data={"text": long_no_punct})
+    assert resp_no_punct.status_code == 400, resp_no_punct.text
+    assert resp_no_punct.json()["error"]["code"] == TS_TOO_SHORT
+
+
+def test_http_text_summary_validasi_rasio() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp_5 = client.post("/api/text/summary", data={"text": SAMPLE_ARTICLE_22, "rasio": "5"})
+    assert resp_5.status_code == 400, resp_5.text
+    assert resp_5.json()["error"]["code"] == TS_INVALID_RATIO
+
+    resp_90 = client.post("/api/text/summary", data={"text": SAMPLE_ARTICLE_22, "rasio": "90"})
+    assert resp_90.status_code == 400, resp_90.text
+    assert resp_90.json()["error"]["code"] == TS_INVALID_RATIO
+
+    resp_abc = client.post("/api/text/summary", data={"text": SAMPLE_ARTICLE_22, "rasio": "abc"})
+    assert resp_abc.status_code == 400, resp_abc.text
+    assert resp_abc.json()["error"]["code"] == TS_INVALID_RATIO
+
+
+def test_http_text_summary_validasi_format() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp_tabel = client.post("/api/text/summary", data={"text": SAMPLE_ARTICLE_22, "format": "tabel"})
+    assert resp_tabel.status_code == 400, resp_tabel.text
+    assert resp_tabel.json()["error"]["code"] == TS_INVALID_FORMAT
+
+
+def test_http_text_summary_teks_terlalu_panjang() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    long_text = "x" * (TS_MAX_CHARS + 1)
+    resp_long = client.post("/api/text/summary", data={"text": long_text})
+    assert resp_long.status_code == 400, resp_long.text
+    assert resp_long.json()["error"]["code"] == TS_TOO_LONG
+
+
+def test_http_text_summary_tanpa_multipart_ditolak_400() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp_json = client.post("/api/text/summary", json={"text": SAMPLE_ARTICLE_22})
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == TS_INVALID_REQUEST
+
+
+def test_http_text_summary_rasio_80_lebih_pendek() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp_80 = client.post(
+        "/api/text/summary",
+        data={
+            "text": SAMPLE_ARTICLE_22,
+            "rasio": "80",
+            "format": "paragraf",
+        },
+    )
+    assert resp_80.status_code == 200, resp_80.text
+    body = resp_80.json()
+    assert body["kalimat"]["ringkasan"] < body["kalimat"]["masukan"]
+    assert len(body["ringkasan"]) < len(SAMPLE_ARTICLE_22)
+
+
+def test_http_text_summary_regresi_root_dan_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "text-summary" in root_resp.json()["tools"]
+    assert client.get("/health").status_code == 200
+
+
+def test_http_text_summary_threadpool_tidak_blokir_limits_dan_health() -> None:
+    """Perbaikan 1: summarize_text via run_in_threadpool tidak menahan event loop."""
+    import asyncio
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            blok = "Isi tambahan membahas anggaran, jaringan, sekolah, dan pasar warga. "
+            teks = ("Laporan mingguan tentang layanan publik dan keamanan data warga. " + blok) * 1
+            while len(teks) < 50_000:
+                teks += blok
+            teks = teks[:49_999].rstrip() + "."
+
+            async def _heavy():
+                t0 = time.perf_counter()
+                resp = await client.post("/api/text/summary", data={"text": teks, "rasio": "20", "format": "paragraf"})
+                assert resp.status_code == 200
+                return time.perf_counter() - t0
+
+            async def _fast_limits():
+                await asyncio.sleep(0.05)
+                t0 = time.perf_counter()
+                resp = await client.get("/api/text/summary/limits")
+                elapsed = time.perf_counter() - t0
+                assert resp.status_code == 200
+                assert elapsed < 1.0, f"limits lambat: {elapsed:.3f}s"
+                return elapsed
+
+            async def _fast_health():
+                await asyncio.sleep(0.08)
+                t0 = time.perf_counter()
+                resp = await client.get("/health")
+                elapsed = time.perf_counter() - t0
+                assert resp.status_code == 200
+                assert elapsed < 1.0, f"health lambat: {elapsed:.3f}s"
+                return elapsed
+
+            await asyncio.gather(_heavy(), _fast_limits(), _fast_health())
+
+    asyncio.run(_run())
+
+
+def test_text_summary_performa_200k_di_bawah_lima_detik() -> None:
+    """Perbaikan 2: teks 200.000 karakter selesai di bawah 5 detik."""
+    blok = "Isi tambahan membahas anggaran, jaringan, sekolah, dan pasar warga. "
+    teks = ("Laporan mingguan tentang layanan publik dan keamanan data warga. " + blok) * 1
+    while len(teks) < TS_MAX_CHARS:
+        teks += blok
+    teks = teks[: TS_MAX_CHARS - 1].rstrip() + "."
+
+    t0 = time.perf_counter()
+    res = summarize_text(teks, rasio=20, format="paragraf")
+    elapsed = time.perf_counter() - t0
+    assert res["kalimat"]["ringkasan"] > 0
+    assert elapsed < 5.0, f"Waktu ringkas 200k terlalu lama: {elapsed:.2f}s"
+
+
+def test_text_summary_pemecahan_kalimat_singkatan_dan_daftar() -> None:
+    """Perbaikan 3: singkatan tidak memotong kalimat, daftar bernomor & berbutir rapi."""
+    # 3a. Singkatan lazim Bahasa Indonesia
+    teks_singkatan = (
+        "Rapat dihadiri Bpk. Hasan dan Ibu Sari dari PT. Maju Jaya. "
+        "Notulen memakai format No. 5 tahun 2020. "
+        "Hadir juga perwakilan Dinas Pendidikan.\n\n"
+        "Semua peserta setuju dengan hasil rapat tersebut. "
+        "Dokumen dikirim ke alamat Jl. Merdeka 10. "
+        "Salinan diberikan kepada Dr. Sukma sebagai peninjau."
+    )
+    sents, _, _ = extract_sentences(teks_singkatan)
+    assert len(sents) == 6
+    assert sents[0].text == "Rapat dihadiri Bpk. Hasan dan Ibu Sari dari PT. Maju Jaya."
+    assert sents[5].text == "Salinan diberikan kepada Dr. Sukma sebagai peninjau."
+
+    # 3b. Daftar bernomor tidak menjadi kalimat terpisah
+    teks_bernomor = (
+        "1. Pendaftaran dibuka mulai pekan depan.\n"
+        "2. Peserta wajib membawa fotokopi kartu identitas.\n"
+        "3. Kuota setiap kelas dibatasi tiga puluh orang.\n"
+        "4. Pengumuman hasil seleksi dikirim lewat surel.\n"
+        "5. Biaya pendaftaran tidak dipungut."
+    )
+    sents_nomor, _, _ = extract_sentences(teks_bernomor)
+    assert len(sents_nomor) == 5
+    assert sents_nomor[0].text == "Pendaftaran dibuka mulai pekan depan."
+    assert sents_nomor[4].text == "Biaya pendaftaran tidak dipungut."
+
+    # 3c. Butir daftar tidak menghasilkan tanda pisah ganda pada format poin
+    teks_berbutir = (
+        "- Harga bahan baku naik sejak awal bulan.\n"
+        "- Permintaan pasar justru menurun tajam.\n"
+        "- Stok di gudang masih cukup dua pekan.\n"
+        "- Pedagang memilih menahan penjualan.\n"
+        "- Pemerintah menyiapkan operasi pasar."
+    )
+    res_poin = summarize_text(teks_berbutir, rasio=50, format="poin")
+    for baris in res_poin["ringkasan"].split("\n"):
+        assert baris.startswith("- ")
+        assert not baris.startswith("- - "), f"Tanda pisah ganda terdeteksi: {baris}"
+
+    # 3d. Paragraf beberapa baris tanpa titik terbaca per butir
+    teks_catatan_tanpa_titik = "1. Anggaran\n2. Jadwal\n3. Peserta"
+    sents_catatan, _, _ = extract_sentences(teks_catatan_tanpa_titik)
+    assert len(sents_catatan) == 3
+    assert [s.text for s in sents_catatan] == ["Anggaran", "Jadwal", "Peserta"]
 
 
 # --- Runner mandiri ---------------------------------------------------------
