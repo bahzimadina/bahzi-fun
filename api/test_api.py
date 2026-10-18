@@ -387,6 +387,25 @@ from app.percent_calc import (
     limits_payload as percent_calc_limits_payload_func,
     parse_number as parse_percent_number,
 )
+from app.zakat import (
+    BERAS_KG_PER_JIWA as ZK_BERAS_KG_PER_JIWA,
+    INVALID_REQUEST as ZK_INVALID_REQUEST,
+    MAX_ABS_VALUE as ZK_MAX_ABS_VALUE,
+    MAX_BODY_BYTES as ZK_MAX_BODY_BYTES,
+    MISSING_FIELD as ZK_MISSING_FIELD,
+    NEGATIVE_VALUE as ZK_NEGATIVE_VALUE,
+    NISAB_EMAS_GRAM as ZK_NISAB_EMAS_GRAM,
+    NOT_A_NUMBER as ZK_NOT_A_NUMBER,
+    OUT_OF_RANGE as ZK_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as ZK_PAYLOAD_TOO_LARGE,
+    PERSEN_ZAKAT as ZK_PERSEN_ZAKAT,
+    UNSUPPORTED_MODE as ZK_UNSUPPORTED_MODE,
+    ZakatError,
+    compute_zakat,
+    format_rupiah as format_zakat_rupiah,
+    limits_payload as zakat_limits_payload_func,
+    parse_decimal as parse_zakat_decimal,
+)
 from app.json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
     INDENTS as JT_INDENTS,
@@ -4177,6 +4196,408 @@ def test_http_percent_calc_root_endpoint_dan_regresi() -> None:
 
     wc_limits = client.get("/api/word-count/limits")
     assert wc_limits.status_code == 200
+
+
+# --- Uji Logika Kalkulator Zakat --------------------------------------------
+def test_zakat_limits_payload_logika() -> None:
+    limits = zakat_limits_payload_func()
+    assert isinstance(limits["modes"], list)
+    assert len(limits["modes"]) == 3
+    modes = [m["value"] for m in limits["modes"]]
+    assert "penghasilan" in modes
+    assert "mal" in modes
+    assert "fitrah" in modes
+    assert limits["nisab_emas_gram"] == 85
+    assert limits["persen_zakat"] == 2.5
+    assert limits["beras_kg_per_jiwa"] == 2.5
+    assert limits["max_abs_value"] == ZK_MAX_ABS_VALUE
+    assert limits["max_body_bytes"] == ZK_MAX_BODY_BYTES
+
+
+def test_zakat_penghasilan_di_atas_nisab() -> None:
+    # Penghasilan 10 juta, emas 1 juta -> nisab bulanan = 85 * 1.000.000 / 12 = 7.083.333
+    # 10 juta >= 7.083.333 -> wajib true, zakat = 10.000.000 * 2,5% = 250.000
+    res = compute_zakat({
+        "mode": "penghasilan",
+        "penghasilan": "10000000",
+        "bonus": 0,
+        "emas": "1000000",
+    })
+    assert res["mode"] == "penghasilan"
+    assert res["wajib"] is True
+    assert res["zakat"] == 250000
+    assert res["nisab"] == 7083333
+    assert res["satuan"] == "Rp"
+    assert len(res["ringkasan"]) >= 3
+    assert "catatan" in res
+
+
+def test_zakat_penghasilan_dengan_bonus() -> None:
+    # Pokok 6 juta, bonus 2 juta -> total 8 juta. Emas 1 juta (nisab 7.083.333)
+    # Total 8 juta >= 7.083.333 -> wajib true, zakat = 8.000.000 * 2,5% = 200.000
+    res = compute_zakat({
+        "mode": "penghasilan",
+        "penghasilan": 6000000,
+        "bonus": 2000000,
+        "emas": 1000000,
+    })
+    assert res["wajib"] is True
+    assert res["zakat"] == 200000
+    assert res["nisab"] == 7083333
+
+
+def test_zakat_penghasilan_di_bawah_nisab() -> None:
+    # Penghasilan 5 juta, emas 1 juta -> nisab 7.083.333
+    # 5 juta < 7.083.333 -> wajib false, zakat 0
+    res = compute_zakat({
+        "mode": "penghasilan",
+        "penghasilan": "5.000.000",
+        "bonus": "0",
+        "emas": "1.000.000",
+    })
+    assert res["mode"] == "penghasilan"
+    assert res["wajib"] is False
+    assert res["zakat"] == 0
+    assert res["nisab"] == 7083333
+
+
+def test_zakat_mal_haul_false() -> None:
+    # Harta 200 juta, emas 1 juta (nisab 85 juta). Haul False.
+    # Walau harta melebihi nisab, karena belum setahun -> wajib false, zakat 0
+    res = compute_zakat({
+        "mode": "mal",
+        "harta": "200.000.000",
+        "utang": "0",
+        "emas": "1.000.000",
+        "haul": False,
+    })
+    assert res["mode"] == "mal"
+    assert res["wajib"] is False
+    assert res["zakat"] == 0
+    assert res["nisab"] == 85000000
+
+
+def test_zakat_mal_dengan_utang_dan_haul_true() -> None:
+    # Harta 150 juta, utang 50 juta -> harta bersih = 100 juta.
+    # Emas 1 juta -> nisab 85 juta. Haul True.
+    # Bersih 100 juta >= 85 juta -> wajib true, zakat = 100 juta * 2,5% = 2.500.000
+    res = compute_zakat({
+        "mode": "mal",
+        "harta": 150000000,
+        "utang": 50000000,
+        "emas": 1000000,
+        "haul": True,
+    })
+    assert res["wajib"] is True
+    assert res["zakat"] == 2500000
+    assert res["nisab"] == 85000000
+
+
+def test_zakat_mal_bersih_di_bawah_nisab() -> None:
+    # Harta 100 juta, utang 30 juta -> bersih 70 juta. Emas 1 juta (nisab 85 juta).
+    # Bersih 70 juta < 85 juta -> wajib false, zakat 0
+    res = compute_zakat({
+        "mode": "mal",
+        "harta": "100000000",
+        "utang": "30000000",
+        "emas": "1000000",
+        "haul": True,
+    })
+    assert res["wajib"] is False
+    assert res["zakat"] == 0
+
+
+def test_zakat_fitrah_4_jiwa() -> None:
+    # 4 jiwa -> beras_kg = 4 * 2.5 = 10. Harga beras 15.000 -> uang = 150.000
+    res = compute_zakat({
+        "mode": "fitrah",
+        "jiwa": 4,
+        "harga_beras": 15000,
+    })
+    assert res["mode"] == "fitrah"
+    assert res["wajib"] is True
+    assert res["beras_kg"] == 10
+    assert res["uang"] == 150000
+    assert res["zakat"] == 150000
+    assert res["satuan"] == "Rp"
+    # Periksa ringkasan menyebut kebutuhan beras 2,5 kg per jiwa
+    ada_kebutuhan_beras = any("2,5 kg per jiwa" in r["label"] for r in res["ringkasan"])
+    assert ada_kebutuhan_beras, f"Ringkasan tidak menyebut 2,5 kg per jiwa: {res['ringkasan']}"
+
+
+def test_zakat_parsing_angka_variasi() -> None:
+    # Terima string dengan koma desimal atau titik desimal: "2,5" dan "2.5"
+    d_koma = parse_zakat_decimal("2,5", "tes")
+    assert d_koma == 2.5
+    d_titik = parse_zakat_decimal("2.5", "tes")
+    assert d_titik == 2.5
+
+    # Ribuan dengan titik ganda
+    d_ribuan = parse_zakat_decimal("1.000.000", "tes")
+    assert d_ribuan == 1000000
+
+    # Angka murni
+    d_int = parse_zakat_decimal(15000, "tes")
+    assert d_int == 15000
+
+
+def test_zakat_logika_galat() -> None:
+    # Field wajib kosong -> MISSING_FIELD
+    try:
+        compute_zakat({"mode": "penghasilan", "penghasilan": "", "emas": "1000000"})
+        assert False, "Harusnya MISSING_FIELD"
+    except ZakatError as exc:
+        assert exc.code == ZK_MISSING_FIELD
+
+    # Bukan angka -> NOT_A_NUMBER
+    try:
+        compute_zakat({"mode": "penghasilan", "penghasilan": "sepuluh_juta", "emas": "1000000"})
+        assert False, "Harusnya NOT_A_NUMBER"
+    except ZakatError as exc:
+        assert exc.code == ZK_NOT_A_NUMBER
+
+    # Angka negatif -> NEGATIVE_VALUE
+    try:
+        compute_zakat({"mode": "penghasilan", "penghasilan": "-5000000", "emas": "1000000"})
+        assert False, "Harusnya NEGATIVE_VALUE"
+    except ZakatError as exc:
+        assert exc.code == ZK_NEGATIVE_VALUE
+
+    # Emas 0 -> OUT_OF_RANGE
+    try:
+        compute_zakat({"mode": "penghasilan", "penghasilan": "5000000", "emas": 0})
+        assert False, "Harusnya OUT_OF_RANGE"
+    except ZakatError as exc:
+        assert exc.code == ZK_OUT_OF_RANGE
+
+    # Jiwa bukan bilangan bulat -> OUT_OF_RANGE
+    try:
+        compute_zakat({"mode": "fitrah", "jiwa": "2.5", "harga_beras": "15000"})
+        assert False, "Harusnya OUT_OF_RANGE"
+    except ZakatError as exc:
+        assert exc.code == ZK_OUT_OF_RANGE
+
+    # Jiwa di luar rentang 1..50 -> OUT_OF_RANGE
+    try:
+        compute_zakat({"mode": "fitrah", "jiwa": 55, "harga_beras": "15000"})
+        assert False, "Harusnya OUT_OF_RANGE"
+    except ZakatError as exc:
+        assert exc.code == ZK_OUT_OF_RANGE
+
+    # Mode tidak dikenal -> UNSUPPORTED_MODE
+    try:
+        compute_zakat({"mode": "mode_ngawur", "penghasilan": "5000000"})
+        assert False, "Harusnya UNSUPPORTED_MODE"
+    except ZakatError as exc:
+        assert exc.code == ZK_UNSUPPORTED_MODE
+
+    # Body bukan objek -> INVALID_REQUEST
+    try:
+        compute_zakat(["bukan", "objek"])
+        assert False, "Harusnya INVALID_REQUEST"
+    except ZakatError as exc:
+        assert exc.code == ZK_INVALID_REQUEST
+
+
+# --- Uji HTTP TestClient untuk Kalkulator Zakat ------------------------------
+def test_http_zakat_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/zakat/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body["modes"], list)
+    assert len(body["modes"]) == 3
+    mode_values = [m["value"] for m in body["modes"]]
+    assert "penghasilan" in mode_values
+    assert "mal" in mode_values
+    assert "fitrah" in mode_values
+    assert body["nisab_emas_gram"] == 85
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_zakat_penghasilan_di_atas_nisab() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "penghasilan", "penghasilan": "10000000", "bonus": "0", "emas": "1000000"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "penghasilan"
+    assert body["wajib"] is True
+    assert body["zakat"] == 250000
+    assert body["nisab"] == 7083333
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_zakat_penghasilan_di_bawah_nisab() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "penghasilan", "penghasilan": "5000000", "bonus": "0", "emas": "1000000"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["wajib"] is False
+    assert body["zakat"] == 0
+
+
+def test_http_zakat_mal_haul_false() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "mal", "harta": "200000000", "utang": "0", "emas": "1000000", "haul": False},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["wajib"] is False
+    assert body["zakat"] == 0
+
+
+def test_http_zakat_mal_dengan_utang() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # Harta 150 jt, utang 50 jt -> bersih 100 jt. Emas 1 jt (nisab 85 jt).
+    # zakat = 100 jt * 2,5% = 2.500.000
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "mal", "harta": "150000000", "utang": "50000000", "emas": "1000000", "haul": True},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["wajib"] is True
+    assert body["zakat"] == 2500000
+
+
+def test_http_zakat_fitrah_4_jiwa() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "fitrah", "jiwa": 4, "harga_beras": 15000},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["wajib"] is True
+    assert body["beras_kg"] == 10
+    assert body["uang"] == 150000
+    assert body["zakat"] == 150000
+
+
+def test_http_zakat_galat_field_wajib_kosong() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "penghasilan", "penghasilan": "", "emas": "1000000"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_MISSING_FIELD
+
+
+def test_http_zakat_galat_bukan_angka() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "penghasilan", "penghasilan": "bukan_angka", "emas": "1000000"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_NOT_A_NUMBER
+
+
+def test_http_zakat_galat_angka_negatif() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "penghasilan", "penghasilan": "-1000000", "emas": "1000000"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_NEGATIVE_VALUE
+
+
+def test_http_zakat_galat_emas_nol() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "penghasilan", "penghasilan": "5000000", "emas": 0},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_OUT_OF_RANGE
+
+
+def test_http_zakat_galat_mode_tidak_dikenal() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        json={"mode": "mode_ngawur", "penghasilan": "5000000", "emas": "1000000"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_UNSUPPORTED_MODE
+
+
+def test_http_zakat_galat_body_kosong() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/zakat",
+        content=b"",
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_INVALID_REQUEST
+
+
+def test_http_zakat_galat_body_terlalu_besar() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    big_payload = json.dumps({"mode": "penghasilan", "penghasilan": "1" * 9000, "emas": "1000000"}).encode("utf-8")
+    response = client.post(
+        "/api/zakat",
+        content=big_payload,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 413, response.text
+    body = response.json()
+    assert body["error"]["code"] == ZK_PAYLOAD_TOO_LARGE
+
+
+def test_http_zakat_root_tools_terdaftar() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "zakat" in root_data["tools"]
 
 
 # --- Uji logika dan HTTP alat JSON (Rapikan & periksa JSON) -------------------

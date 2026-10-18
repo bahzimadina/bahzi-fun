@@ -13,6 +13,7 @@ Prinsip operasional:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -269,6 +270,23 @@ from .percent_calc import (
     PercentCalcError,
     compute_percent,
     limits_payload as percent_calc_limits_payload_func,
+)
+from .zakat import (
+    BERAS_KG_PER_JIWA as ZK_BERAS_KG_PER_JIWA,
+    INVALID_REQUEST as ZK_INVALID_REQUEST,
+    MAX_ABS_VALUE as ZK_MAX_ABS_VALUE,
+    MAX_BODY_BYTES as ZK_MAX_BODY_BYTES,
+    MISSING_FIELD as ZK_MISSING_FIELD,
+    NEGATIVE_VALUE as ZK_NEGATIVE_VALUE,
+    NISAB_EMAS_GRAM as ZK_NISAB_EMAS_GRAM,
+    NOT_A_NUMBER as ZK_NOT_A_NUMBER,
+    OUT_OF_RANGE as ZK_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as ZK_PAYLOAD_TOO_LARGE,
+    PERSEN_ZAKAT as ZK_PERSEN_ZAKAT,
+    UNSUPPORTED_MODE as ZK_UNSUPPORTED_MODE,
+    ZakatError,
+    compute_zakat,
+    limits_payload as zakat_limits_payload_func,
 )
 from .json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
@@ -781,6 +799,17 @@ async def handle_percent_calc_error(request: Request, exc: PercentCalcError) -> 
     )
 
 
+@app.exception_handler(ZakatError)
+async def handle_zakat_error(request: Request, exc: ZakatError) -> JSONResponse:
+    """Error kalkulator zakat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung zakat ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(JsonToolError)
 async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONResponse:
     """Error alat JSON yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -932,6 +961,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
     elif request.url.path.startswith("/api/percent-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
+    elif request.url.path.startswith("/api/zakat"):
+        msg = "Permintaan tidak valid. Kirim objek JSON."
     elif request.url.path.startswith("/api/date-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/countdown"):
@@ -1477,6 +1508,27 @@ def _reject_oversized_percent_content_length(request: Request) -> None:
 
 def _percent_calc_limits_payload() -> dict:
     return percent_calc_limits_payload_func()
+
+
+def _reject_oversized_zakat_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator zakat."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > ZK_MAX_BODY_BYTES:
+        raise ZakatError(
+            ZK_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 8 KB.",
+            413,
+        )
+
+
+def _zakat_limits_payload() -> dict:
+    return zakat_limits_payload_func()
 
 
 def _reject_oversized_json_content_length(request: Request) -> None:
@@ -2855,6 +2907,68 @@ async def percent_calc_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/zakat/limits")
+async def zakat_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Kalkulator Zakat."""
+    return JSONResponse(content=_zakat_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/zakat")
+async def zakat_endpoint(request: Request) -> JSONResponse:
+    """Hitung zakat di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_zakat_content_length(request)
+
+    body_bytes = await request.body()
+    if len(body_bytes) > ZK_MAX_BODY_BYTES:
+        raise ZakatError(
+            ZK_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 8 KB.",
+            413,
+        )
+
+    if not body_bytes or not body_bytes.strip():
+        raise ZakatError(
+            ZK_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim objek JSON.",
+            400,
+        )
+
+    try:
+        data = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        raise ZakatError(
+            ZK_INVALID_REQUEST,
+            "Format JSON tidak valid.",
+            400,
+        )
+
+    if not isinstance(data, dict):
+        raise ZakatError(
+            ZK_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    result = compute_zakat(data)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai angka masukan pengguna ke log: cukup mode dan durasi.
+    logger.info(
+        "hitung zakat selesai: mode=%s durasi=%.0fms",
+        result.get("mode"),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/json/limits")
 async def json_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Rapikan & periksa JSON."""
@@ -3921,6 +4035,7 @@ async def root() -> dict:
             "text-summary",
             "unit-convert",
             "percent-calc",
+            "zakat",
             "json",
             "xml",
             "date-calc",
