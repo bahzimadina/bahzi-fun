@@ -58,6 +58,22 @@ from .image_edit import (
     edit_image,
     limits_payload as image_edit_limits_payload,
 )
+from .image_filter import (
+    CHUNK_SIZE as FILTER_CHUNK_SIZE,
+    MAX_BYTES as FILTER_MAX_BYTES,
+    MAX_PIXELS as FILTER_MAX_PIXELS,
+    MAX_SIDE as FILTER_MAX_SIDE,
+    MIME_TYPES as FILTER_MIME_TYPES,
+    TARGETS as FILTER_TARGETS,
+    EMPTY_FILE as FILTER_EMPTY_FILE,
+    INVALID_REQUEST as FILTER_INVALID_REQUEST,
+    NO_FILE as FILTER_NO_FILE,
+    PAYLOAD_TOO_LARGE as FILTER_PAYLOAD_TOO_LARGE,
+    TOO_LARGE as FILTER_TOO_LARGE,
+    FilterError,
+    filter_image,
+    limits_payload as image_filter_limits_payload,
+)
 from .pdf_merge import (
     CHUNK_SIZE,
     ERR_TOO_LARGE,
@@ -720,6 +736,17 @@ async def handle_image_edit_error(request: Request, exc: ImageEditError) -> JSON
     )
 
 
+@app.exception_handler(FilterError)
+async def handle_filter_error(request: Request, exc: FilterError) -> JSONResponse:
+    """Error filter gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("filter gambar ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(WordCountError)
 async def handle_word_count_error(request: Request, exc: WordCountError) -> JSONResponse:
     """Error hitung kata yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -1009,6 +1036,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'files' berisi berkas gambar."
     elif request.url.path.startswith("/api/image/edit"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/image/filter"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/pdf/to-image"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/edit"):
@@ -1125,6 +1154,49 @@ def _reject_oversized_image_content_length(request: Request) -> None:
         return
     if declared > IMG_MAX_BYTES + CONTENT_LENGTH_SLACK:
         check_image_total_size(declared - CONTENT_LENGTH_SLACK)
+
+
+def _reject_oversized_filter_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas gambar filter."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > FILTER_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise FilterError(
+            FILTER_PAYLOAD_TOO_LARGE,
+            f"Ukuran berkas melebihi batas {FILTER_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+async def _read_capped_filter_image(upload: UploadFile, remaining_budget: int) -> bytes:
+    """Baca unggahan gambar sepotong-sepotong untuk filter, tolak bila lewat batas."""
+    if remaining_budget <= 0:
+        raise FilterError(
+            FILTER_TOO_LARGE,
+            f"Ukuran berkas melebihi batas {FILTER_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+            413,
+        )
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(FILTER_CHUNK_SIZE)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > remaining_budget:
+            raise FilterError(
+                FILTER_TOO_LARGE,
+                f"Ukuran berkas melebihi batas {FILTER_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+                413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _limits_payload() -> dict:
@@ -2279,6 +2351,93 @@ async def image_edit_endpoint(
         "X-Pixels": str(result.width * result.height),
         "X-Image-Width": str(result.width),
         "X-Image-Height": str(result.height),
+        "X-Total-Bytes": str(len(result.data)),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=media_type, headers=headers)
+
+
+@app.get("/api/image/filter/limits")
+async def image_filter_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Image Filter."""
+    return JSONResponse(content=image_filter_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/image/filter")
+async def image_filter_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    suasana: str | None = Form(default="asli"),
+    kecerahan: str | None = Form(default="0"),
+    kontras: str | None = Form(default="0"),
+    saturasi: str | None = Form(default="0"),
+    blur: str | None = Form(default="0"),
+    vignette: str | None = Form(default="0"),
+    format: str | None = Form(default="tetap"),
+    kualitas: str | None = Form(default="90"),
+):
+    """Filter dan beri efek satu gambar di memori (PNG/JPEG/WebP).
+
+    Respons: binary gambar, Content-Type sesuai format output,
+    Content-Disposition: attachment; filename="hasil-filter.<ext>".
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_filter_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise FilterError(
+            FILTER_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    upload_file = file
+    if upload_file is None:
+        raise FilterError(
+            FILTER_NO_FILE,
+            "Permintaan tidak valid. Field 'file' wajib disertakan.",
+            400,
+        )
+
+    payload = await _read_capped_filter_image(upload_file, FILTER_MAX_BYTES)
+
+    result = filter_image(
+        payload=payload,
+        suasana=suasana or "asli",
+        kecerahan=kecerahan if kecerahan is not None else "0",
+        kontras=kontras if kontras is not None else "0",
+        saturasi=saturasi if saturasi is not None else "0",
+        blur=blur if blur is not None else "0",
+        vignette=vignette if vignette is not None else "0",
+        format=format or "tetap",
+        kualitas=kualitas if kualitas is not None else "90",
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "filter gambar selesai: in=%s out=%s piksel=%d byte=%d durasi=%.0fms",
+        result.input_format,
+        result.output_format,
+        result.width * result.height,
+        len(result.data),
+        duration_ms,
+    )
+
+    ext = FILTER_TARGETS[result.output_format].lstrip(".")
+    media_type = FILTER_MIME_TYPES[result.output_format]
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="hasil-filter.{ext}"',
+        "Content-Type": media_type,
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Input-Format": result.input_format,
+        "X-Output-Format": result.output_format,
+        "X-Image-Width": str(result.width),
+        "X-Image-Height": str(result.height),
+        "X-Pixels": str(result.width * result.height),
         "X-Total-Bytes": str(len(result.data)),
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
@@ -4127,6 +4286,7 @@ async def root() -> dict:
             "pdf-edit",
             "image-convert",
             "image-edit",
+            "image-filter",
             "word-count",
             "case-convert",
             "ocr",

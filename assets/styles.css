@@ -3300,6 +3300,111 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   text-align: center;
 }
 
+/* ================= Image Filter: panel alat inline ================= */
+.imgfilter__preview-orig {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .7rem .8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.imgfilter__thumb-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.imgfilter__thumb {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.imgfilter__orig-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+.imgfilter__filename {
+  margin: 0;
+  font-weight: 600;
+  font-size: .88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imgfilter__meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+.imgfilter__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+}
+.imgfilter__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-top: .3rem;
+}
+.imgfilter__sliders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .8rem;
+}
+.imgfilter__reset-wrap {
+  display: flex;
+  justify-content: flex-end;
+}
+.imgfilter__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .8rem;
+}
+.imgfilter__row .field {
+  flex: 1 1 160px;
+}
+.imgfilter__result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.imgfilter__result .imgfilter__thumb-wrap {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 240px;
+  padding: .4rem;
+  background: var(--code);
+}
+.imgfilter__result .imgfilter__thumb {
+  max-height: 220px;
+}
+.imgfilter__result-meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 /* ================= Prime Number Generator: panel alat inline ================= */
 .prime__controls {
   display: flex;
@@ -7876,7 +7981,12 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #terbilang-panel input,
   #terbilang-panel select,
   #terbilang-panel button,
-  #terbilang-panel label {
+  #terbilang-panel label,
+  #image-filter-panel button,
+  #image-filter-panel select,
+  #image-filter-panel a.btn,
+  #image-filter-panel .chip,
+  #image-filter-panel input[type="range"] {
     min-height: 44px;
   }
 }

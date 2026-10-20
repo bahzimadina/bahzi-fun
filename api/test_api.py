@@ -11233,6 +11233,333 @@ def test_text_summary_pemecahan_kalimat_singkatan_dan_daftar() -> None:
     assert [s.text for s in sents_catatan] == ["Anggaran", "Jadwal", "Peserta"]
 
 
+# ============================================================================
+# Uji Image Filter (Filter & efek gambar)
+# ============================================================================
+from app.image_filter import (  # noqa: E402
+    ADJUSTMENTS as FILTER_ADJUSTMENTS,
+    CHUNK_SIZE as FILTER_CHUNK_SIZE,
+    DAMAGED_IMAGE as FILTER_DAMAGED_IMAGE,
+    EMPTY_FILE as FILTER_EMPTY_FILE,
+    INVALID_NUMBER as FILTER_INVALID_NUMBER,
+    INVALID_QUALITY as FILTER_INVALID_QUALITY,
+    INVALID_REQUEST as FILTER_INVALID_REQUEST,
+    MAX_BYTES as FILTER_MAX_BYTES,
+    MAX_PIXELS as FILTER_MAX_PIXELS,
+    MAX_SIDE as FILTER_MAX_SIDE,
+    NO_FILE as FILTER_NO_FILE,
+    OUT_OF_RANGE as FILTER_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as FILTER_PAYLOAD_TOO_LARGE,
+    PRESETS as FILTER_PRESETS,
+    SIDE_TOO_LARGE as FILTER_SIDE_TOO_LARGE,
+    TARGETS as FILTER_TARGETS,
+    TOO_LARGE as FILTER_TOO_LARGE,
+    TOO_MANY_PIXELS as FILTER_TOO_MANY_PIXELS,
+    UNSUPPORTED_FILE as FILTER_UNSUPPORTED_FILE,
+    UNSUPPORTED_PRESET as FILTER_UNSUPPORTED_PRESET,
+    UNSUPPORTED_TARGET as FILTER_UNSUPPORTED_TARGET,
+    FilterError,
+    check_total_size as check_filter_total_size,
+    detect_format as detect_filter_format,
+    filter_image,
+    is_supported_image as is_supported_filter_image,
+    limits_payload as image_filter_limits_payload_func,
+    normalize_adjustment as filter_normalize_adjustment,
+    normalize_quality as filter_normalize_quality,
+    normalize_suasana as filter_normalize_suasana,
+    normalize_target as filter_normalize_target,
+)
+
+
+def expect_image_filter_error(func, code: str, status: int) -> FilterError:
+    """Pastikan func() melempar FilterError dengan kode + status yang tepat."""
+    try:
+        func()
+    except FilterError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar FilterError {code}")
+
+
+def test_logika_murni_image_filter() -> None:
+    """Uji logika murni filter_image: normalisasi, suasana, penyetelan, dan format."""
+    # 1. Normalisasi suasana
+    assert filter_normalize_suasana(None) == "asli"
+    assert filter_normalize_suasana("") == "asli"
+    assert filter_normalize_suasana("asli") == "asli"
+    assert filter_normalize_suasana("hitam-putih") == "hitam-putih"
+    assert filter_normalize_suasana("sepia") == "sepia"
+    assert filter_normalize_suasana("pudar") == "pudar"
+    assert filter_normalize_suasana("hangat") == "hangat"
+    assert filter_normalize_suasana("dingin") == "dingin"
+    expect_image_filter_error(lambda: filter_normalize_suasana("kartun"), FILTER_UNSUPPORTED_PRESET, 400)
+
+    # 2. Normalisasi penyetelan angka (titik & koma)
+    assert filter_normalize_adjustment("kecerahan", 0) == 0.0
+    assert filter_normalize_adjustment("kecerahan", "15") == 15.0
+    assert filter_normalize_adjustment("kecerahan", "12.5") == 12.5
+    assert filter_normalize_adjustment("kecerahan", "12,5") == 12.5
+    assert filter_normalize_adjustment("blur", "2,5") == 2.5
+    expect_image_filter_error(lambda: filter_normalize_adjustment("kecerahan", "abc"), FILTER_INVALID_NUMBER, 400)
+    expect_image_filter_error(lambda: filter_normalize_adjustment("kecerahan", 55), FILTER_OUT_OF_RANGE, 400)
+    expect_image_filter_error(lambda: filter_normalize_adjustment("kecerahan", -55), FILTER_OUT_OF_RANGE, 400)
+    expect_image_filter_error(lambda: filter_normalize_adjustment("blur", 15), FILTER_OUT_OF_RANGE, 400)
+    expect_image_filter_error(lambda: filter_normalize_adjustment("blur", -1), FILTER_OUT_OF_RANGE, 400)
+    expect_image_filter_error(lambda: filter_normalize_adjustment("vignette", 101), FILTER_OUT_OF_RANGE, 400)
+
+    # 3. Normalisasi format target & kualitas
+    assert filter_normalize_target("tetap") == "tetap"
+    assert filter_normalize_target("jpeg") == "jpeg"
+    assert filter_normalize_target("jpg") == "jpeg"
+    assert filter_normalize_target("png") == "png"
+    assert filter_normalize_target("webp") == "webp"
+    expect_image_filter_error(lambda: filter_normalize_target("bmp"), FILTER_UNSUPPORTED_TARGET, 400)
+
+    assert filter_normalize_quality(90) == 90
+    assert filter_normalize_quality("80") == 80
+    assert filter_normalize_quality("80,0") == 80
+    expect_image_filter_error(lambda: filter_normalize_quality("abc"), FILTER_INVALID_QUALITY, 400)
+    expect_image_filter_error(lambda: filter_normalize_quality(5), FILTER_INVALID_QUALITY, 400)
+    expect_image_filter_error(lambda: filter_normalize_quality(105), FILTER_INVALID_QUALITY, 400)
+
+    # 4. Filter suasana hitam-putih menghasilkan piksel R==G==B
+    # Kotak warna merah murni (200, 40, 40)
+    img_red = make_image("PNG", size=(30, 30), color="red")
+    res_bw = filter_image(img_red, suasana="hitam-putih")
+    pil_bw = Image.open(io.BytesIO(res_bw.data))
+    assert pil_bw.size == (30, 30)
+    px = pil_bw.getpixel((15, 15))
+    if isinstance(px, tuple) and len(px) >= 3:
+        assert px[0] == px[1] == px[2], f"Piksel hitam-putih harus R=G=B, didapat {px}"
+
+    # 5. Suasana sepia
+    res_sepia = filter_image(img_red, suasana="sepia", format="jpeg")
+    pil_sepia = Image.open(io.BytesIO(res_sepia.data))
+    assert pil_sepia.size == (30, 30)
+    assert pil_sepia.format == "JPEG"
+
+    # 6. Suasana pudar, hangat, dingin
+    for suasana_name in ("pudar", "hangat", "dingin"):
+        res = filter_image(img_red, suasana=suasana_name)
+        img_check = Image.open(io.BytesIO(res.data))
+        assert img_check.size == (30, 30)
+
+    # 7. Penyetelan (kecerahan, kontras, saturasi, blur, vignette)
+    res_adj = filter_image(
+        img_red,
+        kecerahan="10",
+        kontras="5",
+        saturasi="-10",
+        blur="2",
+        vignette="30",
+        format="webp",
+    )
+    pil_adj = Image.open(io.BytesIO(res_adj.data))
+    assert pil_adj.size == (30, 30)
+    assert pil_adj.format == "WEBP"
+
+    # 8. Gambar transparan RGBA ke JPEG: latar belakang putih, tanpa alpha
+    rgba_img = Image.new("RGBA", (20, 20), (255, 0, 0, 128))
+    rgba_buf = io.BytesIO()
+    rgba_img.save(rgba_buf, format="PNG")
+    res_jpeg_no_alpha = filter_image(rgba_buf.getvalue(), format="jpeg")
+    pil_no_alpha = Image.open(io.BytesIO(res_jpeg_no_alpha.data))
+    assert pil_no_alpha.mode == "RGB"
+    assert "A" not in pil_no_alpha.mode
+
+
+def test_http_image_filter_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/image/filter/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["max_mb"] == 15
+    assert data["max_files"] == 1
+    assert data["max_pixels"] == FILTER_MAX_PIXELS
+    assert data["max_side"] == FILTER_MAX_SIDE
+    assert data["formats"] == ["png", "jpeg", "webp"]
+    assert data["targets"] == ["tetap", "jpeg", "png", "webp"]
+    assert len(data["presets"]) == 6
+    assert "kecerahan" in data["adjustments"]
+    assert "kontras" in data["adjustments"]
+    assert "saturasi" in data["adjustments"]
+    assert "blur" in data["adjustments"]
+    assert "vignette" in data["adjustments"]
+    assert data["quality"]["min"] == 10
+    assert data["quality"]["max"] == 100
+    assert data["quality"]["default"] == 90
+
+
+def test_http_image_filter_sukses() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    png_data = make_image("PNG", size=(50, 40), color="blue")
+
+    # 1. Hitam-putih PNG
+    resp_bw = client.post(
+        "/api/image/filter",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"suasana": "hitam-putih", "format": "png"},
+    )
+    assert resp_bw.status_code == 200, resp_bw.text
+    assert resp_bw.headers["content-type"] == "image/png"
+    assert 'filename="hasil-filter.png"' in resp_bw.headers["content-disposition"]
+    assert "no-store" in resp_bw.headers.get("cache-control", "")
+    assert resp_bw.headers["x-input-format"] == "png"
+    assert resp_bw.headers["x-output-format"] == "png"
+    assert resp_bw.headers["x-image-width"] == "50"
+    assert resp_bw.headers["x-image-height"] == "40"
+    assert resp_bw.headers["x-pixels"] == "2000"
+    assert "x-total-bytes" in resp_bw.headers
+    assert "x-processing-ms" in resp_bw.headers
+
+    img_bw = Image.open(io.BytesIO(resp_bw.content))
+    assert img_bw.size == (50, 40)
+    sample_px = img_bw.getpixel((25, 20))
+    if isinstance(sample_px, tuple) and len(sample_px) >= 3:
+        assert sample_px[0] == sample_px[1] == sample_px[2]
+
+    # 2. Sepia ke JPEG
+    resp_sepia = client.post(
+        "/api/image/filter",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"suasana": "sepia", "format": "jpeg", "kualitas": "85"},
+    )
+    assert resp_sepia.status_code == 200, resp_sepia.text
+    assert resp_sepia.headers["content-type"] == "image/jpeg"
+    assert 'filename="hasil-filter.jpg"' in resp_sepia.headers["content-disposition"]
+    img_sepia = Image.open(io.BytesIO(resp_sepia.content))
+    assert img_sepia.format == "JPEG"
+    assert img_sepia.mode == "RGB"
+    assert img_sepia.size == (50, 40)
+
+    # 3. Penyetelan ke WebP
+    resp_webp = client.post(
+        "/api/image/filter",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={
+            "suasana": "hangat",
+            "kecerahan": "10",
+            "kontras": "5",
+            "blur": "1",
+            "vignette": "20",
+            "format": "webp",
+            "kualitas": "80",
+        },
+    )
+    assert resp_webp.status_code == 200, resp_webp.text
+    assert resp_webp.headers["content-type"] == "image/webp"
+    assert 'filename="hasil-filter.webp"' in resp_webp.headers["content-disposition"]
+    img_webp = Image.open(io.BytesIO(resp_webp.content))
+    assert img_webp.format == "WEBP"
+    assert img_webp.size == (50, 40)
+
+
+def test_http_image_filter_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    png_data = make_image("PNG")
+
+    # 1. Tanpa berkas -> 400 NO_FILE
+    resp_no_file = client.post("/api/image/filter", data={"suasana": "asli"})
+    assert resp_no_file.status_code == 400
+    assert resp_no_file.json()["error"]["code"] == FILTER_NO_FILE
+
+    # 2. Berkas bukan gambar -> 400 UNSUPPORTED_FILE
+    resp_not_img = client.post(
+        "/api/image/filter",
+        files={"file": ("dok.txt", b"ini berkas teks bukan gambar", "text/plain")},
+    )
+    assert resp_not_img.status_code == 400
+    assert resp_not_img.json()["error"]["code"] == FILTER_UNSUPPORTED_FILE
+
+    # 3. Berkas kosong -> 400 EMPTY_FILE
+    resp_empty = client.post(
+        "/api/image/filter",
+        files={"file": ("kosong.png", b"", "image/png")},
+    )
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["error"]["code"] == FILTER_EMPTY_FILE
+
+    # 4. Suasana asing -> 400 UNSUPPORTED_PRESET
+    resp_preset = client.post(
+        "/api/image/filter",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"suasana": "retro_synth"},
+    )
+    assert resp_preset.status_code == 400
+    assert resp_preset.json()["error"]["code"] == FILTER_UNSUPPORTED_PRESET
+
+    # 5. Angka bukan angka -> 400 INVALID_NUMBER
+    resp_nan = client.post(
+        "/api/image/filter",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"kecerahan": "bukan_angka"},
+    )
+    assert resp_nan.status_code == 400
+    assert resp_nan.json()["error"]["code"] == FILTER_INVALID_NUMBER
+
+    # 6. Nilai di luar rentang -> 400 OUT_OF_RANGE
+    for field, val in [("kecerahan", "60"), ("kontras", "-60"), ("blur", "15"), ("vignette", "150")]:
+        resp_range = client.post(
+            "/api/image/filter",
+            files={"file": ("a.png", png_data, "image/png")},
+            data={field: val},
+        )
+        assert resp_range.status_code == 400
+        assert resp_range.json()["error"]["code"] == FILTER_OUT_OF_RANGE
+
+    # 7. Format tujuan asing -> 400 UNSUPPORTED_TARGET
+    resp_target = client.post(
+        "/api/image/filter",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"format": "bmp"},
+    )
+    assert resp_target.status_code == 400
+    assert resp_target.json()["error"]["code"] == FILTER_UNSUPPORTED_TARGET
+
+    # 8. Kualitas di luar rentang -> 400 INVALID_QUALITY
+    resp_q_low = client.post(
+        "/api/image/filter",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"kualitas": "5"},
+    )
+    assert resp_q_low.status_code == 400
+    assert resp_q_low.json()["error"]["code"] == FILTER_INVALID_QUALITY
+
+    resp_q_high = client.post(
+        "/api/image/filter",
+        files={"file": ("a.png", png_data, "image/png")},
+        data={"kualitas": "105"},
+    )
+    assert resp_q_high.status_code == 400
+    assert resp_q_high.json()["error"]["code"] == FILTER_INVALID_QUALITY
+
+    # 9. Request JSON bukan multipart -> 400 INVALID_REQUEST
+    resp_json = client.post("/api/image/filter", json={"suasana": "asli"})
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == FILTER_INVALID_REQUEST
+
+    # 10. Berkas terlalu besar
+    expect_image_filter_error(lambda: check_filter_total_size(FILTER_MAX_BYTES + 1), FILTER_TOO_LARGE, 413)
+
+    # 11. Root endpoint berisi "image-filter"
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "image-filter" in root_resp.json()["tools"]
+
+
 # --- Runner mandiri ---------------------------------------------------------
 def main() -> int:
     tests = [
