@@ -288,6 +288,21 @@ from .zakat import (
     compute_zakat,
     limits_payload as zakat_limits_payload_func,
 )
+from .terbilang import (
+    INVALID_BOOLEAN as TB_INVALID_BOOLEAN,
+    INVALID_REQUEST as TB_INVALID_REQUEST,
+    MAX_BODY_BYTES as TB_MAX_BODY_BYTES,
+    NOT_A_NUMBER as TB_NOT_A_NUMBER,
+    OUT_OF_RANGE as TB_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as TB_PAYLOAD_TOO_LARGE,
+    TOO_LONG as TB_TOO_LONG,
+    TOO_MANY_DECIMALS as TB_TOO_MANY_DECIMALS,
+    UNSUPPORTED_MODE as TB_UNSUPPORTED_MODE,
+    TerbilangError,
+    angka_ke_kata,
+    hitung_terbilang,
+    limits_payload as terbilang_limits_payload_func,
+)
 from .json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
     INDENTS as JT_INDENTS,
@@ -810,6 +825,17 @@ async def handle_zakat_error(request: Request, exc: ZakatError) -> JSONResponse:
     )
 
 
+@app.exception_handler(TerbilangError)
+async def handle_terbilang_error(request: Request, exc: TerbilangError) -> JSONResponse:
+    """Error alat terbilang yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("terbilang ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(JsonToolError)
 async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONResponse:
     """Error alat JSON yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -963,6 +989,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
     elif request.url.path.startswith("/api/zakat"):
         msg = "Permintaan tidak valid. Kirim objek JSON."
+    elif request.url.path.startswith("/api/terbilang"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'angka'."
     elif request.url.path.startswith("/api/date-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/countdown"):
@@ -1529,6 +1557,27 @@ def _reject_oversized_zakat_content_length(request: Request) -> None:
 
 def _zakat_limits_payload() -> dict:
     return zakat_limits_payload_func()
+
+
+def _reject_oversized_terbilang_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat terbilang."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > TB_MAX_BODY_BYTES:
+        raise TerbilangError(
+            TB_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+
+def _terbilang_limits_payload() -> dict:
+    return terbilang_limits_payload_func()
 
 
 def _reject_oversized_json_content_length(request: Request) -> None:
@@ -2969,6 +3018,59 @@ async def zakat_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/terbilang/limits")
+async def terbilang_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk alat Terbilang."""
+    return JSONResponse(
+        content=_terbilang_limits_payload(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/terbilang")
+async def terbilang_endpoint(
+    request: Request,
+    angka: str = Form(default=None),
+    mode: str = Form(default="biasa"),
+    kapital: str = Form(default="false"),
+) -> JSONResponse:
+    """Konversi angka ke kata Bahasa Indonesia di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_terbilang_content_length(request)
+
+    form = await request.form()
+    if angka is None and "angka" in form:
+        angka = form.get("angka")
+    if (mode is None or mode == "biasa") and "mode" in form:
+        mode = form.get("mode")
+    if (kapital is None or kapital == "false") and "kapital" in form:
+        kapital = form.get("kapital")
+
+    if angka is None:
+        raise TerbilangError(
+            TB_INVALID_REQUEST,
+            "Field 'angka' wajib disertakan.",
+            400,
+        )
+
+    result = hitung_terbilang(angka=angka, mode=mode, kapital=kapital)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai angka masukan pengguna ke log: cukup mode dan durasi.
+    logger.info(
+        "terbilang selesai: mode=%s durasi=%.0fms",
+        result.get("mode"),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/json/limits")
 async def json_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Rapikan & periksa JSON."""
@@ -4036,6 +4138,7 @@ async def root() -> dict:
             "unit-convert",
             "percent-calc",
             "zakat",
+            "terbilang",
             "json",
             "xml",
             "date-calc",

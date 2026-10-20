@@ -25,6 +25,7 @@ import traceback
 import urllib.error
 import urllib.request
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 API_DIR = Path(__file__).resolve().parent
@@ -405,6 +406,26 @@ from app.zakat import (
     format_rupiah as format_zakat_rupiah,
     limits_payload as zakat_limits_payload_func,
     parse_decimal as parse_zakat_decimal,
+)
+from app.terbilang import (
+    EMPTY_INPUT as TB_EMPTY_INPUT,
+    INVALID_BOOLEAN as TB_INVALID_BOOLEAN,
+    INVALID_REQUEST as TB_INVALID_REQUEST,
+    MAX_ABS_VALUE as TB_MAX_ABS_VALUE,
+    MAX_BODY_BYTES as TB_MAX_BODY_BYTES,
+    MAX_CHARS as TB_MAX_CHARS,
+    MAX_DECIMALS as TB_MAX_DECIMALS,
+    NOT_A_NUMBER as TB_NOT_A_NUMBER,
+    OUT_OF_RANGE as TB_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as TB_PAYLOAD_TOO_LARGE,
+    TOO_LONG as TB_TOO_LONG,
+    TOO_MANY_DECIMALS as TB_TOO_MANY_DECIMALS,
+    UNSUPPORTED_MODE as TB_UNSUPPORTED_MODE,
+    TerbilangError,
+    angka_ke_kata,
+    hitung_terbilang,
+    limits_payload as terbilang_limits_payload_func,
+    parse_input as parse_terbilang_input,
 )
 from app.json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
@@ -4598,6 +4619,388 @@ def test_http_zakat_root_tools_terdaftar() -> None:
     assert root_resp.status_code == 200
     root_data = root_resp.json()
     assert "zakat" in root_data["tools"]
+
+
+# --- Uji Logika Alat Terbilang (Angka jadi huruf) ----------------------------
+def test_terbilang_limits_payload_logika() -> None:
+    limits = terbilang_limits_payload_func()
+    assert limits["max_chars"] == TB_MAX_CHARS
+    assert limits["max_decimals"] == TB_MAX_DECIMALS
+    assert limits["max_value"] == int(TB_MAX_ABS_VALUE)
+    assert limits["max_body_bytes"] == TB_MAX_BODY_BYTES
+    assert "biasa" in limits["mode_didukung"]
+    assert "rupiah" in limits["mode_didukung"]
+    assert len(limits["contoh_masukan"]) >= 3
+
+
+def test_terbilang_angka_ke_kata_contoh_wajib() -> None:
+    contoh_uji = [
+        (Decimal("0"), "biasa", False, "nol"),
+        (Decimal("1"), "biasa", False, "satu"),
+        (Decimal("11"), "biasa", False, "sebelas"),
+        (Decimal("12"), "biasa", False, "dua belas"),
+        (Decimal("19"), "biasa", False, "sembilan belas"),
+        (Decimal("20"), "biasa", False, "dua puluh"),
+        (Decimal("21"), "biasa", False, "dua puluh satu"),
+        (Decimal("100"), "biasa", False, "seratus"),
+        (Decimal("101"), "biasa", False, "seratus satu"),
+        (Decimal("110"), "biasa", False, "seratus sepuluh"),
+        (Decimal("200"), "biasa", False, "dua ratus"),
+        (Decimal("1000"), "biasa", False, "seribu"),
+        (Decimal("1001"), "biasa", False, "seribu satu"),
+        (Decimal("1500"), "biasa", False, "seribu lima ratus"),
+        (Decimal("2000"), "biasa", False, "dua ribu"),
+        (Decimal("1000000"), "biasa", False, "satu juta"),
+        (Decimal("1500000"), "biasa", False, "satu juta lima ratus ribu"),
+        (Decimal("1000000000"), "biasa", False, "satu miliar"),
+        (Decimal("1000000000000"), "biasa", False, "satu triliun"),
+        (Decimal("1000000000000000"), "biasa", False, "satu kuadriliun"),
+        (Decimal("-2500"), "biasa", False, "minus dua ribu lima ratus"),
+        (Decimal("12.75"), "biasa", False, "dua belas koma tujuh lima"),
+        (Decimal("1250000"), "rupiah", False, "satu juta dua ratus lima puluh ribu rupiah"),
+        (Decimal("1250500.50"), "rupiah", False, "satu juta dua ratus lima puluh ribu lima ratus rupiah lima puluh sen"),
+        (Decimal("0"), "rupiah", False, "nol rupiah"),
+    ]
+    for d, mode, kap, expected in contoh_uji:
+        hasil = angka_ke_kata(d, mode=mode, kapital=kap)
+        assert hasil == expected, f"Gagal untuk {d} mode={mode}: dapat {hasil!r}, harap {expected!r}"
+
+
+def test_terbilang_batas_maksimum_dan_di_atasnya() -> None:
+    # 999.999.999.999.999 tepat
+    tepat_str = "999999999999999"
+    res_tepat = hitung_terbilang(tepat_str)
+    assert res_tepat["kata"].startswith("sembilan ratus sembilan puluh sembilan triliun")
+    assert res_tepat["kata"].endswith("sembilan ratus sembilan puluh sembilan")
+
+    # 1 kuadriliun tepat (1.000.000.000.000.000)
+    res_kuadriliun = hitung_terbilang("1000000000000000")
+    assert res_kuadriliun["kata"] == "satu kuadriliun"
+
+    # Di atas batas kuadriliun -> OUT_OF_RANGE
+    try:
+        hitung_terbilang("1000000000000001")
+        assert False, "Harusnya OUT_OF_RANGE untuk nilai > 1 kuadriliun"
+    except TerbilangError as exc:
+        assert exc.code == TB_OUT_OF_RANGE
+        assert exc.status_code == 400
+
+    try:
+        hitung_terbilang("2000000000000000")
+        assert False, "Harusnya OUT_OF_RANGE"
+    except TerbilangError as exc:
+        assert exc.code == TB_OUT_OF_RANGE
+        assert exc.status_code == 400
+
+
+def test_terbilang_desimal_maksimum() -> None:
+    # 6 digit desimal (batas maksimum yang diizinkan)
+    res_6 = hitung_terbilang("0,123456")
+    assert res_6["kata"] == "nol koma satu dua tiga empat lima enam"
+
+    # 7 digit desimal -> TOO_MANY_DECIMALS
+    try:
+        hitung_terbilang("0,1234567")
+        assert False, "Harusnya TOO_MANY_DECIMALS untuk > 6 desimal"
+    except TerbilangError as exc:
+        assert exc.code == TB_TOO_MANY_DECIMALS
+        assert exc.status_code == 400
+
+
+def test_terbilang_titik_tunggal_tiga_digit_sebagai_ribuan() -> None:
+    # Satu titik diikuti tepat 3 digit = pemisah ribuan, bukan desimal
+    assert hitung_terbilang("25.000")["kata"] == "dua puluh lima ribu"
+    assert hitung_terbilang("1.250")["kata"] == "seribu dua ratus lima puluh"
+    assert hitung_terbilang("12.750")["kata"] == "dua belas ribu tujuh ratus lima puluh"
+
+    # Beberapa titik tiga-digit berturut tetap pemisah ribuan
+    assert hitung_terbilang("1.250.000")["kata"] == "satu juta dua ratus lima puluh ribu"
+
+    # Satu titik diikuti 1-2 digit tetap dibaca sebagai desimal
+    assert hitung_terbilang("12.75")["kata"] == "dua belas koma tujuh lima"
+    assert hitung_terbilang("12,75")["kata"] == "dua belas koma tujuh lima"
+
+    # Satu titik diikuti 4-6 digit tetap dibaca sebagai desimal
+    assert hitung_terbilang("12.7500")["kata"] == "dua belas koma tujuh lima"
+
+
+def test_terbilang_nol_ekor_desimal_dibuang() -> None:
+    # Nol di ekor bagian desimal dibuang pada mode biasa
+    assert hitung_terbilang("1500.000000")["kata"] == "seribu lima ratus"
+    assert hitung_terbilang("12,750")["kata"] == "dua belas koma tujuh lima"
+    assert hitung_terbilang("12,700")["kata"] == "dua belas koma tujuh"
+
+    # Mode rupiah tidak terpengaruh (desimal dihitung sebagai sen)
+    res_rupiah = hitung_terbilang("1500.000000", mode="rupiah")
+    assert res_rupiah["kata"] == "seribu lima ratus rupiah"
+
+
+def test_terbilang_minus_dan_nol() -> None:
+    # Minus biasa
+    res_min = hitung_terbilang("-2500")
+    assert res_min["kata"] == "minus dua ribu lima ratus"
+
+    # Minus nol
+    res_min_nol = hitung_terbilang("-0")
+    assert res_min_nol["kata"] == "nol"
+
+    # Nol rupiah
+    res_nol_rupiah = hitung_terbilang("0", mode="rupiah")
+    assert res_nol_rupiah["kata"] == "nol rupiah"
+
+    # Minus rupiah
+    res_min_rupiah = hitung_terbilang("-2500", mode="rupiah")
+    assert res_min_rupiah["kata"] == "minus dua ribu lima ratus rupiah"
+
+
+def test_terbilang_kapital() -> None:
+    res = hitung_terbilang("1250000", mode="rupiah", kapital=True)
+    assert res["kata"] == "Satu juta dua ratus lima puluh ribu rupiah"
+    assert res["kapital"] is True
+
+    res_min = hitung_terbilang("-2500", mode="biasa", kapital=True)
+    assert res_min["kata"] == "Minus dua ribu lima ratus"
+
+
+def test_terbilang_logika_galat() -> None:
+    # Input kosong
+    try:
+        hitung_terbilang("")
+        assert False, "Harusnya EMPTY_INPUT"
+    except TerbilangError as exc:
+        assert exc.code == TB_EMPTY_INPUT
+        assert exc.status_code == 400
+
+    try:
+        hitung_terbilang("   ")
+        assert False, "Harusnya EMPTY_INPUT"
+    except TerbilangError as exc:
+        assert exc.code == TB_EMPTY_INPUT
+        assert exc.status_code == 400
+
+    # Terlalu panjang (> 40 karakter)
+    try:
+        hitung_terbilang("1" * 41)
+        assert False, "Harusnya TOO_LONG"
+    except TerbilangError as exc:
+        assert exc.code == TB_TOO_LONG
+        assert exc.status_code == 400
+
+    # Bukan angka (huruf, simbol, pemisah aneh)
+    for bad in ["abc", "12a34", "12-34", "-", "12..34", "12,34,56.78", "12.3.4"]:
+        try:
+            hitung_terbilang(bad)
+            assert False, f"Harusnya NOT_A_NUMBER untuk {bad!r}"
+        except TerbilangError as exc:
+            assert exc.code == TB_NOT_A_NUMBER
+            assert exc.status_code == 400
+
+    # Mode tidak didukung
+    try:
+        hitung_terbilang("100", mode="dolar")
+        assert False, "Harusnya UNSUPPORTED_MODE"
+    except TerbilangError as exc:
+        assert exc.code == TB_UNSUPPORTED_MODE
+        assert exc.status_code == 400
+
+    # Boolean kapital tidak valid
+    try:
+        hitung_terbilang("100", kapital="bukan_boolean")
+        assert False, "Harusnya INVALID_BOOLEAN"
+    except TerbilangError as exc:
+        assert exc.code == TB_INVALID_BOOLEAN
+        assert exc.status_code == 400
+
+
+# --- Uji HTTP TestClient untuk Alat Terbilang ---------------------------------
+def test_http_terbilang_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/terbilang/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_chars"] == TB_MAX_CHARS
+    assert body["max_decimals"] == TB_MAX_DECIMALS
+    assert body["max_value"] == int(TB_MAX_ABS_VALUE)
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_terbilang_post_sukses_biasa() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/terbilang",
+        data={"angka": "12,75", "mode": "biasa", "kapital": "false"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["angka"] == "12.75"
+    assert body["kata"] == "dua belas koma tujuh lima"
+    assert body["mode"] == "biasa"
+    assert body["jumlah_kata"] == 5
+    assert body["jumlah_karakter"] == 25
+    assert body["kapital"] is False
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_terbilang_post_sukses_rupiah() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/terbilang",
+        data={"angka": "1.250.500,50", "mode": "rupiah", "kapital": "true"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["kata"] == "Satu juta dua ratus lima puluh ribu lima ratus rupiah lima puluh sen"
+    assert body["mode"] == "rupiah"
+    assert body["kapital"] is True
+
+
+def test_http_terbilang_galat_field_angka_tidak_ada() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"mode": "biasa"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_INVALID_REQUEST
+
+
+def test_http_terbilang_galat_empty_input() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "   "})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_EMPTY_INPUT
+
+
+def test_http_terbilang_galat_not_a_number() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "seratus"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_NOT_A_NUMBER
+    assert "Contoh:" in body["error"]["message"] or "contoh" in body["error"]["message"].lower()
+
+
+def test_http_terbilang_galat_too_many_decimals() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "0,1234567"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_TOO_MANY_DECIMALS
+
+
+def test_http_terbilang_galat_out_of_range() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "1000000000000001"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_OUT_OF_RANGE
+
+
+def test_http_terbilang_galat_too_long() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "9" * 41})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_TOO_LONG
+
+
+def test_http_terbilang_galat_unsupported_mode() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "100", "mode": "dolar"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_UNSUPPORTED_MODE
+
+
+def test_http_terbilang_galat_invalid_boolean() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post("/api/terbilang", data={"angka": "100", "kapital": "bukan_boolean"})
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_INVALID_BOOLEAN
+
+
+def test_http_terbilang_galat_payload_too_large() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    big_body = b"angka=" + b"9" * 70000
+    response = client.post(
+        "/api/terbilang",
+        content=big_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 413, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_PAYLOAD_TOO_LARGE
+
+
+def test_http_terbilang_galat_body_json_ditolak() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/terbilang",
+        json={"angka": "1250000"},
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"]["code"] == TB_INVALID_REQUEST
+
+
+def test_http_terbilang_root_tools_terdaftar() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "terbilang" in root_data["tools"]
+
+
+def test_http_terbilang_regresi_endpoint_lama() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    # Healthcheck
+    r_health = client.get("/health")
+    assert r_health.status_code == 200
+
+    # Zakat limits & hitung
+    r_zk_limits = client.get("/api/zakat/limits")
+    assert r_zk_limits.status_code == 200
+    r_zk_calc = client.post("/api/zakat", json={"mode": "fitrah", "jiwa": 1, "harga_beras": 15000})
+    assert r_zk_calc.status_code == 200
+
+    # Percent calc limits
+    r_pc = client.get("/api/percent-calc/limits")
+    assert r_pc.status_code == 200
+
+    # Unit convert limits
+    r_uc = client.get("/api/unit-convert/limits")
+    assert r_uc.status_code == 200
 
 
 # --- Uji logika dan HTTP alat JSON (Rapikan & periksa JSON) -------------------

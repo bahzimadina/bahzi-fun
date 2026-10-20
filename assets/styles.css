@@ -7710,6 +7710,161 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .2rem;
 }
 
+/* =========================================================================
+   Panel alat: Angka jadi huruf (Terbilang)
+   ========================================================================= */
+.tb__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+
+.tb__field {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+
+.tb__field--mode {
+  flex: 1;
+}
+
+.tb__field--checkbox {
+  flex: 1;
+  justify-content: flex-end;
+  padding-bottom: .25rem;
+}
+
+.tb__row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+@media (max-width: 600px) {
+  .tb__row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: .75rem;
+  }
+}
+
+.tb__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tb__input {
+  width: 100%;
+  padding: .65rem .85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  box-sizing: border-box;
+}
+
+.tb__input:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.tb__select {
+  width: 100%;
+  padding: .65rem .85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: .92rem;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.tb__select:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.tb__checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  font-size: .9rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tb__checkbox {
+  accent-color: var(--brand);
+  width: 1.15rem;
+  height: 1.15rem;
+  cursor: pointer;
+}
+
+.tb__hint-text {
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.tb__results {
+  margin-top: 1rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+}
+
+.tb__hint {
+  font-size: .88rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}
+
+.tb__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+.tb__card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.tb__result-text {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  word-break: break-word;
+}
+
+.tb__stats {
+  font-size: .84rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.tb__output-actions {
+  display: flex;
+  gap: .5rem;
+}
+
 @media (pointer: coarse) {
   #ringkas-teks-panel input,
   #ringkas-teks-panel button,
@@ -7717,7 +7872,11 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #zakat-panel input,
   #zakat-panel select,
   #zakat-panel button,
-  #zakat-panel label {
+  #zakat-panel label,
+  #terbilang-panel input,
+  #terbilang-panel select,
+  #terbilang-panel button,
+  #terbilang-panel label {
     min-height: 44px;
   }
 }
