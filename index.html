@@ -3,8 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#121316">
+  <script>
+    (function() {
+      try {
+        var s = localStorage.getItem('omnitools-theme');
+        var p = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        var t = s || (p ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
   <meta name="robots" content="index,follow">
 
   <!-- Alamat dasar layanan penggabung PDF. Kosong berarti dilayani dari domain
@@ -136,6 +146,13 @@
       <path d="M12 4v11M7 10l5 5 5-5"></path>
       <path d="M5 19.5h14"></path>
     </symbol>
+    <symbol id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="4.5"></circle>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+    </symbol>
+    <symbol id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+    </symbol>
     <symbol id="icon-logo" viewBox="0 0 32 32">
       <rect width="32" height="32" rx="9" fill="url(#bz-gradient)"></rect>
       <text x="16" y="22" text-anchor="middle" font-size="16" font-weight="700" fill="#150f23">b</text>
@@ -155,6 +172,10 @@
         <a class="navbar__link" href="#roadmap">Roadmap</a>
         <a class="navbar__link" href="#faq">FAQ</a>
       </nav>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Ganti mode terang atau gelap" title="Ganti mode terang/gelap">
+        <svg class="theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true"><use href="#icon-sun"></use></svg>
+        <svg class="theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true"><use href="#icon-moon"></use></svg>
+      </button>
       <a class="btn btn--primary btn--sm navbar__cta" href="#alat">Lihat alat</a>
     </div>
   </header>

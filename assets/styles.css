@@ -2,7 +2,7 @@
    OmniTools (bahzi.fun) — Material Design 3 (M3) Design System
    Sistem Desain Material You / M3: Semantic Tokens, Tonal Elevation,
    M3 Component Cards, Search Bar, Filter Chips, Adaptive Layout.
-   Mendukung semua perangkat: Mobile (<600dp), Tablet (600-840dp), Desktop (>840dp).
+   Mendukung Mode Terang (Light) & Mode Gelap (Dark), adaptif di semua perangkat.
    ========================================================================== */
 
 /* ---------- Font self-host (Rubik Variable + IBM Plex Mono) ---------------- */
@@ -22,10 +22,39 @@
 }
 
 /* ==========================================================================
-   MATERIAL DESIGN 3 SEMANTIC TOKENS (Dark Baseline Tonal Palette)
+   MATERIAL DESIGN 3: TOKENS UMUM (Shapes, Rhythm, Elevation)
    ========================================================================== */
 :root {
-  /* M3 Surface Tonal Hierarchy (Dark Mode Baseline) */
+  /* M3 Shape Scale */
+  --m3-shape-none: 0px;
+  --m3-shape-xs: 4px;
+  --m3-shape-sm: 8px;
+  --m3-shape-md: 12px;
+  --m3-shape-lg: 16px;
+  --m3-shape-xl: 24px;
+  --m3-shape-full: 9999px;
+
+  /* Aliases Bentuk */
+  --radius: var(--m3-shape-md);
+  --radius-card: var(--m3-shape-lg);
+  --radius-pill: var(--m3-shape-full);
+
+  /* Layout & Rhythm */
+  --gap: 1rem;
+  --pad-section: clamp(2rem, 1.6rem + 1.6vw, 3rem);
+  --transition: 200ms cubic-bezier(0.2, 0, 0, 1);
+  --maxw: 1220px;
+  --nav-h: 64px;
+
+  --font-sans: "Rubik", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* ==========================================================================
+   M3 COLOR TOKENS: DARK THEME (DEFAULT)
+   ========================================================================== */
+:root, [data-theme="dark"] {
+  /* M3 Surface Tonal Hierarchy (Dark) */
   --md-sys-color-surface: #121316;
   --md-sys-color-surface-dim: #0e0f12;
   --md-sys-color-surface-bright: #38393e;
@@ -35,32 +64,32 @@
   --md-sys-color-surface-container-high: #292a2f;
   --md-sys-color-surface-container-highest: #34353a;
 
-  /* M3 Content / On-Surface Hierarchy */
+  /* Content / On-Surface */
   --md-sys-color-on-surface: #e2e2e7;
   --md-sys-color-on-surface-variant: #c4c6d0;
   --md-sys-color-outline: #8e909a;
   --md-sys-color-outline-variant: #44464f;
 
-  /* M3 Primary: Indigo / Modern Blue Tonal Pair */
+  /* Primary: Indigo / Modern Blue */
   --md-sys-color-primary: #a8c7fa;
   --md-sys-color-on-primary: #062e6f;
   --md-sys-color-primary-container: #233e78;
   --md-sys-color-on-primary-container: #d3e3fd;
   --md-sys-color-primary-hover: #c4d0ff;
 
-  /* M3 Secondary: Slate Indigo */
+  /* Secondary: Slate Indigo */
   --md-sys-color-secondary: #c2c6dc;
   --md-sys-color-on-secondary: #2b3042;
   --md-sys-color-secondary-container: #414659;
   --md-sys-color-on-secondary-container: #dfe2f9;
 
-  /* M3 Tertiary: Warm Rose Accent */
+  /* Tertiary: Warm Rose */
   --md-sys-color-tertiary: #efb8c8;
   --md-sys-color-on-tertiary: #492532;
   --md-sys-color-tertiary-container: #633b48;
   --md-sys-color-on-tertiary-container: #ffd8e4;
 
-  /* M3 Semantic State Colors */
+  /* States */
   --md-sys-color-error: #ffb4ab;
   --md-sys-color-on-error: #690005;
   --md-sys-color-error-container: #93000a;
@@ -70,7 +99,7 @@
   --md-sys-color-warning: #ffd043;
   --md-sys-color-on-warning: #3f2e00;
 
-  /* --- Backward-Compatibility Aliases (Menjaga 36 Panel Alat Tetap Utuh) --- */
+  /* Backward-Compatibility Aliases */
   --bg: var(--md-sys-color-surface);
   --surface: var(--md-sys-color-surface-container-low);
   --surface-2: var(--md-sys-color-surface-container);
@@ -95,41 +124,108 @@
   --yellow: var(--md-sys-color-warning);
   --green: var(--md-sys-color-success);
 
-  /* M3 Tonal Gradients & Subtle Atmospheric Light */
   --grad-title: linear-gradient(135deg, #e3ecfc 0%, #a8c7fa 60%, #c2c6dc 100%);
   --grad-panel: linear-gradient(180deg, var(--md-sys-color-surface-container-low) 0%, var(--md-sys-color-surface-container) 100%);
   --glow-brand: 0 4px 16px rgba(168, 199, 250, 0.12);
 
-  /* M3 Shape System (Scale: XS, SM, MD, LG, XL, FULL) */
-  --m3-shape-none: 0px;
-  --m3-shape-xs: 4px;
-  --m3-shape-sm: 8px;
-  --m3-shape-md: 12px;
-  --m3-shape-lg: 16px;
-  --m3-shape-xl: 24px;
-  --m3-shape-full: 9999px;
-
-  /* Aliases Bentuk */
-  --radius: var(--m3-shape-md);
-  --radius-card: var(--m3-shape-lg);
-  --radius-pill: var(--m3-shape-full);
-
-  /* M3 Elevation Scale (Tonal Elevation) */
+  /* M3 Dark Elevation */
   --m3-elevation-0: none;
   --m3-elevation-1: 0 1px 3px 1px rgba(0, 0, 0, 0.22), 0 1px 2px 0 rgba(0, 0, 0, 0.28);
   --m3-elevation-2: 0 2px 6px 2px rgba(0, 0, 0, 0.22), 0 1px 2px 0 rgba(0, 0, 0, 0.28);
   --m3-elevation-3: 0 4px 8px 3px rgba(0, 0, 0, 0.25), 0 1px 3px 0 rgba(0, 0, 0, 0.32);
   --m3-elevation-4: 0 6px 12px 4px rgba(0, 0, 0, 0.25), 0 2px 4px 0 rgba(0, 0, 0, 0.32);
 
-  /* Layout & Rhythm */
-  --gap: 1rem;
-  --pad-section: clamp(2rem, 1.6rem + 1.6vw, 3rem);
-  --transition: 200ms cubic-bezier(0.2, 0, 0, 1);
-  --maxw: 1220px;
-  --nav-h: 64px;
+  --navbar-bg: rgba(26, 27, 31, 0.85);
+  --toolbar-bg: rgba(31, 32, 36, 0.94);
+}
 
-  --font-sans: "Rubik", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+/* ==========================================================================
+   M3 COLOR TOKENS: LIGHT THEME
+   ========================================================================== */
+[data-theme="light"] {
+  /* M3 Surface Tonal Hierarchy (Light) */
+  --md-sys-color-surface: #fdfcff;
+  --md-sys-color-surface-dim: #ded8e1;
+  --md-sys-color-surface-bright: #fdfcff;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f7f3f9;
+  --md-sys-color-surface-container: #f1edf3;
+  --md-sys-color-surface-container-high: #ebe7ee;
+  --md-sys-color-surface-container-highest: #e5e1e8;
+
+  /* Content / On-Surface */
+  --md-sys-color-on-surface: #1a1b1f;
+  --md-sys-color-on-surface-variant: #44474f;
+  --md-sys-color-outline: #74777f;
+  --md-sys-color-outline-variant: #c4c6d0;
+
+  /* Primary: Deep Royal M3 Blue */
+  --md-sys-color-primary: #005ac1;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #d8e2ff;
+  --md-sys-color-on-primary-container: #001a41;
+  --md-sys-color-primary-hover: #00489c;
+
+  /* Secondary: Slate Indigo */
+  --md-sys-color-secondary: #575e71;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #dbe2f9;
+  --md-sys-color-on-secondary-container: #141b2c;
+
+  /* Tertiary: Plum Accent */
+  --md-sys-color-tertiary: #715573;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #fbd7fc;
+  --md-sys-color-on-tertiary-container: #29132d;
+
+  /* States */
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #410002;
+  --md-sys-color-success: #198754;
+  --md-sys-color-on-success: #ffffff;
+  --md-sys-color-warning: #946c00;
+  --md-sys-color-on-warning: #ffffff;
+
+  /* Backward-Compatibility Aliases */
+  --bg: var(--md-sys-color-surface);
+  --surface: var(--md-sys-color-surface-container-low);
+  --surface-2: var(--md-sys-color-surface-container);
+  --code: var(--md-sys-color-surface-container-lowest);
+  --border: var(--md-sys-color-outline-variant);
+
+  --text: var(--md-sys-color-on-surface);
+  --text-muted: var(--md-sys-color-on-surface-variant);
+
+  --brand: var(--md-sys-color-primary);
+  --brand-hover: var(--md-sys-color-primary-hover);
+  --brand-text: var(--md-sys-color-primary);
+  --blurple: var(--md-sys-color-secondary);
+  --deep-1: var(--md-sys-color-surface-container-low);
+  --deep-2: var(--md-sys-color-surface-container);
+  --deep-3: var(--md-sys-color-surface-container-high);
+
+  --pink: var(--md-sys-color-tertiary);
+  --pink-dark: #715573;
+  --pink-light: #fbd7fc;
+  --orange: #8a5100;
+  --yellow: var(--md-sys-color-warning);
+  --green: var(--md-sys-color-success);
+
+  --grad-title: linear-gradient(135deg, #001a41 0%, #005ac1 60%, #575e71 100%);
+  --grad-panel: linear-gradient(180deg, var(--md-sys-color-surface-container-low) 0%, var(--md-sys-color-surface-container) 100%);
+  --glow-brand: 0 4px 16px rgba(0, 90, 193, 0.10);
+
+  /* M3 Light Elevation */
+  --m3-elevation-0: none;
+  --m3-elevation-1: 0 1px 3px 1px rgba(0, 0, 0, 0.08), 0 1px 2px 0 rgba(0, 0, 0, 0.12);
+  --m3-elevation-2: 0 2px 6px 2px rgba(0, 0, 0, 0.08), 0 1px 2px 0 rgba(0, 0, 0, 0.12);
+  --m3-elevation-3: 0 4px 8px 3px rgba(0, 0, 0, 0.10), 0 1px 3px 0 rgba(0, 0, 0, 0.14);
+  --m3-elevation-4: 0 6px 12px 4px rgba(0, 0, 0, 0.10), 0 2px 4px 0 rgba(0, 0, 0, 0.14);
+
+  --navbar-bg: rgba(253, 252, 255, 0.88);
+  --toolbar-bg: rgba(247, 243, 249, 0.94);
 }
 
 /* ==========================================================================
@@ -140,7 +236,7 @@ html, body { margin: 0; padding: 0; }
 [hidden] { display: none !important; }
 
 html {
-  color-scheme: dark;
+  color-scheme: dark light;
   scroll-behavior: smooth;
   background: var(--md-sys-color-surface);
 }
@@ -154,9 +250,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  transition: background-color var(--transition), color var(--transition);
 }
 
-/* Atmospheric Ambient Layer (M3 Dark Surface Tint, Non-distracting) */
+/* Atmospheric Ambient Layer (M3 Surface Tint) */
 body::before,
 body::after {
   content: "";
@@ -164,6 +261,7 @@ body::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
+  transition: opacity var(--transition);
 }
 body::before {
   background:
@@ -179,6 +277,19 @@ body::after {
   mask-image: radial-gradient(100% 75% at 50% 0%, #000 0%, transparent 80%);
   -webkit-mask-image: radial-gradient(100% 75% at 50% 0%, #000 0%, transparent 80%);
   opacity: 0.35;
+}
+
+[data-theme="light"] body::before {
+  background:
+    radial-gradient(45% 35% at 15% -5%, rgba(0, 90, 193, 0.06), transparent 70%),
+    radial-gradient(40% 30% at 85% 5%, rgba(113, 85, 115, 0.04), transparent 75%),
+    radial-gradient(55% 45% at 50% 105%, rgba(216, 226, 255, 0.35), transparent 70%);
+}
+[data-theme="light"] body::after {
+  background-image:
+    linear-gradient(to right, rgba(196, 198, 208, 0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(196, 198, 208, 0.25) 1px, transparent 1px);
+  opacity: 0.45;
 }
 
 /* Scrollbar M3 Style */
@@ -270,7 +381,6 @@ main > section {
               transform var(--transition), box-shadow var(--transition), color var(--transition);
 }
 
-/* Filled Button (High Emphasis) */
 .btn--primary {
   background: var(--md-sys-color-primary);
   color: var(--md-sys-color-on-primary);
@@ -282,7 +392,6 @@ main > section {
   transform: translateY(-1px);
 }
 
-/* Outlined Button (Medium Emphasis) */
 .btn--secondary {
   background: transparent;
   border: 1px solid var(--md-sys-color-outline);
@@ -293,7 +402,6 @@ main > section {
   border-color: var(--md-sys-color-primary);
 }
 
-/* Ghost / Text Button (Low Emphasis) */
 .btn--ghost {
   background: transparent;
   border: 1px solid var(--md-sys-color-outline-variant);
@@ -334,10 +442,20 @@ main > section {
   background: rgba(122, 218, 147, 0.12);
   border-color: rgba(122, 218, 147, 0.28);
 }
+[data-theme="light"] .badge--available {
+  color: #0e623b;
+  background: #d4f7e2;
+  border-color: #a3eec0;
+}
 .badge--soon {
   color: var(--md-sys-color-warning);
   background: rgba(255, 208, 67, 0.12);
   border-color: rgba(255, 208, 67, 0.28);
+}
+[data-theme="light"] .badge--soon {
+  color: #795500;
+  background: #ffeed0;
+  border-color: #ffd88a;
 }
 
 /* M3 Filter Chips */
@@ -373,22 +491,22 @@ main > section {
   box-shadow: var(--m3-elevation-1);
 }
 .chip--active:hover {
-  background: #2b498f;
-  color: #fff;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
 }
 
 /* ==========================================================================
-   TOP APP BAR (M3 Center-Aligned / Small App Bar)
+   TOP APP BAR & THEME TOGGLE (M3 Center-Aligned / Small App Bar)
    ========================================================================== */
 .navbar {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(26, 27, 31, 0.85);
+  background: var(--navbar-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
-  transition: background var(--transition), box-shadow var(--transition);
+  transition: background var(--transition), border-color var(--transition);
 }
 .navbar__inner {
   display: flex;
@@ -451,6 +569,38 @@ main > section {
   background: var(--md-sys-color-surface-container-high);
   color: var(--md-sys-color-on-surface);
 }
+
+/* Theme Toggle Button */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--m3-shape-full);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  background: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline);
+  transform: rotate(15deg);
+}
+.theme-toggle__icon {
+  width: 20px;
+  height: 20px;
+  transition: transform var(--transition);
+}
+.theme-toggle__icon--moon { display: none; }
+.theme-toggle__icon--sun { display: block; color: #ffd043; }
+
+[data-theme="light"] .theme-toggle__icon--sun { display: none; }
+[data-theme="light"] .theme-toggle__icon--moon { display: block; color: var(--md-sys-color-primary); }
+
 .navbar__cta {
   flex-shrink: 0;
   background: var(--md-sys-color-primary-container);
@@ -510,12 +660,13 @@ main > section {
   gap: .65rem;
   margin-block: 1rem 1.6rem;
   padding: .85rem 1rem;
-  background: rgba(31, 32, 36, 0.94);
+  background: var(--toolbar-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 20px;
   box-shadow: var(--m3-elevation-2);
+  transition: background var(--transition), border-color var(--transition);
 }
 .toolbar__row {
   display: flex;
@@ -576,7 +727,7 @@ main > section {
   font-size: .78rem;
   color: var(--md-sys-color-on-surface-variant);
   padding-top: .5rem;
-  border-top: 1px solid rgba(68, 70, 79, 0.4);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
 }
 
 /* ==========================================================================
@@ -727,6 +878,7 @@ a.tool-card__open { text-decoration: none; }
   margin-block: 1rem 1.6rem;
   box-shadow: var(--m3-elevation-3);
   scroll-margin-top: calc(var(--nav-h) + var(--sticky-offset, 130px) + 16px);
+  transition: background var(--transition), border-color var(--transition);
 }
 .tool-panel:focus { outline: none; }
 .tool-panel:focus-visible {
@@ -768,8 +920,8 @@ a.tool-card__open { text-decoration: none; }
 }
 .tool-panel__close:hover {
   border-color: var(--md-sys-color-primary);
-  background: rgba(168, 199, 250, 0.12);
-  color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
 }
 
 .tool-panel__note {
@@ -777,8 +929,8 @@ a.tool-card__open { text-decoration: none; }
   padding: .65rem .85rem;
   font-size: .82rem;
   color: var(--md-sys-color-on-surface-variant);
-  background: rgba(168, 199, 250, 0.08);
-  border: 1px solid rgba(168, 199, 250, 0.22);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: var(--m3-shape-md);
   line-height: 1.5;
 }
@@ -796,7 +948,7 @@ a.tool-card__open { text-decoration: none; }
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: var(--m3-shape-lg);
   padding: 1.15rem;
-  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition), background var(--transition);
 }
 .card:hover {
   border-color: var(--md-sys-color-primary);
@@ -931,6 +1083,7 @@ a.tool-card__open { text-decoration: none; }
   background: var(--md-sys-color-surface-container-lowest);
   padding-block: 1.75rem;
   margin-top: 2rem;
+  transition: background var(--transition), border-color var(--transition);
 }
 .footer__inner {
   display: flex;
@@ -999,10 +1152,10 @@ html.js-reveal .reveal.is-visible { opacity: 1; transform: translateY(0); }
   .chip { flex: 0 0 auto; }
 
   .navbar__brand-sub { display: none; }
-  .navbar__inner { gap: .5rem; }
+  .navbar__inner { gap: .45rem; }
   .navbar__brand-text { font-size: .95rem; }
-  .navbar__nav { gap: .4rem; }
-  .navbar__link { font-size: .8rem; padding: .35rem .65rem; }
+  .navbar__nav { gap: .35rem; }
+  .navbar__link { font-size: .8rem; padding: .35rem .6rem; }
   .navbar__cta { padding: .35rem .75rem; font-size: .8rem; }
   
   .tool-group__list { grid-template-columns: 1fr; }

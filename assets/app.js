@@ -988,4 +988,21 @@
 
   // Tinggi bilah ikut berubah saat layar diputar atau jendela diubah ukurannya.
   window.addEventListener('resize', reserveCookiebarSpace);
+
+  // --- Mode Terang / Gelap (Material Design 3 Theme Toggle) -----------
+  var themeToggleBtn = document.getElementById('theme-toggle');
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', function () {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('omnitools-theme', next);
+      } catch (e) {}
+      var metaTheme = document.querySelector('meta[name="theme-color"]');
+      if (metaTheme) {
+        metaTheme.setAttribute('content', next === 'dark' ? '#121316' : '#fdfcff');
+      }
+    });
+  }
 })();
