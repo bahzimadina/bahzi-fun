@@ -83,7 +83,8 @@
         { name: 'Kalkulator Persen', desc: 'Hitung persentase, kenaikan, dan potongan.', status: 'available', action: 'percent-calc' },
         { name: 'Angka jadi huruf', desc: 'Tulis angka menjadi kata Bahasa Indonesia untuk kuitansi, nota, invoice, dan laporan keuangan.', status: 'available', action: 'terbilang' },
         { name: 'Kalkulator zakat', desc: 'Hitung zakat penghasilan, zakat harta, dan zakat fitrah. Nisab memakai harga emas atau beras yang kamu masukkan sendiri.', status: 'available', action: 'zakat' },
-        { name: 'Unit Converter', desc: 'Ubah nilai antar satuan panjang, berat, suhu, luas, volume, kecepatan, waktu, dan data.', status: 'available', action: 'unit-converter' }
+        { name: 'Unit Converter', desc: 'Ubah nilai antar satuan panjang, berat, suhu, luas, volume, kecepatan, waktu, dan data.', status: 'available', action: 'unit-converter' },
+        { name: 'Simulasi cicilan', desc: 'Hitung perkiraan angsuran tiap bulan, total bunga, dan sisa utang bulan demi bulan.', status: 'available', action: 'cicilan' }
       ]
     },
     {

@@ -319,6 +319,17 @@ from .terbilang import (
     hitung_terbilang,
     limits_payload as terbilang_limits_payload_func,
 )
+from .cicilan import (
+    INVALID_REQUEST as CC_INVALID_REQUEST,
+    MAX_BODY_BYTES as CC_MAX_BODY_BYTES,
+    NOT_A_NUMBER as CC_NOT_A_NUMBER,
+    OUT_OF_RANGE as CC_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CC_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_METHOD as CC_UNSUPPORTED_METHOD,
+    CicilanError,
+    hitung_cicilan,
+    limits_payload as cicilan_limits_payload_func,
+)
 from .json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
     INDENTS as JT_INDENTS,
@@ -863,6 +874,17 @@ async def handle_terbilang_error(request: Request, exc: TerbilangError) -> JSONR
     )
 
 
+@app.exception_handler(CicilanError)
+async def handle_cicilan_error(request: Request, exc: CicilanError) -> JSONResponse:
+    """Error alat simulasi cicilan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("cicilan ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(JsonToolError)
 async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONResponse:
     """Error alat JSON yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1018,6 +1040,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim objek JSON."
     elif request.url.path.startswith("/api/terbilang"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'angka'."
+    elif request.url.path.startswith("/api/cicilan"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'pokok', 'bunga', 'tenor', dan 'metode'."
     elif request.url.path.startswith("/api/date-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/countdown"):
@@ -1650,6 +1674,27 @@ def _reject_oversized_terbilang_content_length(request: Request) -> None:
 
 def _terbilang_limits_payload() -> dict:
     return terbilang_limits_payload_func()
+
+
+def _reject_oversized_cicilan_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat cicilan."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > CC_MAX_BODY_BYTES:
+        raise CicilanError(
+            CC_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+
+def _cicilan_limits_payload() -> dict:
+    return cicilan_limits_payload_func()
 
 
 def _reject_oversized_json_content_length(request: Request) -> None:
@@ -3230,6 +3275,93 @@ async def terbilang_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/cicilan/limits")
+async def cicilan_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk alat simulasi cicilan."""
+    return JSONResponse(
+        content=_cicilan_limits_payload(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/cicilan")
+async def cicilan_endpoint(
+    request: Request,
+    pokok: str = Form(default=None),
+    bunga: str = Form(default=None),
+    tenor: str = Form(default=None),
+    metode: str = Form(default="anuitas"),
+) -> JSONResponse:
+    """Hitung perkiraan angsuran pinjaman di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_cicilan_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise CicilanError(
+            CC_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise CicilanError(
+            CC_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise CicilanError(
+                CC_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if pokok is None and "pokok" in form:
+        pokok = form.get("pokok")
+    if bunga is None and "bunga" in form:
+        bunga = form.get("bunga")
+    if tenor is None and "tenor" in form:
+        tenor = form.get("tenor")
+    if (metode is None or metode == "anuitas") and "metode" in form:
+        metode = form.get("metode")
+
+    if "pokok" not in form or "bunga" not in form or "tenor" not in form:
+        raise CicilanError(
+            CC_INVALID_REQUEST,
+            "Field 'pokok', 'bunga', dan 'tenor' wajib disertakan.",
+            400,
+        )
+
+    result = await run_in_threadpool(
+        hitung_cicilan,
+        pokok=pokok,
+        bunga=bunga,
+        tenor=tenor,
+        metode=metode,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nominal uang ke log: cukup metode, tenor, dan durasi.
+    logger.info(
+        "cicilan selesai: metode=%s tenor=%s durasi=%.0fms",
+        result.get("metode"),
+        result.get("tenor_bulan"),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/json/limits")
 async def json_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Rapikan & periksa JSON."""
@@ -4299,6 +4431,7 @@ async def root() -> dict:
             "percent-calc",
             "zakat",
             "terbilang",
+            "cicilan",
             "json",
             "xml",
             "date-calc",

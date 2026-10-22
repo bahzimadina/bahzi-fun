@@ -427,6 +427,27 @@ from app.terbilang import (
     limits_payload as terbilang_limits_payload_func,
     parse_input as parse_terbilang_input,
 )
+from app.cicilan import (
+    INVALID_REQUEST as CC_INVALID_REQUEST,
+    MAX_BODY_BYTES as CC_MAX_BODY_BYTES,
+    MAX_BUNGA as CC_MAX_BUNGA,
+    MAX_POKOK as CC_MAX_POKOK,
+    MAX_TENOR as CC_MAX_TENOR,
+    MIN_BUNGA as CC_MIN_BUNGA,
+    MIN_POKOK as CC_MIN_POKOK,
+    MIN_TENOR as CC_MIN_TENOR,
+    NOT_A_NUMBER as CC_NOT_A_NUMBER,
+    OUT_OF_RANGE as CC_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CC_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_METHOD as CC_UNSUPPORTED_METHOD,
+    CicilanError,
+    hitung_cicilan,
+    limits_payload as cicilan_limits_payload_func,
+    parse_bunga as parse_cicilan_bunga,
+    parse_metode as parse_cicilan_metode,
+    parse_pokok as parse_cicilan_pokok,
+    parse_tenor as parse_cicilan_tenor,
+)
 from app.json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
     INDENTS as JT_INDENTS,
@@ -11558,6 +11579,344 @@ def test_http_image_filter_galat() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "image-filter" in root_resp.json()["tools"]
+
+
+# --- Uji modul simulasi cicilan ---------------------------------------------
+def test_cicilan_limits_payload_logika() -> None:
+    """Uji isi konfigurasi limits_payload untuk alat simulasi cicilan."""
+    limits = cicilan_limits_payload_func()
+    assert limits["min_pokok"] == CC_MIN_POKOK
+    assert limits["max_pokok"] == CC_MAX_POKOK
+    assert limits["min_bunga"] == CC_MIN_BUNGA
+    assert limits["max_bunga"] == CC_MAX_BUNGA
+    assert limits["min_tenor"] == CC_MIN_TENOR
+    assert limits["max_tenor"] == CC_MAX_TENOR
+    assert limits["max_body_bytes"] == CC_MAX_BODY_BYTES
+    assert limits["default_metode"] == "anuitas"
+    metode_values = [m["value"] for m in limits["metode_didukung"]]
+    assert "anuitas" in metode_values
+    assert "flat" in metode_values
+    assert "contoh" in limits
+    assert "catatan" in limits
+
+
+def test_cicilan_parsing_helpers() -> None:
+    """Uji helper parsing pokok, bunga, tenor, dan metode."""
+    assert parse_cicilan_pokok("50.000.000") == Decimal("50000000")
+    assert parse_cicilan_pokok("100000") == Decimal("100000")
+    assert parse_cicilan_pokok(" 50,000,000 ") == Decimal("50000000")
+
+    assert parse_cicilan_bunga("6,5") == Decimal("6.5")
+    assert parse_cicilan_bunga("6.5%") == Decimal("6.5")
+    assert parse_cicilan_bunga("0") == Decimal("0")
+    assert parse_cicilan_bunga("100") == Decimal("100")
+    assert parse_cicilan_bunga("6.1234") == Decimal("6.1234")
+
+    assert parse_cicilan_tenor("1") == 1
+    assert parse_cicilan_tenor("36") == 36
+    assert parse_cicilan_tenor("360") == 360
+
+    assert parse_cicilan_metode("anuitas") == "anuitas"
+    assert parse_cicilan_metode("flat") == "flat"
+    assert parse_cicilan_metode(" ANUITAS ") == "anuitas"
+
+
+def test_cicilan_logika_anuitas_dan_flat() -> None:
+    """Uji logika hitung_cicilan untuk anuitas dan flat."""
+    # Anuitas 50 jt, 6.5%, 36 bulan
+    res_a = hitung_cicilan(pokok="50.000.000", bunga="6,5", tenor="36", metode="anuitas")
+    assert res_a["metode"] == "anuitas"
+    assert res_a["pokok"] == "50000000.00"
+    assert res_a["tenor_bulan"] == 36
+    assert len(res_a["jadwal"]) == 36
+    assert res_a["jadwal"][-1]["sisa"] == "0.00"
+    assert Decimal(res_a["total_bayar"]) == Decimal(res_a["pokok"]) + Decimal(res_a["total_bunga"])
+    assert res_a["angsuran_per_bulan"] == "1532450.14"
+
+    # Flat 50 jt, 6.5%, 36 bulan
+    res_f = hitung_cicilan(pokok="50.000.000", bunga="6,5", tenor="36", metode="flat")
+    assert res_f["metode"] == "flat"
+    assert res_f["pokok"] == "50000000.00"
+    assert res_f["tenor_bulan"] == 36
+    assert len(res_f["jadwal"]) == 36
+    assert res_f["jadwal"][-1]["sisa"] == "0.00"
+    assert Decimal(res_f["total_bayar"]) == Decimal(res_f["pokok"]) + Decimal(res_f["total_bunga"])
+    # Pokok 50jt * 6.5% * 3 thn = 9.750.000 bunga
+    assert res_f["total_bunga"] == "9750000.00"
+    assert res_f["total_bayar"] == "59750000.00"
+
+
+def test_cicilan_jadwal_konsisten_dengan_ringkasan() -> None:
+    """Regresi: jumlah tiap kolom jadwal harus pas dengan ringkasan (anuitas & flat)."""
+    kombinasi = [
+        ("50000000", "6.5", "36"),
+        ("250000000", "0.5", "60"),
+        ("7500000", "10.25", "7"),
+        ("1000000", "0", "12"),
+        ("99999999", "12.75", "359"),
+    ]
+    for pokok, bunga, tenor in kombinasi:
+        for met in ["anuitas", "flat"]:
+            res = hitung_cicilan(pokok, bunga, tenor, met)
+            jadwal = res["jadwal"]
+            assert len(jadwal) == int(tenor)
+            assert jadwal[-1]["sisa"] == "0.00"
+            assert sum(Decimal(row["angsuran"]) for row in jadwal) == Decimal(res["total_bayar"])
+            assert sum(Decimal(row["bunga"]) for row in jadwal) == Decimal(res["total_bunga"])
+            assert sum(Decimal(row["pokok"]) for row in jadwal) == Decimal(res["pokok"])
+
+
+def test_cicilan_kasus_khusus_bunga_nol_dan_ekstrem_tenor() -> None:
+    """Uji bunga 0%, tenor 1 bulan, dan tenor 360 bulan."""
+    # Bunga 0% Anuitas & Flat
+    for met in ["anuitas", "flat"]:
+        res_0 = hitung_cicilan("12000000", "0", "12", met)
+        assert len(res_0["jadwal"]) == 12
+        assert res_0["jadwal"][-1]["sisa"] == "0.00"
+        assert res_0["total_bunga"] == "0.00"
+        assert res_0["total_bayar"] == "12000000.00"
+        assert res_0["angsuran_per_bulan"] == "1000000.00"
+
+    # Tenor 1 bulan
+    for met in ["anuitas", "flat"]:
+        res_1 = hitung_cicilan("10000000", "12", "1", met)
+        assert len(res_1["jadwal"]) == 1
+        assert res_1["jadwal"][0]["sisa"] == "0.00"
+        assert Decimal(res_1["total_bayar"]) == Decimal(res_1["pokok"]) + Decimal(res_1["total_bunga"])
+
+    # Tenor 360 bulan
+    for met in ["anuitas", "flat"]:
+        res_360 = hitung_cicilan("100000000", "5", "360", met)
+        assert len(res_360["jadwal"]) == 360
+        assert res_360["jadwal"][-1]["sisa"] == "0.00"
+        assert Decimal(res_360["total_bayar"]) == Decimal(res_360["pokok"]) + Decimal(res_360["total_bunga"])
+
+
+def test_cicilan_logika_galat() -> None:
+    """Uji berbagai skenario galat operasional logika cicilan."""
+    # Field kosong
+    try:
+        parse_cicilan_pokok("")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_INVALID_REQUEST
+
+    try:
+        parse_cicilan_bunga("")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_INVALID_REQUEST
+
+    try:
+        parse_cicilan_tenor("")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_INVALID_REQUEST
+
+    # Bukan angka
+    try:
+        parse_cicilan_pokok("seratus_ribu")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_NOT_A_NUMBER
+
+    try:
+        parse_cicilan_bunga("enam_koma_lima")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_NOT_A_NUMBER
+
+    try:
+        parse_cicilan_tenor("tiga_puluh")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_NOT_A_NUMBER
+
+    # Negatif
+    try:
+        parse_cicilan_pokok("-1000000")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_bunga("-5")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_tenor("-12")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    # Batas rentang
+    try:
+        parse_cicilan_tenor("0")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_tenor("361")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_bunga("101")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_bunga("5.12345")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_pokok("99999")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    try:
+        parse_cicilan_pokok("100000000001")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_OUT_OF_RANGE
+
+    # Metode tidak didukung
+    try:
+        parse_cicilan_metode("ngawur")
+        assert False, "Harus melempar CicilanError"
+    except CicilanError as e:
+        assert e.code == CC_UNSUPPORTED_METHOD
+
+
+def test_http_cicilan_limits() -> None:
+    """Uji HTTP GET /api/cicilan/limits."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/cicilan/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control") == "no-store"
+    data = resp.json()
+    assert data["min_pokok"] == CC_MIN_POKOK
+    assert data["max_pokok"] == CC_MAX_POKOK
+    assert data["default_metode"] == "anuitas"
+
+
+def test_http_cicilan_post_sukses_dan_headers() -> None:
+    """Uji HTTP POST /api/cicilan sukses untuk anuitas dan flat."""
+    client = _test_client()
+    if client is None:
+        return
+    resp_a = client.post(
+        "/api/cicilan",
+        data={"pokok": "50.000.000", "bunga": "6,5", "tenor": "36", "metode": "anuitas"},
+    )
+    assert resp_a.status_code == 200
+    assert resp_a.headers.get("cache-control") == "no-store"
+    assert "X-Processing-Ms" in resp_a.headers
+    data_a = resp_a.json()
+    assert data_a["metode"] == "anuitas"
+    assert len(data_a["jadwal"]) == 36
+    assert data_a["jadwal"][-1]["sisa"] == "0.00"
+    assert Decimal(data_a["total_bayar"]) == Decimal(data_a["pokok"]) + Decimal(data_a["total_bunga"])
+
+    resp_f = client.post(
+        "/api/cicilan",
+        data={"pokok": "25000000", "bunga": "8", "tenor": "12", "metode": "flat"},
+    )
+    assert resp_f.status_code == 200
+    data_f = resp_f.json()
+    assert data_f["metode"] == "flat"
+    assert len(data_f["jadwal"]) == 12
+    assert data_f["jadwal"][-1]["sisa"] == "0.00"
+    assert Decimal(data_f["total_bayar"]) == Decimal(data_f["pokok"]) + Decimal(data_f["total_bunga"])
+
+
+def test_http_cicilan_semua_jalur_galat() -> None:
+    """Uji HTTP POST /api/cicilan untuk semua kemungkinan input tidak valid."""
+    client = _test_client()
+    if client is None:
+        return
+    # Field kosong
+    r_empty = client.post("/api/cicilan", data={"pokok": "", "bunga": "6.5", "tenor": "36", "metode": "anuitas"})
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == CC_INVALID_REQUEST
+
+    # Field tidak lengkap
+    r_missing = client.post("/api/cicilan", data={"bunga": "6.5", "tenor": "36"})
+    assert r_missing.status_code == 400
+    assert r_missing.json()["error"]["code"] == CC_INVALID_REQUEST
+
+    # Bukan angka
+    r_nan = client.post("/api/cicilan", data={"pokok": "bukan_angka", "bunga": "6.5", "tenor": "36"})
+    assert r_nan.status_code == 400
+    assert r_nan.json()["error"]["code"] == CC_NOT_A_NUMBER
+
+    # Negatif
+    r_neg = client.post("/api/cicilan", data={"pokok": "-50000000", "bunga": "6.5", "tenor": "36"})
+    assert r_neg.status_code == 400
+    assert r_neg.json()["error"]["code"] == CC_OUT_OF_RANGE
+
+    # Tenor 0
+    r_t0 = client.post("/api/cicilan", data={"pokok": "1000000", "bunga": "6.5", "tenor": "0"})
+    assert r_t0.status_code == 400
+    assert r_t0.json()["error"]["code"] == CC_OUT_OF_RANGE
+
+    # Tenor 361
+    r_t361 = client.post("/api/cicilan", data={"pokok": "1000000", "bunga": "6.5", "tenor": "361"})
+    assert r_t361.status_code == 400
+    assert r_t361.json()["error"]["code"] == CC_OUT_OF_RANGE
+
+    # Bunga 101
+    r_b101 = client.post("/api/cicilan", data={"pokok": "1000000", "bunga": "101", "tenor": "12"})
+    assert r_b101.status_code == 400
+    assert r_b101.json()["error"]["code"] == CC_OUT_OF_RANGE
+
+    # Metode ngawur
+    r_m = client.post("/api/cicilan", data={"pokok": "1000000", "bunga": "5", "tenor": "12", "metode": "ngawur"})
+    assert r_m.status_code == 400
+    assert r_m.json()["error"]["code"] == CC_UNSUPPORTED_METHOD
+
+    # Body JSON ditolak
+    r_json = client.post("/api/cicilan", json={"pokok": "1000000", "bunga": "5", "tenor": "12"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == CC_INVALID_REQUEST
+
+    # Body terlalu besar (413)
+    r_big = client.post(
+        "/api/cicilan",
+        data={"pokok": "1" * (CC_MAX_BODY_BYTES + 10), "bunga": "5", "tenor": "12"},
+    )
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == CC_PAYLOAD_TOO_LARGE
+
+
+def test_http_cicilan_root_tools_dan_regresi() -> None:
+    """Pastikan cicilan ada di root endpoint dan endpoint lain tetap berfungsi."""
+    client = _test_client()
+    if client is None:
+        return
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "cicilan" in root_resp.json()["tools"]
+
+    # Regresi endpoint lain
+    tb_resp = client.get("/api/terbilang/limits")
+    assert tb_resp.status_code == 200
+
+    pc_resp = client.get("/api/percent-calc/limits")
+    assert pc_resp.status_code == 200
+
+    zk_resp = client.get("/api/zakat/limits")
+    assert zk_resp.status_code == 200
 
 
 # --- Runner mandiri ---------------------------------------------------------
