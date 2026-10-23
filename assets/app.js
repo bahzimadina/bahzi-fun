@@ -68,6 +68,7 @@
       icon: 'icon-clock',
       tools: [
         { name: 'Date Calculator', desc: 'Hitung selisih dua tanggal, tambah atau kurangi tanggal, nama hari, dan usia.', status: 'available', action: 'date-calc' },
+        { name: 'Kalender Hijriah', desc: 'Ubah tanggal Hijriah ke Masehi dan sebaliknya, lengkap dengan nama hari dan tanggal penting setahun.', status: 'available', action: 'hijriah' },
         { name: 'Time Zone Converter', desc: 'Lihat jam yang sama di beberapa kota, konversi antar zona waktu, dan cari jam rapat yang cocok.', status: 'available', action: 'timezone' },
         { name: 'Countdown Timer', desc: 'Hitung mundur ke tanggal atau waktu tertentu, berdetak tiap detik.', status: 'available', action: 'countdown' },
         { name: 'Pomodoro Timer', desc: 'Susun jadwal fokus dan istirahat, lalu jalankan penghitung waktunya.', status: 'available', action: 'pomodoro' }

@@ -330,6 +330,17 @@ from .cicilan import (
     hitung_cicilan,
     limits_payload as cicilan_limits_payload_func,
 )
+from .hijriah import (
+    INVALID_DATE as HJ_INVALID_DATE,
+    INVALID_REQUEST as HJ_INVALID_REQUEST,
+    MAX_BODY_BYTES as HJ_MAX_BODY_BYTES,
+    OUT_OF_RANGE as HJ_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as HJ_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as HJ_UNSUPPORTED_MODE,
+    HijriahError,
+    konversi as konversi_hijriah,
+    limits_payload as hijriah_limits_payload_func,
+)
 from .json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
     INDENTS as JT_INDENTS,
@@ -885,6 +896,17 @@ async def handle_cicilan_error(request: Request, exc: CicilanError) -> JSONRespo
     )
 
 
+@app.exception_handler(HijriahError)
+async def handle_hijriah_error(request: Request, exc: HijriahError) -> JSONResponse:
+    """Error alat kalender Hijriah yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hijriah ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(JsonToolError)
 async def handle_json_tool_error(request: Request, exc: JsonToolError) -> JSONResponse:
     """Error alat JSON yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1042,6 +1064,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'angka'."
     elif request.url.path.startswith("/api/cicilan"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'pokok', 'bunga', 'tenor', dan 'metode'."
+    elif request.url.path.startswith("/api/hijriah"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/date-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
     elif request.url.path.startswith("/api/countdown"):
@@ -1695,6 +1719,27 @@ def _reject_oversized_cicilan_content_length(request: Request) -> None:
 
 def _cicilan_limits_payload() -> dict:
     return cicilan_limits_payload_func()
+
+
+def _reject_oversized_hijriah_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat kalender Hijriah."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > HJ_MAX_BODY_BYTES:
+        raise HijriahError(
+            HJ_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+
+def _hijriah_limits_payload() -> dict:
+    return hijriah_limits_payload_func()
 
 
 def _reject_oversized_json_content_length(request: Request) -> None:
@@ -3362,6 +3407,98 @@ async def cicilan_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/hijriah/limits")
+async def hijriah_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk alat kalender Hijriah."""
+    return JSONResponse(
+        content=_hijriah_limits_payload(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/hijriah")
+async def hijriah_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    hari: str = Form(default=None),
+    bulan: str = Form(default=None),
+    tahun: str = Form(default=None),
+    tanggal_masehi: str = Form(default=None),
+) -> JSONResponse:
+    """Konversi tanggal Hijriah <-> Masehi di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_hijriah_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise HijriahError(
+            HJ_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise HijriahError(
+            HJ_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise HijriahError(
+                HJ_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    allowed_fields = {"mode", "hari", "bulan", "tahun", "tanggal_masehi"}
+    for key in form.keys():
+        if key not in allowed_fields:
+            raise HijriahError(
+                HJ_INVALID_REQUEST,
+                f"Field '{key}' tidak dikenal.",
+                400,
+            )
+
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if hari is None and "hari" in form:
+        hari = form.get("hari")
+    if bulan is None and "bulan" in form:
+        bulan = form.get("bulan")
+    if tahun is None and "tahun" in form:
+        tahun = form.get("tahun")
+    if tanggal_masehi is None and "tanggal_masehi" in form:
+        tanggal_masehi = form.get("tanggal_masehi")
+
+    result = await run_in_threadpool(
+        konversi_hijriah,
+        mode=mode,
+        hari=hari,
+        bulan=bulan,
+        tahun=tahun,
+        tanggal_masehi=tanggal_masehi,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat tanggal pengunjung ke log: cukup mode dan durasi.
+    logger.info(
+        "hijriah selesai: mode=%s durasi=%.0fms",
+        result.get("mode"),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/json/limits")
 async def json_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Rapikan & periksa JSON."""
@@ -4432,6 +4569,7 @@ async def root() -> dict:
             "zakat",
             "terbilang",
             "cicilan",
+            "hijriah",
             "json",
             "xml",
             "date-calc",

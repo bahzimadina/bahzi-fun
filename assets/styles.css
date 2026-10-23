@@ -94,8 +94,10 @@
   --md-sys-color-on-error: #690005;
   --md-sys-color-error-container: #93000a;
   --md-sys-color-on-error-container: #ffdad6;
+  --md-sys-color-error-text: #ffb4ab;
   --md-sys-color-success: #7ada93;
   --md-sys-color-on-success: #003915;
+  --md-sys-color-success-text: #7ada93;
   --md-sys-color-warning: #ffd043;
   --md-sys-color-on-warning: #3f2e00;
 
@@ -183,8 +185,10 @@
   --md-sys-color-on-error: #ffffff;
   --md-sys-color-error-container: #ffdad6;
   --md-sys-color-on-error-container: #410002;
+  --md-sys-color-error-text: #ba1a1a;
   --md-sys-color-success: #198754;
   --md-sys-color-on-success: #ffffff;
+  --md-sys-color-success-text: #146c43;
   --md-sys-color-warning: #946c00;
   --md-sys-color-on-warning: #ffffff;
 
@@ -1256,8 +1260,8 @@ html.js-reveal .reveal.is-visible { opacity: 1; transform: translateY(0); }
   display: flex; align-items: center; gap: .5rem; min-height: 1.25rem; margin: 0;
   font-size: .83rem; color: var(--text-muted);
 }
-.status--ok { color: var(--green); }
-.status--error { color: var(--pink-light); }
+.status--ok { color: var(--md-sys-color-success-text); }
+.status--error { color: var(--md-sys-color-error-text); }
 .spinner {
   flex: 0 0 auto; width: 15px; height: 15px; border-radius: 50%;
   border: 2px solid rgba(117, 83, 255, .3); border-top-color: var(--brand);
@@ -8895,7 +8899,199 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .2rem;
 }
 
+/* ================= Kalender Hijriah ================= */
+.hijriah__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.hijriah__field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  width: 100%;
+}
+.hijriah__label {
+  font-size: .85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.hijriah__inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr;
+  gap: .75rem;
+  width: 100%;
+}
+@media (max-width: 540px) {
+  .hijriah__inputs-row {
+    grid-template-columns: 1fr;
+  }
+}
+.hijriah__inputs-single {
+  width: 100%;
+}
+.hijriah__inputs-single[hidden] {
+  display: none;
+}
+.hijriah__inputs-row[hidden] {
+  display: none;
+}
+.hijriah__input,
+.hijriah__select {
+  width: 100%;
+  padding: .65rem .85rem;
+  font-size: .95rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color var(--transition, 150ms ease), outline var(--transition, 150ms ease);
+}
+.hijriah__input:focus,
+.hijriah__select:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.hijriah__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+.hijriah__hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.hijriah__hint[hidden] {
+  display: none;
+}
+.hijriah__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.hijriah__output-wrap[hidden] {
+  display: none;
+}
+.hijriah__cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: .85rem;
+  width: 100%;
+}
+.hijriah__card {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.hijriah__card-label {
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.hijriah__card-main {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--brand-text);
+  line-height: 1.25;
+  word-break: break-word;
+}
+.hijriah__card-sub {
+  font-size: .88rem;
+  color: var(--text-muted);
+}
+.hijriah__penting-section {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+  width: 100%;
+}
+.hijriah__penting-title {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.hijriah__penting-list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+.hijriah__penting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.hijriah__penting-left {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
+.hijriah__penting-name {
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.hijriah__penting-hijriah {
+  font-size: .82rem;
+  color: var(--text-muted);
+}
+.hijriah__penting-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .15rem;
+}
+@media (max-width: 480px) {
+  .hijriah__penting-right {
+    align-items: flex-start;
+  }
+}
+.hijriah__penting-masehi {
+  font-size: .88rem;
+  font-weight: 500;
+  color: var(--brand-text);
+}
+.hijriah__penting-hari {
+  font-size: .8rem;
+  color: var(--text-muted);
+}
+.hijriah__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
 @media (pointer: coarse) {
+  #hijriah-panel input,
+  #hijriah-panel select,
+  #hijriah-panel button,
+  #hijriah-panel label,
   #cicilan-panel input,
   #cicilan-panel button,
   #cicilan-panel .chip,

@@ -16,8 +16,10 @@ Keluar dengan status 1 bila ada uji yang gagal.
 from __future__ import annotations
 
 import csv
+import datetime
 import io
 import json
+import math
 import os
 import sys
 import time
@@ -27,6 +29,7 @@ import urllib.request
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+import random
 
 API_DIR = Path(__file__).resolve().parent
 if str(API_DIR) not in sys.path:
@@ -447,6 +450,31 @@ from app.cicilan import (
     parse_metode as parse_cicilan_metode,
     parse_pokok as parse_cicilan_pokok,
     parse_tenor as parse_cicilan_tenor,
+)
+from app.hijriah import (
+    INVALID_DATE as HJ_INVALID_DATE,
+    INVALID_REQUEST as HJ_INVALID_REQUEST,
+    MAX_BODY_BYTES as HJ_MAX_BODY_BYTES,
+    MAX_TAHUN_HIJRIAH as HJ_MAX_TAHUN_HIJRIAH,
+    MAX_TANGGAL_MASEHI as HJ_MAX_TANGGAL_MASEHI,
+    MIN_TAHUN_HIJRIAH as HJ_MIN_TAHUN_HIJRIAH,
+    MIN_TANGGAL_MASEHI as HJ_MIN_TANGGAL_MASEHI,
+    NAMA_BULAN_HIJRIAH,
+    NAMA_BULAN_MASEHI,
+    NAMA_HARI,
+    OUT_OF_RANGE as HJ_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as HJ_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as HJ_UNSUPPORTED_MODE,
+    HijriahError,
+    hari_dalam_bulan_hijriah,
+    hijriah_ke_jd,
+    is_kabisat_hijriah,
+    jd_ke_hijriah,
+    jd_ke_masehi,
+    konversi as konversi_hijriah,
+    limits_payload as hijriah_limits_payload_func,
+    masehi_ke_jd,
+    parse_tanggal_masehi,
 )
 from app.json_tool import (
     CHUNK_SIZE as JT_CHUNK_SIZE,
@@ -11917,6 +11945,374 @@ def test_http_cicilan_root_tools_dan_regresi() -> None:
 
     zk_resp = client.get("/api/zakat/limits")
     assert zk_resp.status_code == 200
+
+
+# --- Uji modul kalender Hijriah ---------------------------------------------
+def test_hijriah_limits_payload_logika() -> None:
+    """Uji isi konfigurasi limits_payload untuk alat kalender Hijriah."""
+    limits = hijriah_limits_payload_func()
+    assert limits["min_tahun_hijriah"] == HJ_MIN_TAHUN_HIJRIAH
+    assert limits["max_tahun_hijriah"] == HJ_MAX_TAHUN_HIJRIAH
+    assert limits["min_tanggal_masehi"] == HJ_MIN_TANGGAL_MASEHI
+    assert limits["max_tanggal_masehi"] == HJ_MAX_TANGGAL_MASEHI
+    assert limits["max_body_bytes"] == HJ_MAX_BODY_BYTES
+    assert len(limits["daftar_bulan"]) == 12
+    assert limits["daftar_bulan"][0]["nama"] == "Muharram"
+    assert limits["daftar_bulan"][11]["nama"] == "Dzulhijjah"
+    mode_values = [m["value"] for m in limits["mode_didukung"]]
+    assert "ke_masehi" in mode_values
+    assert "ke_hijriah" in mode_values
+    assert limits["default_mode"] == "ke_masehi"
+    assert "catatan" in limits
+    assert "aritmetika" in limits["catatan"].lower()
+    assert "1 Ramadhan 1447 H" in limits["catatan"]
+    assert "ringkasan_batas" in limits
+    assert limits["ringkasan_batas"] == "Tahun Hijriah 1300–1600 H; tanggal Masehi yang bisa dimasukkan 1900–2100"
+
+
+def test_hijriah_roundtrip_400_tanggal_acak() -> None:
+    """Konversi bolak-balik: untuk 400 tanggal Hijriah acak (benih tetap),
+
+    hijriah -> masehi -> hijriah harus kembali ke tanggal semula.
+    """
+    random.seed(42)
+    # 1. Uji logika murni JD untuk seluruh rentang 1300..1600 H
+    for _ in range(400):
+        y = random.randint(HJ_MIN_TAHUN_HIJRIAH, HJ_MAX_TAHUN_HIJRIAH)
+        m = random.randint(1, 12)
+        max_d = hari_dalam_bulan_hijriah(y, m)
+        d = random.randint(1, max_d)
+        jd = hijriah_ke_jd(y, m, d)
+        hy, hm, hd = jd_ke_hijriah(jd)
+        assert (hy, hm, hd) == (y, m, d)
+
+    # 2. Uji konversi bolak-balik end-to-end dalam rentang tanggal Masehi yang didukung (1318..1523 H)
+    for _ in range(400):
+        y = random.randint(1318, 1523)
+        m = random.randint(1, 12)
+        max_d = hari_dalam_bulan_hijriah(y, m)
+        d = random.randint(1, max_d)
+
+        # Hijriah -> Masehi
+        res_m = konversi_hijriah("ke_masehi", hari=d, bulan=m, tahun=y)
+        tgl_masehi = res_m["masehi"]["tanggal"]
+
+        # Masehi -> Hijriah
+        res_h = konversi_hijriah("ke_hijriah", tanggal_masehi=tgl_masehi)
+        h = res_h["hijriah"]
+        assert (h["tahun"], h["bulan"], h["hari"]) == (y, m, d)
+        expected_day_of_year = math.ceil(29.5 * (m - 1)) + d
+        assert h["hari_dalam_tahun"] == expected_day_of_year
+
+
+def test_hijriah_nomor_hari_cocok_weekday() -> None:
+    """Nomor hari cocok dengan datetime.date.weekday() Python (Senin=0) untuk 200 tanggal Masehi acak."""
+    random.seed(1337)
+    start_date = datetime.date(1900, 1, 1)
+    end_date = datetime.date(2100, 12, 31)
+    days_range = (end_date - start_date).days
+
+    for _ in range(200):
+        offset = random.randint(0, days_range)
+        dt = start_date + datetime.timedelta(days=offset)
+        res = konversi_hijriah("ke_hijriah", tanggal_masehi=dt.isoformat())
+
+        # Nama hari harus tepat sesuai NAMA_HARI[dt.weekday()] (Senin=0)
+        assert res["masehi"]["hari"] == NAMA_HARI[dt.weekday()]
+        # hari_angka adalah 1..7 (Senin=1 .. Minggu=7), cocok dengan dt.weekday() + 1
+        assert res["masehi"]["hari_angka"] == dt.isoweekday()
+        assert res["masehi"]["hari_angka"] - 1 == dt.weekday()
+
+
+def test_hijriah_jangkar_nyata_2026_10_23() -> None:
+    """Jangkar nyata: 2026-10-23 harus 'Jumat' (diketahui hari Jumat) dan menghasilkan 4 tanggal penting."""
+    res = konversi_hijriah("ke_hijriah", tanggal_masehi="2026-10-23")
+    assert res["masehi"]["hari"] == "Jumat"
+    assert res["masehi"]["hari_angka"] == 5
+    assert res["masehi"]["tanggal"] == "2026-10-23"
+    assert res["masehi"]["teks"] == "23 Oktober 2026"
+    assert res["hijriah"]["tahun"] == 1448
+    assert res["hijriah"]["hari_dalam_tahun"] == 129
+
+    penting = res["tanggal_penting"]
+    assert len(penting) == 4
+    names = [p["nama"] for p in penting]
+    assert "1 Muharram (Tahun Baru Hijriah)" in names[0]
+    assert "12 Rabiul Awal (Maulid Nabi)" in names[1]
+    assert "1 Ramadhan" in names[2]
+    assert "10 Dzulhijjah (Idul Adha)" in names[3]
+
+    for item in penting:
+        assert "1448 H" in item["hijriah"]
+        assert item["hari"] in NAMA_HARI
+        assert item["masehi"] != ""
+
+
+def test_hijriah_siklus_awal_akhir_tahun_dan_kabisat() -> None:
+    """Awal tahun Hijriah selalu 1 Muharram; akhir tahun 29/30 Dzulhijjah; jumlah hari satu tahun 354 atau 355."""
+    for y in range(1430, 1461):
+        # Awal tahun: 1 Muharram
+        res_awal = konversi_hijriah("ke_masehi", hari=1, bulan=1, tahun=y)
+        assert res_awal["hijriah"]["hari_dalam_tahun"] == 1
+
+        kabisat = is_kabisat_hijriah(y)
+        hari_dzulhijjah = 30 if kabisat else 29
+        hari_total_tahun = 355 if kabisat else 354
+
+        # Akhir tahun: hari terakhir Dzulhijjah
+        res_akhir = konversi_hijriah("ke_masehi", hari=hari_dzulhijjah, bulan=12, tahun=y)
+        assert res_akhir["hijriah"]["hari_dalam_tahun"] == hari_total_tahun
+
+        # Pastikan 1 Muharram tahun berikutnya persis 1 hari setelah akhir tahun ini
+        jd_akhir = hijriah_ke_jd(y, 12, hari_dzulhijjah)
+        jd_awal_next = hijriah_ke_jd(y + 1, 1, 1)
+        assert jd_awal_next - jd_akhir == 1.0
+
+
+def test_hijriah_penolakan_logika() -> None:
+    """Penolakan: 30 Syaban -> INVALID_DATE; 31 April -> INVALID_DATE; 2026-02-30 -> INVALID_DATE;
+
+    tahun 1200 & 1700 -> OUT_OF_RANGE; tanggal 1899 -> OUT_OF_RANGE; mode salah -> UNSUPPORTED_MODE;
+    field kurang -> INVALID_REQUEST; campuran mode / extra -> INVALID_REQUEST.
+    """
+    # 30 Syaban (Syaban bulan 8 selalu 29 hari)
+    try:
+        konversi_hijriah("ke_masehi", hari=30, bulan=8, tahun=1448)
+        assert False, "Harus menolak 30 Syaban"
+    except HijriahError as exc:
+        assert exc.code == HJ_INVALID_DATE
+        assert exc.status_code == 400
+
+    # 31 April (April hanya 30 hari)
+    try:
+        konversi_hijriah("ke_hijriah", tanggal_masehi="2026-04-31")
+        assert False, "Harus menolak 31 April"
+    except HijriahError as exc:
+        assert exc.code == HJ_INVALID_DATE
+        assert exc.status_code == 400
+
+    # 2026-02-30
+    try:
+        konversi_hijriah("ke_hijriah", tanggal_masehi="2026-02-30")
+        assert False, "Harus menolak 2026-02-30"
+    except HijriahError as exc:
+        assert exc.code == HJ_INVALID_DATE
+        assert exc.status_code == 400
+
+    # Tahun 1200 & 1700 Hijriah -> OUT_OF_RANGE
+    try:
+        konversi_hijriah("ke_masehi", hari=1, bulan=1, tahun=1200)
+        assert False, "Harus menolak tahun 1200 H"
+    except HijriahError as exc:
+        assert exc.code == HJ_OUT_OF_RANGE
+        assert exc.status_code == 400
+
+    try:
+        konversi_hijriah("ke_masehi", hari=1, bulan=1, tahun=1700)
+        assert False, "Harus menolak tahun 1700 H"
+    except HijriahError as exc:
+        assert exc.code == HJ_OUT_OF_RANGE
+        assert exc.status_code == 400
+
+    # Tanggal 1899 Masehi -> OUT_OF_RANGE
+    try:
+        konversi_hijriah("ke_hijriah", tanggal_masehi="1899-12-31")
+        assert False, "Harus menolak tahun 1899"
+    except HijriahError as exc:
+        assert exc.code == HJ_OUT_OF_RANGE
+        assert exc.status_code == 400
+
+    # Mode salah -> UNSUPPORTED_MODE
+    try:
+        konversi_hijriah("ke_jawa", hari=1, bulan=1, tahun=1448)
+        assert False, "Harus menolak mode salah"
+    except HijriahError as exc:
+        assert exc.code == HJ_UNSUPPORTED_MODE
+        assert exc.status_code == 400
+
+    # Field kurang -> INVALID_REQUEST
+    try:
+        konversi_hijriah("ke_masehi", hari=1)
+        assert False, "Harus menolak field kurang"
+    except HijriahError as exc:
+        assert exc.code == HJ_INVALID_REQUEST
+        assert exc.status_code == 400
+
+    # Campuran mode -> INVALID_REQUEST
+    try:
+        konversi_hijriah("ke_masehi", hari=1, bulan=1, tahun=1448, tanggal_masehi="2026-10-23")
+        assert False, "Harus menolak campuran mode"
+    except HijriahError as exc:
+        assert exc.code == HJ_INVALID_REQUEST
+        assert exc.status_code == 400
+
+    # Field tidak dikenal -> INVALID_REQUEST
+    try:
+        konversi_hijriah("ke_masehi", hari=1, bulan=1, tahun=1448, extra_field="foo")
+        assert False, "Harus menolak field tidak dikenal"
+    except HijriahError as exc:
+        assert exc.code == HJ_INVALID_REQUEST
+        assert exc.status_code == 400
+
+
+def test_http_hijriah_limits_dan_headers() -> None:
+    """Uji HTTP GET /api/hijriah/limits: status 200, Cache-Control no-store, data lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/hijriah/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control") == "no-store"
+    data = resp.json()
+    assert data["min_tahun_hijriah"] == HJ_MIN_TAHUN_HIJRIAH
+    assert data["max_tahun_hijriah"] == HJ_MAX_TAHUN_HIJRIAH
+    assert len(data["daftar_bulan"]) == 12
+    assert data["default_mode"] == "ke_masehi"
+
+
+def test_http_hijriah_post_sukses_dan_headers() -> None:
+    """Uji HTTP POST /api/hijriah sukses untuk kedua mode dan header tepat."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Mode ke_masehi
+    resp_m = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_masehi", "hari": "11", "bulan": "5", "tahun": "1448"},
+    )
+    assert resp_m.status_code == 200
+    assert resp_m.headers.get("cache-control") == "no-store"
+    assert "X-Processing-Ms" in resp_m.headers
+    data_m = resp_m.json()
+    assert data_m["mode"] == "ke_masehi"
+    assert data_m["masehi"]["tanggal"] == "2026-10-23"
+    assert data_m["masehi"]["hari"] == "Jumat"
+    assert data_m["hijriah"]["hari_dalam_tahun"] == 129
+    assert len(data_m["tanggal_penting"]) == 4
+
+    # Mode ke_hijriah
+    resp_h = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_hijriah", "tanggal_masehi": "2026-10-23"},
+    )
+    assert resp_h.status_code == 200
+    assert resp_h.headers.get("cache-control") == "no-store"
+    assert "X-Processing-Ms" in resp_h.headers
+    data_h = resp_h.json()
+    assert data_h["mode"] == "ke_hijriah"
+    assert data_h["masehi"]["tanggal"] == "2026-10-23"
+    assert data_h["hijriah"]["tahun"] == 1448
+    assert data_h["hijriah"]["bulan"] == 5
+    assert data_h["hijriah"]["hari"] == 11
+    assert data_h["hijriah"]["hari_dalam_tahun"] == 129
+
+
+def test_http_hijriah_semua_jalur_galat() -> None:
+    """Uji HTTP POST /api/hijriah untuk semua kemungkinan penolakan input."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Field mode kosong
+    r_empty = client.post("/api/hijriah", data={"mode": ""})
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == HJ_INVALID_REQUEST
+
+    # Field mode tidak lengkap
+    r_missing = client.post("/api/hijriah", data={"mode": "ke_masehi", "hari": "10"})
+    assert r_missing.status_code == 400
+    assert r_missing.json()["error"]["code"] == HJ_INVALID_REQUEST
+
+    # Mode tidak didukung
+    r_unsupported = client.post("/api/hijriah", data={"mode": "ke_jawa", "hari": "1", "bulan": "1", "tahun": "1448"})
+    assert r_unsupported.status_code == 400
+    assert r_unsupported.json()["error"]["code"] == HJ_UNSUPPORTED_MODE
+
+    # 30 Syaban -> INVALID_DATE
+    r_syaban = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_masehi", "hari": "30", "bulan": "8", "tahun": "1448"},
+    )
+    assert r_syaban.status_code == 400
+    assert r_syaban.json()["error"]["code"] == HJ_INVALID_DATE
+
+    # 31 April -> INVALID_DATE
+    r_april = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_hijriah", "tanggal_masehi": "2026-04-31"},
+    )
+    assert r_april.status_code == 400
+    assert r_april.json()["error"]["code"] == HJ_INVALID_DATE
+
+    # 2026-02-30 -> INVALID_DATE
+    r_feb = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_hijriah", "tanggal_masehi": "2026-02-30"},
+    )
+    assert r_feb.status_code == 400
+    assert r_feb.json()["error"]["code"] == HJ_INVALID_DATE
+
+    # Tahun 1200 & 1700 -> OUT_OF_RANGE
+    r_1200 = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_masehi", "hari": "1", "bulan": "1", "tahun": "1200"},
+    )
+    assert r_1200.status_code == 400
+    assert r_1200.json()["error"]["code"] == HJ_OUT_OF_RANGE
+
+    r_1700 = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_masehi", "hari": "1", "bulan": "1", "tahun": "1700"},
+    )
+    assert r_1700.status_code == 400
+    assert r_1700.json()["error"]["code"] == HJ_OUT_OF_RANGE
+
+    # Tanggal 1899 -> OUT_OF_RANGE
+    r_1899 = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_hijriah", "tanggal_masehi": "1899-05-10"},
+    )
+    assert r_1899.status_code == 400
+    assert r_1899.json()["error"]["code"] == HJ_OUT_OF_RANGE
+
+    # Body JSON ditolak
+    r_json = client.post("/api/hijriah", json={"mode": "ke_hijriah", "tanggal_masehi": "2026-10-23"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == HJ_INVALID_REQUEST
+    assert "JSON" in r_json.json()["error"]["message"]
+
+    # Field tidak dikenal
+    r_extra = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_hijriah", "tanggal_masehi": "2026-10-23", "extra_field": "123"},
+    )
+    assert r_extra.status_code == 400
+    assert r_extra.json()["error"]["code"] == HJ_INVALID_REQUEST
+
+    # Payload terlalu besar -> 413 PAYLOAD_TOO_LARGE
+    r_big = client.post(
+        "/api/hijriah",
+        data={"mode": "ke_hijriah", "tanggal_masehi": "2026-10-23" + "x" * (HJ_MAX_BODY_BYTES + 10)},
+    )
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == HJ_PAYLOAD_TOO_LARGE
+
+
+def test_http_hijriah_root_tools_dan_regresi() -> None:
+    """Pastikan hijriah ada di root endpoint dan endpoint lain tetap berfungsi."""
+    client = _test_client()
+    if client is None:
+        return
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "hijriah" in root_resp.json()["tools"]
+
+    # Regresi endpoint lain
+    cc_resp = client.get("/api/cicilan/limits")
+    assert cc_resp.status_code == 200
+    tb_resp = client.get("/api/terbilang/limits")
+    assert tb_resp.status_code == 200
 
 
 # --- Runner mandiri ---------------------------------------------------------
