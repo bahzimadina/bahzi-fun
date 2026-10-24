@@ -316,6 +316,20 @@ from app.list_shuffler import (  # noqa: E402
     shuffle_lines,
     validate_text as validate_list_shuffler_text,
 )
+from app.text_diff import (  # noqa: E402
+    INVALID_BOOLEAN as TD_INVALID_BOOLEAN,
+    INVALID_REQUEST as TD_INVALID_REQUEST,
+    MAX_BYTES as TD_MAX_BYTES,
+    MAX_CHARS as TD_MAX_CHARS,
+    MAX_LINES as TD_MAX_LINES,
+    NO_TEXT as TD_NO_TEXT,
+    TOO_LONG as TD_TOO_LONG,
+    TOO_MANY_LINES as TD_TOO_MANY_LINES,
+    TextDiffError,
+    diff_text,
+    parse_bool as parse_text_diff_bool,
+    validate_single_text as validate_text_diff_text,
+)
 from app.text_formatter import (  # noqa: E402
     CHUNK_SIZE as TF_CHUNK_SIZE,
     INVALID_BOOLEAN as TF_INVALID_BOOLEAN,
@@ -3584,6 +3598,240 @@ def test_http_text_formatter_regresi_endpoint_lama() -> None:
     assert root_resp.status_code == 200
     root_data = root_resp.json()
     assert "text-formatter" in root_data["tools"]
+
+
+# --- Uji Text Diff: Logika murni -------------------------------------------
+def test_text_diff_logika_identik() -> None:
+    raw = "Baris pertama\nBaris kedua\nBaris ketiga"
+    res = diff_text(raw, raw)
+    ringkasan = res["ringkasan"]
+    assert ringkasan["identik"] is True
+    assert ringkasan["total_beda"] == 0
+    assert ringkasan["sama"] == 3
+    assert ringkasan["tambah"] == 0
+    assert ringkasan["hapus"] == 0
+    assert ringkasan["ubah"] == 0
+    assert len(res["baris"]) == 3
+    for b in res["baris"]:
+        assert b["jenis"] == "sama"
+        assert b["nomor_a"] is not None
+        assert b["nomor_b"] is not None
+        assert b["nomor_a"] == b["nomor_b"]
+
+
+def test_text_diff_logika_tambah_hapus_ubah() -> None:
+    lama = "Baris 1\nBaris 2 lama\nBaris 3\nBaris 4 dihapus\nBaris 5"
+    baru = "Baris 1\nBaris 2 baru\nBaris 3\nBaris 5\nBaris 6 ditambah"
+    res = diff_text(lama, baru)
+    ringkasan = res["ringkasan"]
+    assert ringkasan["identik"] is False
+    assert ringkasan["sama"] == 3
+    assert ringkasan["ubah"] == 1
+    assert ringkasan["hapus"] == 1
+    assert ringkasan["tambah"] == 1
+    assert ringkasan["total_beda"] == 3
+
+    # Cek baris jenis ubah
+    ubah_lines = [b for b in res["baris"] if b["jenis"] == "ubah"]
+    assert len(ubah_lines) == 1
+    assert ubah_lines[0]["nomor_a"] == 2
+    assert ubah_lines[0]["nomor_b"] == 2
+    assert ubah_lines[0]["teks_a"] == "Baris 2 lama"
+    assert ubah_lines[0]["teks_b"] == "Baris 2 baru"
+
+    # Cek baris jenis hapus dan tambah
+    hapus_lines = [b for b in res["baris"] if b["jenis"] == "hapus"]
+    assert len(hapus_lines) == 1
+    assert hapus_lines[0]["nomor_a"] == 4
+    assert hapus_lines[0]["nomor_b"] is None
+    assert hapus_lines[0]["teks"] == "Baris 4 dihapus"
+
+    tambah_lines = [b for b in res["baris"] if b["jenis"] == "tambah"]
+    assert len(tambah_lines) == 1
+    assert tambah_lines[0]["nomor_a"] is None
+    assert tambah_lines[0]["nomor_b"] == 5
+    assert tambah_lines[0]["teks"] == "Baris 6 ditambah"
+
+
+def test_text_diff_logika_replace_tak_seimbang() -> None:
+    # Blok replace: lama 2 baris, baru 1 baris
+    lama_1 = "a\nb\nc"
+    baru_1 = "x\nc"
+    res_1 = diff_text(lama_1, baru_1)
+    # k=0: a -> x (ubah), k=1: b tak berpasangan (hapus)
+    assert res_1["ringkasan"]["ubah"] == 1
+    assert res_1["ringkasan"]["hapus"] == 1
+    assert res_1["ringkasan"]["tambah"] == 0
+    assert res_1["ringkasan"]["sama"] == 1
+
+    # Blok replace: lama 1 baris, baru 3 baris
+    lama_2 = "a\nd"
+    baru_2 = "x\ny\nz\nd"
+    res_2 = diff_text(lama_2, baru_2)
+    # k=0: a -> x (ubah), sisa: y, z (tambah)
+    assert res_2["ringkasan"]["ubah"] == 1
+    assert res_2["ringkasan"]["tambah"] == 2
+    assert res_2["ringkasan"]["hapus"] == 0
+    assert res_2["ringkasan"]["sama"] == 1
+
+
+def test_text_diff_logika_opsi_spasi_dan_huruf() -> None:
+    lama = "  Halo    Dunia  \nBaris 2"
+    baru = "halo dunia\nBaris 2"
+
+    # Bawaan: abaikan_spasi=True, peka_huruf=True -> baris 1 beda karena beda huruf
+    res_def = diff_text(lama, baru)
+    assert res_def["ringkasan"]["ubah"] == 1
+
+    # peka_huruf=False, abaikan_spasi=True -> baris 1 sama
+    res_case = diff_text(lama, baru, abaikan_spasi=True, peka_huruf=False)
+    assert res_case["ringkasan"]["identik"] is True
+    assert res_case["ringkasan"]["sama"] == 2
+    # Teks asli tetap dipertahankan
+    assert res_case["baris"][0]["teks_a"] == "  Halo    Dunia  "
+    assert res_case["baris"][0]["teks_b"] == "halo dunia"
+
+    # abaikan_spasi=False -> beda spasi di baris 1 dihitung beda
+    res_no_space = diff_text("halo  dunia", "halo dunia", abaikan_spasi=False, peka_huruf=False)
+    assert res_no_space["ringkasan"]["ubah"] == 1
+
+
+def test_text_diff_logika_unified_diff() -> None:
+    lama = "alpha\nbeta\ngamma"
+    baru = "alpha\nbeta revisi\ngamma\ndelta"
+    res = diff_text(lama, baru)
+    ud = res["teks_selisih"]
+    assert "--- teks lama" in ud
+    assert "+++ teks baru" in ud
+    assert "@@ " in ud
+    assert "-beta" in ud
+    assert "+beta revisi" in ud
+    assert "+delta" in ud
+
+
+def test_text_diff_validasi_galat() -> None:
+    import pytest
+
+    # Ketiadaan field / bukan string
+    with pytest.raises(TextDiffError) as exc_info:
+        diff_text(None, "teks")
+    assert exc_info.value.code == TD_INVALID_REQUEST
+
+    with pytest.raises(TextDiffError) as exc_info:
+        diff_text("teks", 123)  # type: ignore
+    assert exc_info.value.code == TD_INVALID_REQUEST
+
+    # Kedua teks kosong setelah dirapikan
+    with pytest.raises(TextDiffError) as exc_info:
+        diff_text("   \n  \t  \n  ", "   ")
+    assert exc_info.value.code == TD_NO_TEXT
+
+    # Teks terlalu panjang
+    long_txt = "x" * (TD_MAX_CHARS + 1)
+    with pytest.raises(TextDiffError) as exc_info:
+        diff_text(long_txt, "b")
+    assert exc_info.value.code == TD_TOO_LONG
+
+    # Terlalu banyak baris
+    many_lines = "\n".join(["baris"] * (TD_MAX_LINES + 1))
+    with pytest.raises(TextDiffError) as exc_info:
+        diff_text(many_lines, "b")
+    assert exc_info.value.code == TD_TOO_MANY_LINES
+
+    # Boolean tidak valid
+    with pytest.raises(TextDiffError) as exc_info:
+        diff_text("a", "b", abaikan_spasi="ngawur")
+    assert exc_info.value.code == TD_INVALID_BOOLEAN
+
+
+# --- Uji HTTP TestClient untuk Text Diff -------------------------------------
+def test_http_text_diff_limits() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.get("/api/banding-teks/limits")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_chars"] == TD_MAX_CHARS
+    assert body["max_bytes"] == TD_MAX_BYTES
+    assert body["max_lines"] == TD_MAX_LINES
+    assert body["defaults"]["abaikan_spasi"] is True
+    assert body["defaults"]["peka_huruf"] is True
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_http_text_diff_sukses_dan_headers() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    response = client.post(
+        "/api/banding-teks",
+        data={
+            "teks_a": "Baris 1\nBaris 2 lama\nBaris 3",
+            "teks_b": "Baris 1\nBaris 2 baru\nBaris 3\nBaris 4",
+            "abaikan_spasi": "true",
+            "peka_huruf": "true",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "ringkasan" in body
+    assert "baris" in body
+    assert "teks_selisih" in body
+    assert body["ringkasan"]["sama"] == 2
+    assert body["ringkasan"]["ubah"] == 1
+    assert body["ringkasan"]["tambah"] == 1
+    assert body["ringkasan"]["total_beda"] == 2
+    assert "no-store" in response.headers.get("Cache-Control", "")
+    assert response.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in response.headers
+
+
+def test_http_text_diff_galat_dan_validasi() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # teks_a atau teks_b tidak ada -> INVALID_REQUEST 400
+    resp_missing = client.post("/api/banding-teks", data={"teks_a": "halo"})
+    assert resp_missing.status_code == 400, resp_missing.text
+    assert resp_missing.json()["error"]["code"] == TD_INVALID_REQUEST
+
+    # Request JSON bukan multipart -> INVALID_REQUEST 400
+    resp_json = client.post("/api/banding-teks", json={"teks_a": "a", "teks_b": "b"})
+    assert resp_json.status_code == 400, resp_json.text
+    assert resp_json.json()["error"]["code"] == TD_INVALID_REQUEST
+
+    # Kedua teks kosong -> NO_TEXT 400
+    resp_empty = client.post("/api/banding-teks", data={"teks_a": "  ", "teks_b": " \n "})
+    assert resp_empty.status_code == 400, resp_empty.text
+    assert resp_empty.json()["error"]["code"] == TD_NO_TEXT
+
+    # Teks terlalu panjang -> TOO_LONG 413
+    resp_long = client.post("/api/banding-teks", data={"teks_a": "x" * (TD_MAX_CHARS + 1), "teks_b": "y"})
+    assert resp_long.status_code == 413, resp_long.text
+    assert resp_long.json()["error"]["code"] == TD_TOO_LONG
+
+    # Terlalu banyak baris -> TOO_MANY_LINES 413
+    many_lines = "\n".join(["baris"] * (TD_MAX_LINES + 1))
+    resp_lines = client.post("/api/banding-teks", data={"teks_a": many_lines, "teks_b": "ok"})
+    assert resp_lines.status_code == 413, resp_lines.text
+    assert resp_lines.json()["error"]["code"] == TD_TOO_MANY_LINES
+
+    # Boolean tidak dikenal -> 400 INVALID_BOOLEAN
+    resp_bool = client.post("/api/banding-teks", data={"teks_a": "a", "teks_b": "b", "abaikan_spasi": "tidak_tahu"})
+    assert resp_bool.status_code == 400, resp_bool.text
+    assert resp_bool.json()["error"]["code"] == TD_INVALID_BOOLEAN
+
+
+def test_http_text_diff_root_registry() -> None:
+    client = _test_client()
+    if client is None:
+        return
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_data = root_resp.json()
+    assert "banding-teks" in root_data["tools"]
 
 
 # --- Uji Konverter Satuan: Logika murni ---------------------------------------

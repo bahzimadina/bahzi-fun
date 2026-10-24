@@ -60,7 +60,8 @@
         { name: 'Word Counter', desc: 'Hitung kata, karakter, kalimat, dan perkiraan waktu baca.', status: 'available', action: 'word-count' },
         { name: 'Remove Duplicates', desc: 'Hapus baris duplikat dari sebuah daftar.', status: 'available', action: 'remove-duplicates' },
         // Alat ini bekerja dengan memilih kalimat asli, bukan model bahasa, jadi tempatnya di kategori teks.
-        { name: 'Ringkas teks', desc: 'Ambil kalimat paling penting dari artikel atau laporan panjang jadi ringkasan pendek.', status: 'available', action: 'ringkas-teks' }
+        { name: 'Ringkas teks', desc: 'Ambil kalimat paling penting dari artikel atau laporan panjang jadi ringkasan pendek.', status: 'available', action: 'ringkas-teks' },
+        { name: 'Bandingkan teks', desc: 'Lihat baris mana yang ditambah, dihapus, atau berubah antara dua versi teks.', status: 'available', action: 'banding-teks' }
       ]
     },
     {
@@ -107,7 +108,7 @@
       icon: 'icon-ai',
       tools: [
         { name: 'Ambil teks dari gambar', desc: 'Baca teks dari gambar scan atau PDF hasil pindai.', status: 'available', href: '/ocr/' },
-        { name: 'Ubah/Redesign Gambar', desc: 'Ubah gaya visual gambar dengan bantuan AI.', status: 'soon' },
+        { name: 'Ubah/Redesign Gambar (AI)', desc: 'Ubah gaya visual gambar dengan model AI (memerlukan model AI, saat ini belum tersedia).', status: 'soon' },
         { name: 'Transkripsi Audio', desc: 'Ubah rekaman suara menjadi teks.', status: 'soon' }
       ]
     }

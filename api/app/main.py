@@ -243,6 +243,20 @@ from .list_shuffler import (
     shuffle_lines,
     validate_text as validate_list_shuffler_text,
 )
+from .text_diff import (
+    INVALID_BOOLEAN as TD_INVALID_BOOLEAN,
+    INVALID_REQUEST as TD_INVALID_REQUEST,
+    MAX_BYTES as TD_MAX_BYTES,
+    MAX_CHARS as TD_MAX_CHARS,
+    MAX_LINES as TD_MAX_LINES,
+    MAX_REQUEST_BYTES as TD_MAX_REQUEST_BYTES,
+    NO_TEXT as TD_NO_TEXT,
+    TOO_LONG as TD_TOO_LONG,
+    TOO_MANY_LINES as TD_TOO_MANY_LINES,
+    TextDiffError,
+    diff_text,
+    text_diff_limits_payload,
+)
 from .text_formatter import (
     CHUNK_SIZE as TF_CHUNK_SIZE,
     INVALID_BOOLEAN as TF_INVALID_BOOLEAN,
@@ -846,6 +860,17 @@ async def handle_list_shuffler_error(request: Request, exc: ListShufflerError) -
     )
 
 
+@app.exception_handler(TextDiffError)
+async def handle_text_diff_error(request: Request, exc: TextDiffError) -> JSONResponse:
+    """Error bandingkan teks yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("bandingkan teks ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(TextFormatterError)
 async def handle_text_formatter_error(request: Request, exc: TextFormatterError) -> JSONResponse:
     """Error rapikan teks yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1077,6 +1102,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/list-shuffler"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
+    elif request.url.path.startswith("/api/banding-teks"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks_a' dan 'teks_b'."
     elif request.url.path.startswith("/api/text-formatter"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'text'."
     elif request.url.path.startswith("/api/text/summary"):
@@ -1595,6 +1622,23 @@ def _list_shuffler_limits_payload() -> dict:
         "processed_on": "server",
         "note": "Daftar diproses di memori server lalu dibuang, tidak disimpan di disk.",
     }
+
+
+def _reject_oversized_text_diff_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas badan permintaan diff."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > TD_MAX_REQUEST_BYTES:
+        raise TextDiffError(
+            TD_TOO_LONG,
+            "Ukuran permintaan melebihi batas 8 MB.",
+            413,
+        )
 
 
 def _reject_oversized_text_formatter_content_length(request: Request) -> None:
@@ -3142,6 +3186,87 @@ async def text_formatter_endpoint(
         result["keluaran"]["chars"],
         result["masukan"]["lines"],
         result["keluaran"]["lines"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
+@app.get("/api/banding-teks/limits")
+async def banding_teks_limits() -> JSONResponse:
+    """Batas operasional untuk Bandingkan Teks."""
+    return JSONResponse(content=text_diff_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/banding-teks")
+async def banding_teks_endpoint(
+    request: Request,
+    teks_a: str = Form(default=None),
+    teks_b: str = Form(default=None),
+    abaikan_spasi: str = Form(default=None),
+    peka_huruf: str = Form(default=None),
+):
+    """Bandingkan dua versi teks di memori (baris per baris)."""
+    started = time.perf_counter()
+
+    _reject_oversized_text_diff_content_length(request)
+
+    form = await request.form()
+    if teks_a is None:
+        if "teks_a" in form:
+            val_a = form.get("teks_a")
+            if isinstance(val_a, UploadFile):
+                raise TextDiffError(TD_INVALID_REQUEST, "Field 'teks_a' harus berupa teks string.", 400)
+            teks_a = val_a
+        else:
+            raise TextDiffError(
+                TD_INVALID_REQUEST,
+                "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks_a' dan 'teks_b'.",
+                400,
+            )
+    elif isinstance(teks_a, UploadFile):
+        raise TextDiffError(TD_INVALID_REQUEST, "Field 'teks_a' harus berupa teks string.", 400)
+
+    if teks_b is None:
+        if "teks_b" in form:
+            val_b = form.get("teks_b")
+            if isinstance(val_b, UploadFile):
+                raise TextDiffError(TD_INVALID_REQUEST, "Field 'teks_b' harus berupa teks string.", 400)
+            teks_b = val_b
+        else:
+            raise TextDiffError(
+                TD_INVALID_REQUEST,
+                "Permintaan tidak valid. Kirim multipart/form-data dengan field 'teks_a' dan 'teks_b'.",
+                400,
+            )
+    elif isinstance(teks_b, UploadFile):
+        raise TextDiffError(TD_INVALID_REQUEST, "Field 'teks_b' harus berupa teks string.", 400)
+
+    if abaikan_spasi is None and "abaikan_spasi" in form:
+        abaikan_spasi = form.get("abaikan_spasi")
+    if peka_huruf is None and "peka_huruf" in form:
+        peka_huruf = form.get("peka_huruf")
+
+    result = diff_text(
+        teks_a=teks_a,
+        teks_b=teks_b,
+        abaikan_spasi=abaikan_spasi,
+        peka_huruf=peka_huruf,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "bandingkan teks selesai: chars_a=%d chars_b=%d lines_a=%d lines_b=%d total_beda=%d durasi=%.0fms",
+        len(teks_a),
+        len(teks_b),
+        result["ringkasan"]["baris_a"],
+        result["ringkasan"]["baris_b"],
+        result["ringkasan"]["total_beda"],
         duration_ms,
     )
 
@@ -4713,6 +4838,7 @@ async def root() -> dict:
             "remove-duplicates",
             "list-shuffler",
             "text-formatter",
+            "banding-teks",
             "text-summary",
             "unit-convert",
             "percent-calc",

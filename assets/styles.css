@@ -9228,10 +9228,204 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #kompres-gambar-panel select,
   #kompres-gambar-panel button,
   #kompres-gambar-panel a.btn,
-  #kompres-gambar-panel .chip {
+  #kompres-gambar-panel .chip,
+  #banding-teks-panel input,
+  #banding-teks-panel button,
+  #banding-teks-panel label {
     min-height: 44px;
   }
 }
+
+/* ================= Bandingkan teks (Text Diff): panel inline ================= */
+.banding-teks__inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: .75rem;
+}
+
+@media (max-width: 680px) {
+  .banding-teks__inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.banding-teks__textarea {
+  min-height: 180px;
+  font-family: var(--font-mono);
+  font-size: .88rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.banding-teks__switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-top: .75rem;
+}
+
+.banding-teks__result {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.banding-teks__stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: .5rem;
+}
+
+.banding-teks__stat-card {
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .6rem;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.banding-teks__stat-label {
+  font-size: .75rem;
+  color: var(--text-muted);
+}
+
+.banding-teks__stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.banding-teks__stat--sama .banding-teks__stat-value {
+  color: var(--md-sys-color-on-surface);
+}
+
+.banding-teks__stat--tambah .banding-teks__stat-value {
+  color: var(--md-sys-color-success-text);
+}
+
+.banding-teks__stat--hapus .banding-teks__stat-value {
+  color: var(--md-sys-color-error-text);
+}
+
+.banding-teks__stat--ubah .banding-teks__stat-value {
+  color: var(--md-sys-color-warning);
+}
+
+.banding-teks__stat--beda .banding-teks__stat-value {
+  color: var(--brand-text);
+}
+
+.banding-teks__identik-note {
+  margin: .25rem 0 0 0;
+  padding: .6rem 1rem;
+  border-radius: 6px;
+  background: rgba(122, 218, 147, 0.12);
+  color: var(--md-sys-color-success-text);
+  font-size: .88rem;
+  font-weight: 500;
+}
+
+.banding-teks__actions {
+  display: flex;
+  gap: .5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.banding-teks__daftar-wrap {
+  max-height: 480px;
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code);
+}
+
+.banding-teks__daftar {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: .84rem;
+  line-height: 1.5;
+}
+
+.banding-teks__row {
+  display: grid;
+  grid-template-columns: 3.5rem 3.5rem 1.75rem 1fr;
+  align-items: baseline;
+  padding: .2rem .5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.banding-teks__row--sama {
+  color: var(--text);
+}
+
+.banding-teks__row--tambah {
+  background: rgba(122, 218, 147, 0.12);
+  color: var(--md-sys-color-success-text);
+}
+
+.banding-teks__row--hapus {
+  background: rgba(255, 180, 171, 0.12);
+  color: var(--md-sys-color-error-text);
+}
+
+.banding-teks__row--ubah {
+  background: rgba(255, 208, 67, 0.12);
+  color: var(--text);
+}
+
+.banding-teks__col-num {
+  user-select: none;
+  font-size: .75rem;
+  color: var(--text-muted);
+  text-align: right;
+  padding-right: .5rem;
+}
+
+.banding-teks__col-sign {
+  user-select: none;
+  font-weight: 700;
+  text-align: center;
+}
+
+.banding-teks__row--tambah .banding-teks__col-sign {
+  color: var(--md-sys-color-success-text);
+}
+
+.banding-teks__row--hapus .banding-teks__col-sign {
+  color: var(--md-sys-color-error-text);
+}
+
+.banding-teks__row--ubah .banding-teks__col-sign {
+  color: var(--md-sys-color-warning);
+}
+
+.banding-teks__col-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.banding-teks__inline-del {
+  color: var(--md-sys-color-error-text);
+  text-decoration: line-through;
+  opacity: 0.9;
+  margin-right: .25rem;
+}
+
+.banding-teks__inline-ins {
+  color: var(--md-sys-color-success-text);
+  text-decoration: none;
+  font-weight: 600;
+}
+
 
 
 
