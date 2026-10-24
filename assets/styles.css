@@ -9115,5 +9115,124 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Kompres Gambar: panel alat inline ================= */
+.kompres-gambar__preview-orig {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .7rem .8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.kompres-gambar__thumb-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.kompres-gambar__thumb {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.kompres-gambar__orig-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+.kompres-gambar__filename {
+  margin: 0;
+  font-weight: 600;
+  font-size: .88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kompres-gambar__meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+.kompres-gambar__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+}
+.kompres-gambar__target-box {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.kompres-gambar__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.kompres-gambar__suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  flex-wrap: wrap;
+  padding: .75rem 1rem;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  border-radius: var(--radius);
+}
+.kompres-gambar__suggestion-text {
+  margin: 0;
+  font-size: .88rem;
+  color: var(--text);
+}
+.kompres-gambar__result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.kompres-gambar__result .kompres-gambar__thumb-wrap {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 240px;
+  padding: .4rem;
+  background: var(--code);
+}
+.kompres-gambar__result .kompres-gambar__thumb {
+  max-height: 220px;
+}
+.kompres-gambar__result-meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (pointer: coarse) {
+  #kompres-gambar-panel input,
+  #kompres-gambar-panel select,
+  #kompres-gambar-panel button,
+  #kompres-gambar-panel a.btn,
+  #kompres-gambar-panel .chip {
+    min-height: 44px;
+  }
+}
+
+
 
 

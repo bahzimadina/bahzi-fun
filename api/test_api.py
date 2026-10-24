@@ -12315,6 +12315,401 @@ def test_http_hijriah_root_tools_dan_regresi() -> None:
     assert tb_resp.status_code == 200
 
 
+# ============================================================================
+# Uji Image Compress (Kompres gambar)
+# ============================================================================
+from app.image_compress import (  # noqa: E402
+    CHUNK_SIZE as COMPRESS_CHUNK_SIZE,
+    DAMAGED_IMAGE as COMPRESS_DAMAGED_IMAGE,
+    DEFAULT_FORMAT as COMPRESS_DEFAULT_FORMAT,
+    EMPTY_FILE as COMPRESS_EMPTY_FILE,
+    EXTENSIONS as COMPRESS_EXTENSIONS,
+    INVALID_REQUEST as COMPRESS_INVALID_REQUEST,
+    INVALID_TARGET as COMPRESS_INVALID_TARGET,
+    MAX_BYTES as COMPRESS_MAX_BYTES,
+    MAX_PIXELS as COMPRESS_MAX_PIXELS,
+    MAX_SIDE as COMPRESS_MAX_SIDE,
+    MIME_TYPES as COMPRESS_MIME_TYPES,
+    NO_FILE as COMPRESS_NO_FILE,
+    PAYLOAD_TOO_LARGE as COMPRESS_PAYLOAD_TOO_LARGE,
+    QUALITY_MAX as COMPRESS_QUALITY_MAX,
+    QUALITY_MIN as COMPRESS_QUALITY_MIN,
+    SCALES as COMPRESS_SCALES,
+    SIDE_TOO_LARGE as COMPRESS_SIDE_TOO_LARGE,
+    SUPPORTED_FORMATS as COMPRESS_SUPPORTED_FORMATS,
+    TARGET_KB_DEFAULT as COMPRESS_TARGET_KB_DEFAULT,
+    TARGET_KB_MAX as COMPRESS_TARGET_KB_MAX,
+    TARGET_KB_MIN as COMPRESS_TARGET_KB_MIN,
+    TARGET_OUT_OF_RANGE as COMPRESS_TARGET_OUT_OF_RANGE,
+    TARGET_UNREACHABLE as COMPRESS_TARGET_UNREACHABLE,
+    TOO_LARGE as COMPRESS_TOO_LARGE,
+    TOO_MANY_PIXELS as COMPRESS_TOO_MANY_PIXELS,
+    UNSUPPORTED_FILE as COMPRESS_UNSUPPORTED_FILE,
+    UNSUPPORTED_FORMAT as COMPRESS_UNSUPPORTED_FORMAT,
+    CompressError,
+    CompressResult as ImageCompressResult,
+    check_total_size as check_compress_total_size,
+    compress_image,
+    detect_format as detect_compress_format,
+    is_supported_image as is_supported_compress_image,
+    limits_payload as image_compress_limits_payload_func,
+    normalize_format as compress_normalize_format,
+    normalize_target_kb as compress_normalize_target_kb,
+)
+from PIL import ImageDraw  # noqa: E402
+
+
+def expect_image_compress_error(func, code: str, status: int) -> CompressError:
+    """Pastikan func() melempar CompressError dengan kode + status yang tepat."""
+    try:
+        func()
+    except CompressError as exc:
+        assert exc.code == code, f"kode error {exc.code!r}, diharapkan {code!r}"
+        assert exc.status_code == status, f"status {exc.status_code}, diharapkan {status}"
+        body = exc.to_dict()
+        assert body["error"]["code"] == code
+        assert isinstance(body["error"]["message"], str) and body["error"]["message"]
+        return exc
+    raise AssertionError(f"tidak melempar CompressError {code}")
+
+
+def test_logika_murni_image_compress_normalisasi_target() -> None:
+    """Uji parsing dan validasi target ukuran (KB)."""
+    assert compress_normalize_target_kb(None) == 200
+    assert compress_normalize_target_kb("200") == 200
+    assert compress_normalize_target_kb("200.5") == 201
+    assert compress_normalize_target_kb("200,4") == 200
+    assert compress_normalize_target_kb(100) == 100
+    assert compress_normalize_target_kb(10) == 10
+    assert compress_normalize_target_kb(5000) == 5000
+
+    expect_image_compress_error(lambda: compress_normalize_target_kb(True), COMPRESS_INVALID_TARGET, 400)
+    expect_image_compress_error(lambda: compress_normalize_target_kb("abc"), COMPRESS_INVALID_TARGET, 400)
+    expect_image_compress_error(lambda: compress_normalize_target_kb(9), COMPRESS_TARGET_OUT_OF_RANGE, 400)
+    expect_image_compress_error(lambda: compress_normalize_target_kb(5001), COMPRESS_TARGET_OUT_OF_RANGE, 400)
+    expect_image_compress_error(lambda: compress_normalize_target_kb(-10), COMPRESS_TARGET_OUT_OF_RANGE, 400)
+
+
+def test_logika_murni_image_compress_normalisasi_format() -> None:
+    """Uji parsing dan validasi pilihan format kompresi."""
+    assert compress_normalize_format(None) == "jpeg"
+    assert compress_normalize_format("") == "jpeg"
+    assert compress_normalize_format("jpeg") == "jpeg"
+    assert compress_normalize_format("jpg") == "jpeg"
+    assert compress_normalize_format("JPG") == "jpeg"
+    assert compress_normalize_format("webp") == "webp"
+    assert compress_normalize_format("WEBP") == "webp"
+
+    expect_image_compress_error(lambda: compress_normalize_format("png"), COMPRESS_UNSUPPORTED_FORMAT, 400)
+    expect_image_compress_error(lambda: compress_normalize_format("gif"), COMPRESS_UNSUPPORTED_FORMAT, 400)
+    expect_image_compress_error(lambda: compress_normalize_format("bmp"), COMPRESS_UNSUPPORTED_FORMAT, 400)
+
+
+def test_image_compress_magic_bytes_detection() -> None:
+    """Pastikan deteksi magic bytes PNG, JPEG, dan WebP berfungsi akurat."""
+    png_data = make_image("PNG")
+    jpeg_data = make_image("JPEG")
+    webp_data = make_image("WEBP")
+
+    assert detect_compress_format(png_data) == "png"
+    assert detect_compress_format(jpeg_data) == "jpeg"
+    assert detect_compress_format(webp_data) == "webp"
+    assert detect_compress_format(b"bukan gambar sama sekali") is None
+
+    assert is_supported_compress_image(png_data) is True
+    assert is_supported_compress_image(jpeg_data) is True
+    assert is_supported_compress_image(webp_data) is True
+    assert is_supported_compress_image(b"plain text file") is False
+
+
+def test_image_compress_berkas_kosong() -> None:
+    """Berkas 0 byte harus ditolak dengan EMPTY_FILE 400."""
+    expect_image_compress_error(lambda: compress_image(b""), COMPRESS_EMPTY_FILE, 400)
+
+
+def test_image_compress_bukan_gambar() -> None:
+    """Berkas teks atau format asing ditolak dengan UNSUPPORTED_FILE 400."""
+    expect_image_compress_error(lambda: compress_image(b"ini berkas teks biasa"), COMPRESS_UNSUPPORTED_FILE, 400)
+
+
+def test_image_compress_berkas_rusak() -> None:
+    """Berkas dengan magic bytes benar tetapi bodi rusak ditolak dengan DAMAGED_IMAGE 422."""
+    corrupted = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+    expect_image_compress_error(lambda: compress_image(corrupted), COMPRESS_DAMAGED_IMAGE, 422)
+
+
+def test_image_compress_dimensi_sisi_terlalu_besar() -> None:
+    """Sisi melebihi 12.000 px ditolak dengan SIDE_TOO_LARGE 413 sebelum decode penuh."""
+    img_side = Image.new("1", (12001, 10), 0)
+    buf = io.BytesIO()
+    img_side.save(buf, format="PNG")
+    expect_image_compress_error(lambda: compress_image(buf.getvalue()), COMPRESS_SIDE_TOO_LARGE, 413)
+
+
+def test_image_compress_piksel_terlalu_banyak() -> None:
+    """Piksel melebihi 40.000.000 ditolak dengan TOO_MANY_PIXELS 413."""
+    img_huge = Image.new("1", (7000, 6000), 0)
+    buf = io.BytesIO()
+    img_huge.save(buf, format="PNG")
+    expect_image_compress_error(lambda: compress_image(buf.getvalue()), COMPRESS_TOO_MANY_PIXELS, 413)
+
+
+def test_image_compress_ukuran_lewat_batas() -> None:
+    """Ukuran berkas melebihi batas 15 MB ditolak dengan TOO_LARGE 413."""
+    expect_image_compress_error(lambda: check_compress_total_size(COMPRESS_MAX_BYTES + 1), COMPRESS_TOO_LARGE, 413)
+
+
+def test_image_compress_sudah_kecil() -> None:
+    """Bila ukuran berkas asal sudah <= target, kembalikan apa adanya tanpa kompres ulang."""
+    png_data = make_image("PNG", size=(30, 30), color="blue")
+    res = compress_image(png_data, target_kb=500, format="jpeg")
+    assert res.already_small is True
+    assert res.data == png_data
+    assert res.output_format == "png"
+    assert res.scale == 1.0
+    assert res.quality == 100
+
+
+def test_image_compress_sukses_jpeg() -> None:
+    """Kompres gambar gradasi PNG ke JPEG muat di bawah batas target KB."""
+    import os
+    raw_data = os.urandom(800 * 600 * 3)
+    img = Image.frombytes("RGB", (800, 600), raw_data)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_data = buf.getvalue()
+    assert len(png_data) > 200 * 1024
+
+    res = compress_image(png_data, target_kb=100, format="jpeg")
+    assert res.already_small is False
+    assert res.output_format == "jpeg"
+    assert len(res.data) <= 100 * 1024
+    assert res.quality >= 5
+
+    pil_out = Image.open(io.BytesIO(res.data))
+    assert pil_out.format == "JPEG"
+
+
+def test_image_compress_sukses_webp() -> None:
+    """Kompres gambar RGBA PNG ke WebP muat di bawah batas target KB."""
+    import os
+    raw_data = os.urandom(800 * 600 * 4)
+    img = Image.frombytes("RGBA", (800, 600), raw_data)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_data = buf.getvalue()
+    assert len(png_data) > 200 * 1024
+
+    res = compress_image(png_data, target_kb=80, format="webp")
+    assert res.already_small is False
+    assert res.output_format == "webp"
+    assert len(res.data) <= 80 * 1024
+
+    pil_out = Image.open(io.BytesIO(res.data))
+    assert pil_out.format == "WEBP"
+
+
+def test_image_compress_jpeg_alpha_latar_putih() -> None:
+    """Kompres PNG transparan ke JPEG meratakan latar ke putih tanpa eror channel alpha."""
+    import os
+    raw_data = os.urandom(600 * 600 * 4)
+    img = Image.frombytes("RGBA", (600, 600), raw_data)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_data = buf.getvalue()
+
+    res = compress_image(png_data, target_kb=80, format="jpeg")
+    assert res.output_format == "jpeg"
+    assert len(res.data) <= 80 * 1024
+    pil_out = Image.open(io.BytesIO(res.data))
+    assert pil_out.mode == "RGB"
+
+
+def test_image_compress_target_unreachable() -> None:
+    """Gambar berdimensi besar dan berpola rapat yang mustahil mencapai target kecil menghasilkan 422 TARGET_UNREACHABLE."""
+    w, h = 6000, 6000
+    img = Image.new("RGB", (w, h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    for i in range(0, w, 10):
+        draw.line([(i, 0), (i, h)], fill=((i * 7) % 256, (i * 13) % 256, (i * 29) % 256), width=3)
+    for j in range(0, h, 10):
+        draw.line([(0, j), (w, j)], fill=((j * 17) % 256, (j * 23) % 256, (j * 31) % 256), width=3)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=55)
+    jpeg_data = buf.getvalue()
+
+    exc = expect_image_compress_error(
+        lambda: compress_image(jpeg_data, target_kb=10, format="jpeg"),
+        COMPRESS_TARGET_UNREACHABLE,
+        422,
+    )
+    assert exc.min_kb is not None
+    assert exc.min_kb > 10
+    assert "Ukuran terkecil yang bisa dicapai" in exc.message
+
+
+def test_image_compress_limits_payload_logika() -> None:
+    """Uji payload limits_payload untuk Image Compress."""
+    payload = image_compress_limits_payload_func()
+    assert payload["max_mb"] == 15
+    assert payload["max_files"] == 1
+    assert payload["max_pixels"] == COMPRESS_MAX_PIXELS
+    assert payload["max_side"] == COMPRESS_MAX_SIDE
+    assert payload["target_kb"]["min"] == 10
+    assert payload["target_kb"]["max"] == 5000
+    assert payload["target_kb"]["default"] == 200
+    assert payload["target_kb"]["shortcuts"] == [100, 200, 500, 1000]
+    assert "jpeg" in payload["formats"]
+    assert "webp" in payload["formats"]
+
+
+def test_http_image_compress_limits() -> None:
+    """Uji endpoint GET /api/image/compress/limits."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/image/compress/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["max_mb"] == 15
+    assert data["target_kb"]["default"] == 200
+    assert "jpeg" in data["formats"]
+
+
+def test_http_image_compress_sukses() -> None:
+    """Uji endpoint POST /api/image/compress dengan skenario JPEG, WebP, dan gambar sudah kecil."""
+    client = _test_client()
+    if client is None:
+        return
+
+    import os
+    raw_data = os.urandom(800 * 600 * 3)
+    img = Image.frombytes("RGB", (800, 600), raw_data)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_data = buf.getvalue()
+    assert len(png_data) > 200 * 1024
+
+    # 1. Kompres ke JPEG target 100 KB
+    resp_jpeg = client.post(
+        "/api/image/compress",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"target_kb": "100", "format": "jpeg"},
+    )
+    assert resp_jpeg.status_code == 200
+    assert resp_jpeg.headers["content-type"] == "image/jpeg"
+    assert "hasil-kompres.jpg" in resp_jpeg.headers["content-disposition"]
+    out_bytes = int(resp_jpeg.headers["x-output-bytes"])
+    assert out_bytes <= 100 * 1024
+    assert resp_jpeg.headers["x-output-format"] == "jpeg"
+    assert resp_jpeg.headers["x-already-small"] == "false"
+    assert "x-processing-ms" in resp_jpeg.headers
+
+    # 2. Kompres ke WebP target 80 KB
+    resp_webp = client.post(
+        "/api/image/compress",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"target_kb": "80", "format": "webp"},
+    )
+    assert resp_webp.status_code == 200
+    assert resp_webp.headers["content-type"] == "image/webp"
+    assert "hasil-kompres.webp" in resp_webp.headers["content-disposition"]
+    assert int(resp_webp.headers["x-output-bytes"]) <= 80 * 1024
+
+    # 3. Berkas sudah di bawah target (target 5000 KB)
+    small_data = make_image("PNG", size=(20, 20), color="green")
+    resp_small = client.post(
+        "/api/image/compress",
+        files={"file": ("kecil.png", small_data, "image/png")},
+        data={"target_kb": "5000", "format": "jpeg"},
+    )
+    assert resp_small.status_code == 200
+    assert resp_small.headers["x-already-small"] == "true"
+    assert resp_small.content == small_data
+
+
+def test_http_image_compress_galat() -> None:
+    """Uji berbagai skenario galat HTTP pada POST /api/image/compress."""
+    client = _test_client()
+    if client is None:
+        return
+
+    png_data = make_image("PNG")
+
+    # 1. Tanpa berkas -> 400 NO_FILE
+    resp_no_file = client.post("/api/image/compress", data={"target_kb": "200"})
+    assert resp_no_file.status_code == 400
+    assert resp_no_file.json()["error"]["code"] == COMPRESS_NO_FILE
+
+    # 2. Berkas kosong 0 byte -> 400 EMPTY_FILE
+    resp_empty = client.post(
+        "/api/image/compress",
+        files={"file": ("kosong.png", b"", "image/png")},
+        data={"target_kb": "200"},
+    )
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["error"]["code"] == COMPRESS_EMPTY_FILE
+
+    # 3. Berkas teks -> 400 UNSUPPORTED_FILE
+    resp_txt = client.post(
+        "/api/image/compress",
+        files={"file": ("teks.txt", b"bukan gambar sama sekali", "text/plain")},
+        data={"target_kb": "200"},
+    )
+    assert resp_txt.status_code == 400
+    assert resp_txt.json()["error"]["code"] == COMPRESS_UNSUPPORTED_FILE
+
+    # 4. Target bukan angka -> 400 INVALID_TARGET
+    resp_inv_target = client.post(
+        "/api/image/compress",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"target_kb": "seratus"},
+    )
+    assert resp_inv_target.status_code == 400
+    assert resp_inv_target.json()["error"]["code"] == COMPRESS_INVALID_TARGET
+
+    # 5. Target di luar rentang -> 400 TARGET_OUT_OF_RANGE
+    resp_oor = client.post(
+        "/api/image/compress",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"target_kb": "2"},
+    )
+    assert resp_oor.status_code == 400
+    assert resp_oor.json()["error"]["code"] == COMPRESS_TARGET_OUT_OF_RANGE
+
+    # 6. Format tidak didukung -> 400 UNSUPPORTED_FORMAT
+    resp_fmt = client.post(
+        "/api/image/compress",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"target_kb": "200", "format": "tiff"},
+    )
+    assert resp_fmt.status_code == 400
+    assert resp_fmt.json()["error"]["code"] == COMPRESS_UNSUPPORTED_FORMAT
+
+    # 7. Body JSON -> 400 INVALID_REQUEST
+    resp_json = client.post("/api/image/compress", json={"target_kb": "200"})
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == COMPRESS_INVALID_REQUEST
+
+
+def test_http_image_compress_root_dan_regresi() -> None:
+    """Pastikan image-compress terdaftar di root dan endpoint lain tidak terganggu."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "image-compress" in root_resp.json()["tools"]
+
+    filter_resp = client.get("/api/image/filter/limits")
+    assert filter_resp.status_code == 200
+    cicilan_resp = client.get("/api/cicilan/limits")
+    assert cicilan_resp.status_code == 200
+
+
+
 # --- Runner mandiri ---------------------------------------------------------
 def main() -> int:
     tests = [

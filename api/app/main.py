@@ -74,6 +74,22 @@ from .image_filter import (
     filter_image,
     limits_payload as image_filter_limits_payload,
 )
+from .image_compress import (
+    CHUNK_SIZE as IMG_COMPRESS_CHUNK_SIZE,
+    MAX_BYTES as IMG_COMPRESS_MAX_BYTES,
+    MAX_PIXELS as IMG_COMPRESS_MAX_PIXELS,
+    MAX_SIDE as IMG_COMPRESS_MAX_SIDE,
+    MIME_TYPES as IMG_COMPRESS_MIME_TYPES,
+    EXTENSIONS as IMG_COMPRESS_EXTENSIONS,
+    EMPTY_FILE as IMG_COMPRESS_EMPTY_FILE,
+    INVALID_REQUEST as IMG_COMPRESS_INVALID_REQUEST,
+    NO_FILE as IMG_COMPRESS_NO_FILE,
+    PAYLOAD_TOO_LARGE as IMG_COMPRESS_PAYLOAD_TOO_LARGE,
+    TOO_LARGE as IMG_COMPRESS_TOO_LARGE,
+    CompressError as ImageCompressError,
+    compress_image,
+    limits_payload as image_compress_limits_payload,
+)
 from .pdf_merge import (
     CHUNK_SIZE,
     ERR_TOO_LARGE,
@@ -769,6 +785,17 @@ async def handle_filter_error(request: Request, exc: FilterError) -> JSONRespons
     )
 
 
+@app.exception_handler(ImageCompressError)
+async def handle_image_compress_error(request: Request, exc: ImageCompressError) -> JSONResponse:
+    """Error kompres gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("kompres gambar ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(WordCountError)
 async def handle_word_count_error(request: Request, exc: WordCountError) -> JSONResponse:
     """Error hitung kata yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -1086,6 +1113,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/image/filter"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/image/compress"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/pdf/to-image"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/edit"):
@@ -1241,6 +1270,49 @@ async def _read_capped_filter_image(upload: UploadFile, remaining_budget: int) -
             raise FilterError(
                 FILTER_TOO_LARGE,
                 f"Ukuran berkas melebihi batas {FILTER_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+                413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _reject_oversized_compress_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas gambar kompres."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > IMG_COMPRESS_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise ImageCompressError(
+            IMG_COMPRESS_PAYLOAD_TOO_LARGE,
+            f"Ukuran berkas melebihi batas {IMG_COMPRESS_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+async def _read_capped_compress_image(upload: UploadFile, remaining_budget: int) -> bytes:
+    """Baca unggahan gambar sepotong-sepotong untuk kompres, tolak bila lewat batas."""
+    if remaining_budget <= 0:
+        raise ImageCompressError(
+            IMG_COMPRESS_TOO_LARGE,
+            f"Ukuran berkas melebihi batas {IMG_COMPRESS_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+            413,
+        )
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(IMG_COMPRESS_CHUNK_SIZE)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > remaining_budget:
+            raise ImageCompressError(
+                IMG_COMPRESS_TOO_LARGE,
+                f"Ukuran berkas melebihi batas {IMG_COMPRESS_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
                 413,
             )
         chunks.append(chunk)
@@ -2529,6 +2601,83 @@ async def image_filter_endpoint(
         "X-Image-Height": str(result.height),
         "X-Pixels": str(result.width * result.height),
         "X-Total-Bytes": str(len(result.data)),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=media_type, headers=headers)
+
+
+@app.get("/api/image/compress/limits")
+async def image_compress_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Image Compress."""
+    return JSONResponse(content=image_compress_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/image/compress")
+async def image_compress_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    target_kb: str | None = Form(default="200"),
+    format: str | None = Form(default="jpeg"),
+) -> Response:
+    """Kompres gambar di memori agar ukuran berkas <= target_kb (PNG/JPEG/WebP).
+
+    Respons: binary gambar, Content-Type sesuai format output,
+    Content-Disposition: attachment; filename="hasil-kompres.<ext>".
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_compress_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise ImageCompressError(
+            IMG_COMPRESS_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    if file is None:
+        raise ImageCompressError(
+            IMG_COMPRESS_NO_FILE,
+            "Permintaan tidak valid. Field 'file' wajib disertakan.",
+            400,
+        )
+
+    payload = await _read_capped_compress_image(file, IMG_COMPRESS_MAX_BYTES)
+
+    result = await run_in_threadpool(
+        compress_image,
+        payload=payload,
+        target_kb=target_kb if target_kb is not None else "200",
+        format=format or "jpeg",
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "kompres gambar selesai: out=%s kb=%d durasi=%.0fms",
+        result.output_format,
+        result.output_kb,
+        duration_ms,
+    )
+
+    ext = IMG_COMPRESS_EXTENSIONS.get(result.output_format, ".jpg").lstrip(".")
+    media_type = IMG_COMPRESS_MIME_TYPES.get(result.output_format, "image/jpeg")
+
+    filename = f"gambar-asli.{ext}" if result.already_small else f"hasil-kompres.{ext}"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": media_type,
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Output-Format": result.output_format,
+        "X-Output-Width": str(result.width),
+        "X-Output-Height": str(result.height),
+        "X-Output-Kb": str(result.output_kb),
+        "X-Output-Bytes": str(len(result.data)),
+        "X-Output-Quality": str(result.quality),
+        "X-Output-Scale": f"{result.scale:.2f}",
+        "X-Already-Small": "true" if result.already_small else "false",
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=media_type, headers=headers)
@@ -4556,6 +4705,7 @@ async def root() -> dict:
             "image-convert",
             "image-edit",
             "image-filter",
+            "image-compress",
             "word-count",
             "case-convert",
             "ocr",
