@@ -9426,6 +9426,347 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   font-weight: 600;
 }
 
+/* ================= Hitung IPK: panel inline ================= */
+.ipk__rows-header {
+  display: grid;
+  grid-template-columns: 1fr 100px 140px 44px;
+  gap: .5rem;
+  padding: 0 .25rem;
+  margin-top: 1rem;
+  margin-bottom: .25rem;
+  font-size: .82rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ipk__rows {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.ipk__row {
+  display: grid;
+  grid-template-columns: 1fr 100px 140px 44px;
+  gap: .5rem;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .ipk__rows-header {
+    display: none;
+  }
+  .ipk__row {
+    grid-template-columns: 1fr 80px 1fr 44px;
+    gap: .4rem;
+  }
+  .ipk__col-nama {
+    grid-column: 1 / -1;
+  }
+}
+
+.ipk__input,
+.ipk__select {
+  width: 100%;
+  padding: .6rem .75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--text);
+  font-size: .95rem;
+  box-sizing: border-box;
+}
+
+.ipk__input-sks {
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.ipk__input:focus,
+.ipk__select:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.ipk__input.ipk__field--invalid,
+.ipk__select.ipk__field--invalid,
+.ipk__input[aria-invalid="true"],
+.ipk__select[aria-invalid="true"],
+.ipk__field--invalid {
+  border-color: var(--md-sys-color-error);
+}
+
+.ipk__input.ipk__field--invalid:focus,
+.ipk__select.ipk__field--invalid:focus,
+.ipk__input[aria-invalid="true"]:focus,
+.ipk__select[aria-invalid="true"]:focus,
+.ipk__field--invalid:focus {
+  border-color: var(--md-sys-color-error);
+  outline: 2px solid var(--md-sys-color-error);
+  outline-offset: 1px;
+}
+
+.ipk__row-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code);
+  color: var(--md-sys-color-error-text);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.ipk__row-del:hover {
+  background: var(--card-hover);
+  border-color: var(--md-sys-color-error);
+}
+
+.ipk__add-wrap {
+  margin-top: .75rem;
+}
+
+.ipk__add-btn {
+  font-size: .9rem;
+}
+
+.ipk__target-section {
+  margin-top: 1.25rem;
+  padding: .9rem 1rem;
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.ipk__target-row {
+  display: flex;
+  align-items: flex-end;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.ipk__target-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  flex: 1;
+  min-width: 180px;
+}
+
+.ipk__target-label {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ipk__target-input {
+  padding: .55rem .75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .95rem;
+}
+
+.ipk__target-input:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.ipk__target-btn {
+  white-space: nowrap;
+}
+
+.ipk__target-hint {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+/* Hasil Hitung IPK */
+.ipk__result {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.ipk__hero {
+  text-align: center;
+  padding: 1.25rem;
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .35rem;
+}
+
+.ipk__hero-label {
+  font-size: .85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 600;
+}
+
+.ipk__hero-value {
+  font-family: var(--font-mono);
+  font-size: 3rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--md-sys-color-primary);
+}
+
+.ipk__predikat {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: .2rem 0 0 0;
+}
+
+.ipk__predikat-note {
+  font-size: .78rem;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 480px;
+}
+
+.ipk__stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: .75rem;
+}
+
+.ipk__stat-card {
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.ipk__stat-label {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+.ipk__stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ipk__target-box {
+  padding: .85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+
+.ipk__target-box--sukses {
+  background: rgba(122, 218, 147, 0.12);
+  border-color: var(--md-sys-color-success-text);
+  color: var(--md-sys-color-success-text);
+}
+
+.ipk__target-box--perhatian {
+  background: rgba(255, 180, 171, 0.12);
+  border-color: var(--md-sys-color-error-text);
+  color: var(--md-sys-color-error-text);
+}
+
+.ipk__target-box--info {
+  background: var(--code);
+  border-color: var(--brand);
+}
+
+.ipk__target-box-title {
+  font-size: .95rem;
+  color: var(--text);
+}
+
+.ipk__target-box-pesan {
+  font-size: .88rem;
+  margin: 0;
+  color: var(--text);
+}
+
+.ipk__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ipk__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ipk__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .88rem;
+}
+
+.ipk__table th {
+  background: var(--code);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: left;
+  padding: .65rem .85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.ipk__table td {
+  padding: .6rem .85rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.ipk__table tr:last-child td {
+  border-bottom: none;
+}
+
+.ipk__cell-num {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.ipk__cell-center {
+  text-align: center;
+  font-weight: 600;
+}
+
+@media (pointer: coarse) {
+  #ipk-panel input,
+  #ipk-panel select,
+  #ipk-panel button {
+    min-height: 44px;
+  }
+}
+
+
 
 
 

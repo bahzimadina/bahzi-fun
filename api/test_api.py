@@ -405,6 +405,20 @@ from app.percent_calc import (
     limits_payload as percent_calc_limits_payload_func,
     parse_number as parse_percent_number,
 )
+from app.ipk import (
+    INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
+    INVALID_REQUEST as IPK_INVALID_REQUEST,
+    INVALID_SKS as IPK_INVALID_SKS,
+    INVALID_TARGET as IPK_INVALID_TARGET,
+    NO_COURSES as IPK_NO_COURSES,
+    PAYLOAD_TOO_LARGE as IPK_PAYLOAD_TOO_LARGE,
+    TOO_MANY_COURSES as IPK_TOO_MANY_COURSES,
+    TOTAL_SKS_TOO_LARGE as IPK_TOTAL_SKS_TOO_LARGE,
+    UNSUPPORTED_GRADE as IPK_UNSUPPORTED_GRADE,
+    IpkError,
+    compute_ipk,
+    limits_payload as ipk_limits_payload_func,
+)
 from app.zakat import (
     BERAS_KG_PER_JIWA as ZK_BERAS_KG_PER_JIWA,
     INVALID_REQUEST as ZK_INVALID_REQUEST,
@@ -12953,6 +12967,386 @@ def test_http_image_compress_root_dan_regresi() -> None:
 
     filter_resp = client.get("/api/image/filter/limits")
     assert filter_resp.status_code == 200
+    cicilan_resp = client.get("/api/cicilan/limits")
+    assert cicilan_resp.status_code == 200
+
+
+def test_ipk_kasus_tetap_dan_nilai() -> None:
+    """Uji kasus tetap kalkulator IPK, penerimaan huruf kecil, pembulatan, dan rincian."""
+    # Contoh standar: A 3 SKS + B 2 SKS -> mutu 18, SKS 5, IPK 3.60
+    courses = [
+        {"nama": "Kalkulus I", "sks": 3, "nilai": "a"},
+        {"nama": "Fisika Dasar", "sks": "2", "nilai": "B"},
+    ]
+    res = compute_ipk(courses)
+    assert res["total_sks"] == 5
+    assert res["total_mutu"] == 18.0
+    assert res["ipk"] == 3.60
+    assert res["ipk_teks"] == "3,60"
+    assert res["jumlah_mk"] == 2
+    assert res["predikat"] == "Dengan pujian"
+    assert res["distribusi"]["A"] == 1
+    assert res["distribusi"]["B"] == 1
+    assert len(res["rincian"]) == 2
+    assert res["rincian"][0]["nilai"] == "A"
+    assert res["rincian"][0]["bobot"] == 4.0
+    assert res["rincian"][0]["mutu"] == 12.0
+
+    # Skala lengkap: AB, BC, CD, D, E
+    courses_skala = [
+        {"sks": 1, "nilai": "ab"},
+        {"sks": 1, "nilai": "BC"},
+        {"sks": 1, "nilai": "cd"},
+        {"sks": 1, "nilai": "D"},
+        {"sks": 1, "nilai": "e"},
+    ]
+    res_skala = compute_ipk(courses_skala)
+    assert res_skala["total_sks"] == 5
+    assert res_skala["total_mutu"] == 8.5
+    assert res_skala["ipk"] == 1.70
+    assert res_skala["ipk_teks"] == "1,70"
+
+    # Pembulatan ROUND_HALF_UP 2 desimal: 2 SKS A (8.0) + 1 SKS E (0.0) -> 8/3 = 2.666... -> 2.67
+    res_round = compute_ipk([
+        {"sks": 2, "nilai": "A"},
+        {"sks": 1, "nilai": "E"},
+    ])
+    assert res_round["ipk"] == 2.67
+    assert res_round["ipk_teks"] == "2,67"
+
+
+def test_ipk_predikat_tiap_ambang() -> None:
+    """Uji predikat kelulusan pada setiap batas ambang nilai."""
+    # >= 3.51 -> "Dengan pujian"
+    res_pujian = compute_ipk([
+        {"sks": 26, "nilai": "A"},
+        {"sks": 25, "nilai": "A"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 24, "nilai": "B"},
+    ])  # 51 SKS A (204) + 49 SKS B (147) = 351 mutu / 100 sks = 3.51
+    assert res_pujian["ipk"] == 3.51
+    assert res_pujian["predikat"] == "Dengan pujian"
+
+    # 3.01 - 3.50 -> "Sangat memuaskan"
+    res_sm1 = compute_ipk([
+        {"sks": 25, "nilai": "A"},
+        {"sks": 25, "nilai": "A"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 25, "nilai": "B"},
+    ])  # 50 SKS A (200) + 50 SKS B (150) = 350 mutu / 100 sks = 3.50
+    assert res_sm1["ipk"] == 3.50
+    assert res_sm1["predikat"] == "Sangat memuaskan"
+
+    res_sm2 = compute_ipk([
+        {"sks": 1, "nilai": "A"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 24, "nilai": "B"},
+    ])  # 1 SKS A (4) + 99 SKS B (297) = 301 mutu / 100 sks = 3.01
+    assert res_sm2["ipk"] == 3.01
+    assert res_sm2["predikat"] == "Sangat memuaskan"
+
+    # 2.76 - 3.00 -> "Memuaskan"
+    res_m1 = compute_ipk([{"sks": 25, "nilai": "B"}] * 4)  # 3.00
+    assert res_m1["ipk"] == 3.00
+    assert res_m1["predikat"] == "Memuaskan"
+
+    res_m2 = compute_ipk([
+        {"sks": 26, "nilai": "B"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 25, "nilai": "B"},
+        {"sks": 24, "nilai": "C"},
+    ])  # 76 SKS B (228) + 24 SKS C (48) = 276 / 100 = 2.76
+    assert res_m2["ipk"] == 2.76
+    assert res_m2["predikat"] == "Memuaskan"
+
+    # 2.00 - 2.75 -> "Cukup"
+    res_c1 = compute_ipk([{"sks": 25, "nilai": "B"}] * 3 + [{"sks": 25, "nilai": "C"}])  # 275 / 100 = 2.75
+    assert res_c1["ipk"] == 2.75
+    assert res_c1["predikat"] == "Cukup"
+
+    res_c2 = compute_ipk([{"sks": 25, "nilai": "C"}] * 4)  # 2.00
+    assert res_c2["ipk"] == 2.00
+    assert res_c2["predikat"] == "Cukup"
+
+    # < 2.00 -> "Di bawah 2,00"
+    res_bawah = compute_ipk([
+        {"sks": 25, "nilai": "C"},
+        {"sks": 25, "nilai": "C"},
+        {"sks": 25, "nilai": "C"},
+        {"sks": 24, "nilai": "C"},
+        {"sks": 1, "nilai": "D"},
+    ])  # 99 SKS C (198) + 1 SKS D (1) = 199 / 100 = 1.99
+    assert res_bawah["ipk"] == 1.99
+    assert res_bawah["predikat"] == "Di bawah 2,00"
+
+
+def test_ipk_target() -> None:
+    """Uji perhitungan target SKS nilai A yang dibutuhkan."""
+    # 1. Target sudah tercapai (IPK sekarang 3.60, target 3.40)
+    res_achieved = compute_ipk(
+        [{"sks": 3, "nilai": "A"}, {"sks": 2, "nilai": "B"}],
+        target="3.40",
+    )
+    t1 = res_achieved["target"]
+    assert t1["sudah_tercapai"] is True
+    assert t1["tidak_mungkin"] is False
+    assert t1["sks_a_dibutuhkan"] == 0
+    assert "sudah di atas target" in t1["pesan"]
+
+    # 2. Target butuh tepat 12 SKS A (20 SKS, 64 mutu, IPK 3.20, target 3.50)
+    # x = ceil((3.5 * 20 - 64) / (4 - 3.5)) = ceil(6 / 0.5) = 12
+    res_need12 = compute_ipk(
+        [{"sks": 4, "nilai": "A"}, {"sks": 16, "nilai": "B"}],
+        target="3,50",
+    )
+    t2 = res_need12["target"]
+    assert t2["sudah_tercapai"] is False
+    assert t2["tidak_mungkin"] is False
+    assert t2["sks_a_dibutuhkan"] == 12
+    assert t2["ipk_setelah"] == 3.50
+    assert "12 SKS" in t2["pesan"]
+
+    # 3. Target 4.00 tidak mungkin bila belum semua A
+    res_target4 = compute_ipk(
+        [{"sks": 3, "nilai": "B"}],
+        target=4.0,
+    )
+    t3 = res_target4["target"]
+    assert t3["sudah_tercapai"] is False
+    assert t3["tidak_mungkin"] is True
+    assert t3["sks_a_dibutuhkan"] is None
+    assert "hanya bisa diraih bila semua nilai A" in t3["pesan"]
+
+    # 4. Target butuh SKS melebihi batas 400 total SKS
+    courses_big = [{"sks": 30, "nilai": "C"} for _ in range(13)] + [{"sks": 8, "nilai": "C"}]  # 398 SKS
+    res_too_many = compute_ipk(courses_big, target="3.99")
+    t4 = res_too_many["target"]
+    assert t4["sudah_tercapai"] is False
+    assert t4["tidak_mungkin"] is True
+    assert "melebihi batas" in t4["pesan"]
+
+
+def test_ipk_300_putaran_acak() -> None:
+    """Uji 300 putaran acak dibandingkan implementasi acuan terpisah."""
+    import random
+    from decimal import Decimal, ROUND_HALF_UP
+    rng = random.Random(12345)
+
+    ref_weights = {
+        "A": Decimal("4.0"),
+        "AB": Decimal("3.5"),
+        "B": Decimal("3.0"),
+        "BC": Decimal("2.5"),
+        "C": Decimal("2.0"),
+        "CD": Decimal("1.5"),
+        "D": Decimal("1.0"),
+        "E": Decimal("0.0"),
+    }
+    grades_list = list(ref_weights.keys())
+
+    for _ in range(300):
+        n_courses = rng.randint(1, 30)
+        courses = []
+        for i in range(n_courses):
+            sks = rng.randint(1, 4)
+            grade = rng.choice(grades_list)
+            if rng.random() > 0.5:
+                grade = grade.lower()
+            courses.append({"nama": f"MK {i + 1}", "sks": sks, "nilai": grade})
+
+        # Acuan terpisah
+        ref_total_sks = sum(c["sks"] for c in courses)
+        ref_total_mutu = sum(
+            Decimal(c["sks"]) * ref_weights[c["nilai"].upper()]
+            for c in courses
+        )
+        ref_ipk = (ref_total_mutu / Decimal(ref_total_sks)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
+        res = compute_ipk(courses)
+        assert res["total_sks"] == ref_total_sks
+        assert res["total_mutu"] == float(ref_total_mutu)
+        assert res["ipk"] == float(ref_ipk)
+        assert res["ipk_teks"] == f"{ref_ipk:.2f}".replace(".", ",")
+        assert res["jumlah_mk"] == n_courses
+
+
+def test_ipk_semua_jalur_galat() -> None:
+    """Uji semua skenario galat modul ipk."""
+    # courses bukan list
+    for invalid_courses in [None, "string", 123, {"sks": 3}]:
+        try:
+            compute_ipk(invalid_courses)
+            assert False, "Harus gagal INVALID_REQUEST"
+        except IpkError as e:
+            assert e.code == IPK_INVALID_REQUEST
+
+    # courses kosong
+    try:
+        compute_ipk([])
+        assert False, "Harus gagal NO_COURSES"
+    except IpkError as e:
+        assert e.code == IPK_NO_COURSES
+
+    # courses > 60
+    try:
+        compute_ipk([{"sks": 1, "nilai": "A"}] * 61)
+        assert False, "Harus gagal TOO_MANY_COURSES"
+    except IpkError as e:
+        assert e.code == IPK_TOO_MANY_COURSES
+
+    # baris bukan dict
+    try:
+        compute_ipk(["bukan-dict"])
+        assert False, "Harus gagal INVALID_REQUEST"
+    except IpkError as e:
+        assert e.code == IPK_INVALID_REQUEST
+
+    # SKS tidak valid: 0, 31, -2, "3.5", "abc", bool, None
+    for bad_sks in [0, 31, -2, "3.5", "abc", True, False, None]:
+        try:
+            compute_ipk([{"sks": bad_sks, "nilai": "A"}])
+            assert False, f"SKS {bad_sks} harus gagal INVALID_SKS"
+        except IpkError as e:
+            assert e.code == IPK_INVALID_SKS
+
+    # Nama > 80 karakter
+    try:
+        compute_ipk([{"nama": "A" * 81, "sks": 3, "nilai": "A"}])
+        assert False, "Harus gagal INVALID_COURSE_NAME"
+    except IpkError as e:
+        assert e.code == IPK_INVALID_COURSE_NAME
+
+    # Nilai tidak dikenal
+    for bad_grade in ["Z", "", "F", "A+", None, 4]:
+        try:
+            compute_ipk([{"sks": 3, "nilai": bad_grade}])
+            assert False, f"Grade {bad_grade} harus gagal UNSUPPORTED_GRADE"
+        except IpkError as e:
+            assert e.code == IPK_UNSUPPORTED_GRADE
+
+    # Total SKS > 400
+    try:
+        compute_ipk([{"sks": 30, "nilai": "A"}] * 14)  # 420 SKS
+        assert False, "Harus gagal TOTAL_SKS_TOO_LARGE"
+    except IpkError as e:
+        assert e.code == IPK_TOTAL_SKS_TOO_LARGE
+
+    # Target tidak valid: -1, 4.1, "abc", "5"
+    for bad_target in [-1, 4.1, "abc", "5", True]:
+        try:
+            compute_ipk([{"sks": 3, "nilai": "A"}], target=bad_target)
+            assert False, f"Target {bad_target} harus gagal INVALID_TARGET"
+        except IpkError as e:
+            assert e.code == IPK_INVALID_TARGET
+
+
+def test_http_ipk_limits() -> None:
+    """Uji endpoint GET /api/ipk/limits mengembalikan batas dan header no-store."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/ipk/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control") == "no-store"
+    data = resp.json()
+    assert data["max_courses"] == 60
+    assert data["sks_per_course"]["min"] == 1
+    assert data["sks_per_course"]["max"] == 30
+    assert data["max_total_sks"] == 400
+    assert len(data["grades"]) == 8
+    assert data["target"]["min"] == 0.0
+    assert data["target"]["max"] == 4.0
+
+
+def test_http_ipk_sukses_dan_headers() -> None:
+    """Uji endpoint POST /api/ipk sukses dengan angka benar dan headers."""
+    client = _test_client()
+    if client is None:
+        return
+
+    courses_json = json.dumps([
+        {"nama": "Kalkulus I", "sks": 3, "nilai": "A"},
+        {"nama": "Fisika Dasar", "sks": 2, "nilai": "B"},
+    ])
+    resp = client.post("/api/ipk", data={"courses": courses_json, "target": "3.5"})
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    assert "x-processing-ms" in resp.headers
+
+    data = resp.json()
+    assert data["ipk"] == 3.60
+    assert data["ipk_teks"] == "3,60"
+    assert data["total_sks"] == 5
+    assert data["total_mutu"] == 18.0
+    assert data["target"]["sudah_tercapai"] is True
+
+
+def test_http_ipk_galat() -> None:
+    """Uji berbagai skenario galat pada endpoint POST /api/ipk."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # POST tanpa courses -> 400 NO_COURSES
+    r1 = client.post("/api/ipk", data={})
+    assert r1.status_code == 400
+    assert r1.json()["error"]["code"] == IPK_NO_COURSES
+
+    # courses bukan JSON -> 400 INVALID_REQUEST
+    r2 = client.post("/api/ipk", data={"courses": "bukan-json-valid"})
+    assert r2.status_code == 400
+    assert r2.json()["error"]["code"] == IPK_INVALID_REQUEST
+
+    # sks 0 -> 400 INVALID_SKS
+    r3 = client.post("/api/ipk", data={"courses": json.dumps([{"sks": 0, "nilai": "A"}])})
+    assert r3.status_code == 400
+    assert r3.json()["error"]["code"] == IPK_INVALID_SKS
+
+    # sks "3.5" -> 400 INVALID_SKS
+    r4 = client.post("/api/ipk", data={"courses": json.dumps([{"sks": "3.5", "nilai": "A"}])})
+    assert r4.status_code == 400
+    assert r4.json()["error"]["code"] == IPK_INVALID_SKS
+
+    # nilai "Z" -> 400 UNSUPPORTED_GRADE
+    r5 = client.post("/api/ipk", data={"courses": json.dumps([{"sks": 3, "nilai": "Z"}])})
+    assert r5.status_code == 400
+    assert r5.json()["error"]["code"] == IPK_UNSUPPORTED_GRADE
+
+    # 61 baris -> 400 TOO_MANY_COURSES
+    r6 = client.post("/api/ipk", data={"courses": json.dumps([{"sks": 1, "nilai": "A"}] * 61)})
+    assert r6.status_code == 400
+    assert r6.json()["error"]["code"] == IPK_TOO_MANY_COURSES
+
+    # target "5" -> 400 INVALID_TARGET
+    r7 = client.post("/api/ipk", data={
+        "courses": json.dumps([{"sks": 3, "nilai": "A"}]),
+        "target": "5",
+    })
+    assert r7.status_code == 400
+    assert r7.json()["error"]["code"] == IPK_INVALID_TARGET
+
+
+def test_http_ipk_root_dan_regresi() -> None:
+    """Pastikan ipk terdaftar di root dan endpoint lain tidak terganggu."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "ipk" in root_resp.json()["tools"]
+
+    pc_resp = client.get("/api/percent-calc/limits")
+    assert pc_resp.status_code == 200
+
+    diff_resp = client.get("/api/banding-teks/limits")
+    assert diff_resp.status_code == 200
+
     cicilan_resp = client.get("/api/cicilan/limits")
     assert cicilan_resp.status_code == 200
 

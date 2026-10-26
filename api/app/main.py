@@ -317,6 +317,20 @@ from .percent_calc import (
     compute_percent,
     limits_payload as percent_calc_limits_payload_func,
 )
+from .ipk import (
+    INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
+    INVALID_REQUEST as IPK_INVALID_REQUEST,
+    INVALID_SKS as IPK_INVALID_SKS,
+    INVALID_TARGET as IPK_INVALID_TARGET,
+    NO_COURSES as IPK_NO_COURSES,
+    PAYLOAD_TOO_LARGE as IPK_PAYLOAD_TOO_LARGE,
+    TOO_MANY_COURSES as IPK_TOO_MANY_COURSES,
+    TOTAL_SKS_TOO_LARGE as IPK_TOTAL_SKS_TOO_LARGE,
+    UNSUPPORTED_GRADE as IPK_UNSUPPORTED_GRADE,
+    IpkError,
+    compute_ipk,
+    limits_payload as ipk_limits_payload_func,
+)
 from .zakat import (
     BERAS_KG_PER_JIWA as ZK_BERAS_KG_PER_JIWA,
     INVALID_REQUEST as ZK_INVALID_REQUEST,
@@ -915,6 +929,17 @@ async def handle_percent_calc_error(request: Request, exc: PercentCalcError) -> 
     )
 
 
+@app.exception_handler(IpkError)
+async def handle_ipk_error(request: Request, exc: IpkError) -> JSONResponse:
+    """Error kalkulator IPK yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung ipk ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(ZakatError)
 async def handle_zakat_error(request: Request, exc: ZakatError) -> JSONResponse:
     """Error kalkulator zakat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1112,6 +1137,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
     elif request.url.path.startswith("/api/percent-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
+    elif request.url.path.startswith("/api/ipk"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
         msg = "Permintaan tidak valid. Kirim objek JSON."
     elif request.url.path.startswith("/api/terbilang"):
@@ -1772,6 +1799,27 @@ def _reject_oversized_percent_content_length(request: Request) -> None:
 
 def _percent_calc_limits_payload() -> dict:
     return percent_calc_limits_payload_func()
+
+
+def _reject_oversized_ipk_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator IPK."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise IpkError(
+            IPK_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar.",
+            413,
+        )
+
+
+def _ipk_limits_payload() -> dict:
+    return ipk_limits_payload_func()
 
 
 def _reject_oversized_zakat_content_length(request: Request) -> None:
@@ -3479,6 +3527,73 @@ async def percent_calc_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/ipk/limits")
+async def ipk_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung IPK."""
+    return JSONResponse(content=_ipk_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/ipk")
+async def ipk_endpoint(
+    request: Request,
+    courses: str = Form(default=None),
+    target: str = Form(default=None),
+):
+    """Hitung IPK di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_ipk_content_length(request)
+
+    form = await request.form()
+    if courses is None and "courses" in form:
+        courses = form.get("courses")
+    if target is None and "target" in form:
+        target = form.get("target")
+
+    if courses is None or (isinstance(courses, str) and not courses.strip()):
+        raise IpkError(
+            IPK_NO_COURSES,
+            "Tambahkan minimal satu mata kuliah dengan SKS dan nilai.",
+            400,
+        )
+
+    if isinstance(courses, UploadFile) or isinstance(target, UploadFile):
+        raise IpkError(
+            IPK_INVALID_REQUEST,
+            "Field formulir tidak boleh berupa berkas unggahan.",
+            400,
+        )
+
+    try:
+        parsed_courses = json.loads(courses)
+    except Exception:
+        raise IpkError(
+            IPK_INVALID_REQUEST,
+            "Bentuk permintaan tidak valid. 'courses' harus berupa array JSON.",
+            400,
+        )
+
+    result = compute_ipk(
+        courses=parsed_courses,
+        target=target,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat isi mata kuliah / nama / nilai ke log — cukup jumlah baris dan durasi.
+    logger.info(
+        "hitung ipk selesai: baris=%d durasi=%.0fms",
+        result["jumlah_mk"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/zakat/limits")
 async def zakat_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Kalkulator Zakat."""
@@ -4842,6 +4957,7 @@ async def root() -> dict:
             "text-summary",
             "unit-convert",
             "percent-calc",
+            "ipk",
             "zakat",
             "terbilang",
             "cicilan",
