@@ -90,6 +90,20 @@ from .image_compress import (
     compress_image,
     limits_payload as image_compress_limits_payload,
 )
+from .pas_foto import (
+    CHUNK_SIZE as PAS_FOTO_CHUNK_SIZE,
+    MAX_BYTES as PAS_FOTO_MAX_BYTES,
+    MAX_PIXELS as PAS_FOTO_MAX_PIXELS,
+    MAX_SIDE as PAS_FOTO_MAX_SIDE,
+    EMPTY_FILE as PAS_FOTO_EMPTY_FILE,
+    INVALID_REQUEST as PAS_FOTO_INVALID_REQUEST,
+    NO_FILE as PAS_FOTO_NO_FILE,
+    PAYLOAD_TOO_LARGE as PAS_FOTO_PAYLOAD_TOO_LARGE,
+    TOO_LARGE as PAS_FOTO_TOO_LARGE,
+    PasFotoError,
+    pas_foto,
+    pas_foto_limits_payload,
+)
 from .pdf_merge import (
     CHUNK_SIZE,
     ERR_TOO_LARGE,
@@ -683,6 +697,15 @@ if _cors_origins:
             "X-Audio-Seconds",
             "X-Output-Bytes",
             "X-Mode",
+            "X-Output-Width",
+            "X-Output-Height",
+            "X-Output-Dpi",
+            "X-Output-Kb",
+            "X-Output-Quality",
+            "X-Output-Px",
+            "X-Output-Cm",
+            "X-Upscaled",
+            "X-Target-Met",
         ],
     )
 
@@ -817,6 +840,17 @@ async def handle_filter_error(request: Request, exc: FilterError) -> JSONRespons
 async def handle_image_compress_error(request: Request, exc: ImageCompressError) -> JSONResponse:
     """Error kompres gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
     logger.warning("kompres gambar ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.exception_handler(PasFotoError)
+async def handle_pas_foto_error(request: Request, exc: PasFotoError) -> JSONResponse:
+    """Error pas foto yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("pas foto ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),
@@ -1169,6 +1203,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/image/compress"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/pas-foto"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/pdf/to-image"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/edit"):
@@ -1367,6 +1403,49 @@ async def _read_capped_compress_image(upload: UploadFile, remaining_budget: int)
             raise ImageCompressError(
                 IMG_COMPRESS_TOO_LARGE,
                 f"Ukuran berkas melebihi batas {IMG_COMPRESS_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+                413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _reject_oversized_pas_foto_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas pas foto."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > PAS_FOTO_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise PasFotoError(
+            PAS_FOTO_PAYLOAD_TOO_LARGE,
+            f"Ukuran berkas melebihi batas {PAS_FOTO_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+async def _read_capped_pas_foto_image(upload: UploadFile, remaining_budget: int) -> bytes:
+    """Baca unggahan gambar sepotong-sepotong untuk pas foto, tolak bila lewat batas."""
+    if remaining_budget <= 0:
+        raise PasFotoError(
+            PAS_FOTO_TOO_LARGE,
+            f"Ukuran berkas melebihi batas {PAS_FOTO_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+            413,
+        )
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(PAS_FOTO_CHUNK_SIZE)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > remaining_budget:
+            raise PasFotoError(
+                PAS_FOTO_TOO_LARGE,
+                f"Ukuran berkas melebihi batas {PAS_FOTO_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
                 413,
             )
         chunks.append(chunk)
@@ -2773,6 +2852,87 @@ async def image_compress_endpoint(
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=media_type, headers=headers)
+
+
+@app.get("/api/pas-foto/limits")
+async def get_pas_foto_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Pas Foto."""
+    return JSONResponse(content=pas_foto_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pas-foto")
+async def pas_foto_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    size: str | None = Form(default="3x4"),
+    dpi: str | None = Form(default="300"),
+    fokus: str | None = Form(default="atas"),
+    max_kb: str | None = Form(default=None),
+) -> Response:
+    """Ubah foto menjadi pas foto siap cetak ukuran 2x3, 3x4, atau 4x6 cm di memori.
+
+    Respons: binary JPEG, Content-Type: image/jpeg,
+    Content-Disposition: attachment; filename="pas-foto-<size>.jpg".
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_pas_foto_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise PasFotoError(
+            PAS_FOTO_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    if file is None:
+        raise PasFotoError(
+            PAS_FOTO_NO_FILE,
+            "Permintaan tidak valid. Field 'file' wajib disertakan.",
+            400,
+        )
+
+    payload = await _read_capped_pas_foto_image(file, PAS_FOTO_MAX_BYTES)
+
+    result = await run_in_threadpool(
+        pas_foto,
+        payload=payload,
+        size=size or "3x4",
+        dpi=dpi or "300",
+        fokus=fokus or "atas",
+        max_kb=max_kb,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "pas foto selesai: size=%s dpi=%d kb=%d durasi=%.0fms",
+        result.size,
+        result.dpi,
+        result.output_kb,
+        duration_ms,
+    )
+
+    filename = f"pas-foto-{result.size}.jpg"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Output-Width": str(result.width),
+        "X-Output-Height": str(result.height),
+        "X-Output-Dpi": str(result.dpi),
+        "X-Output-Bytes": str(result.output_bytes),
+        "X-Output-Kb": str(result.output_kb),
+        "X-Output-Quality": str(result.quality),
+        "X-Output-Px": f"{result.width}x{result.height}",
+        "X-Output-Cm": result.cm,
+        "X-Upscaled": "true" if result.diperbesar else "false",
+        "X-Target-Met": "true" if result.batas_terpenuhi else "false",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type="image/jpeg", headers=headers)
 
 
 @app.get("/api/word-count/limits")
@@ -4946,6 +5106,7 @@ async def root() -> dict:
             "image-edit",
             "image-filter",
             "image-compress",
+            "pas-foto",
             "word-count",
             "case-convert",
             "ocr",

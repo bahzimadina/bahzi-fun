@@ -32,6 +32,7 @@
         { name: 'Image Editor', desc: 'Potong, putar, dan balik gambar lalu unduh hasilnya.', status: 'available', action: 'image-editor' },
         { name: 'Filter & efek gambar', desc: 'Ubah suasana foto jadi hitam putih, sepia, atau lebih lembut, plus atur cahaya dan ketajaman.', status: 'available', action: 'image-filter' },
         { name: 'Kompres gambar', desc: 'Perkecil ukuran berkas gambar sampai di bawah batas yang kamu butuhkan.', status: 'available', action: 'kompres-gambar' },
+        { name: 'Pas foto', desc: 'Ubah foto jadi pas foto 2x3, 3x4, atau 4x6 cm siap cetak, lengkap dengan batas ukuran berkas.', status: 'available', action: 'pas-foto' },
         { name: 'Video Trimmer', desc: 'Ambil bagian tertentu dari sebuah klip video, lalu unduh hasilnya.', status: 'available', href: '/potong-video/' },
         { name: 'Ambil audio dari video', desc: 'Simpan suara dari sebuah video menjadi berkas MP3, M4A, atau WAV.', status: 'available', href: '/ekstrak-audio/' },
         { name: 'Balik video', desc: 'Putar video mundur sampai ke detik pertama, dengan pilihan kecepatan dan tanpa suara.', status: 'available', href: '/balik-video/' }

@@ -13351,6 +13351,415 @@ def test_http_ipk_root_dan_regresi() -> None:
     assert cicilan_resp.status_code == 200
 
 
+# ============================================================================
+# Uji Pas Foto (Modul pas_foto.py & Endpoint HTTP)
+# ============================================================================
+from app.pas_foto import (
+    DAMAGED_IMAGE as PAS_FOTO_DAMAGED_IMAGE,
+    EMPTY_FILE as PAS_FOTO_EMPTY_FILE,
+    INVALID_DPI as PAS_FOTO_INVALID_DPI,
+    INVALID_FOCUS as PAS_FOTO_INVALID_FOCUS,
+    INVALID_MAX_KB as PAS_FOTO_INVALID_MAX_KB,
+    INVALID_REQUEST as PAS_FOTO_INVALID_REQUEST,
+    NO_FILE as PAS_FOTO_NO_FILE,
+    PAYLOAD_TOO_LARGE as PAS_FOTO_PAYLOAD_TOO_LARGE,
+    SIDE_TOO_LARGE as PAS_FOTO_SIDE_TOO_LARGE,
+    SUPPORTED_DPIS as PAS_FOTO_SUPPORTED_DPIS,
+    SUPPORTED_FOCUS as PAS_FOTO_SUPPORTED_FOCUS,
+    SUPPORTED_SIZES as PAS_FOTO_SUPPORTED_SIZES,
+    TOO_LARGE as PAS_FOTO_TOO_LARGE,
+    TOO_MANY_PIXELS as PAS_FOTO_TOO_MANY_PIXELS,
+    UNSUPPORTED_FILE as PAS_FOTO_UNSUPPORTED_FILE,
+    UNSUPPORTED_SIZE as PAS_FOTO_UNSUPPORTED_SIZE,
+    MAX_BYTES as PAS_FOTO_MAX_BYTES,
+    MAX_PIXELS as PAS_FOTO_MAX_PIXELS,
+    MAX_SIDE as PAS_FOTO_MAX_SIDE,
+    PasFotoError,
+    PasFotoResult,
+    calculate_pixels,
+    check_total_size as check_pas_foto_total_size,
+    detect_format as detect_pas_foto_format,
+    is_supported_image as is_supported_pas_foto_image,
+    normalize_dpi as normalize_pas_foto_dpi,
+    normalize_focus as normalize_pas_foto_focus,
+    normalize_max_kb as normalize_pas_foto_max_kb,
+    normalize_size as normalize_pas_foto_size,
+    pas_foto,
+    pas_foto_limits_payload as pas_foto_limits_payload_func,
+)
+
+
+def expect_pas_foto_error(func, code: str, status: int) -> PasFotoError:
+    """Pastikan func() melempar PasFotoError dengan kode + status yang tepat."""
+    try:
+        func()
+    except PasFotoError as exc:
+        assert exc.code == code, f"Ekspektasi kode {code}, dapat {exc.code}"
+        assert exc.status_code == status, f"Ekspektasi status {status}, dapat {exc.status_code}"
+        return exc
+    raise AssertionError(f"Ekspektasi PasFotoError({code}), tapi tidak melempar error")
+
+
+def test_pas_foto_deteksi_format() -> None:
+    """Pastikan deteksi magic bytes PNG, JPEG, dan WebP berfungsi akurat."""
+    png_data = make_image("PNG")
+    jpeg_data = make_image("JPEG")
+    webp_data = make_image("WEBP")
+
+    assert detect_pas_foto_format(png_data) == "png"
+    assert detect_pas_foto_format(jpeg_data) == "jpeg"
+    assert detect_pas_foto_format(webp_data) == "webp"
+    assert detect_pas_foto_format(b"bukan gambar") is None
+
+    assert is_supported_pas_foto_image(png_data) is True
+    assert is_supported_pas_foto_image(jpeg_data) is True
+    assert is_supported_pas_foto_image(webp_data) is True
+    assert is_supported_pas_foto_image(b"plain text file") is False
+
+
+def test_pas_foto_berkas_kosong() -> None:
+    """Berkas 0 byte harus ditolak dengan EMPTY_FILE 400."""
+    expect_pas_foto_error(lambda: pas_foto(b""), PAS_FOTO_EMPTY_FILE, 400)
+
+
+def test_pas_foto_bukan_gambar() -> None:
+    """Berkas teks ditolak dengan UNSUPPORTED_FILE 400."""
+    expect_pas_foto_error(lambda: pas_foto(b"bukan gambar valid"), PAS_FOTO_UNSUPPORTED_FILE, 400)
+
+
+def test_pas_foto_berkas_rusak() -> None:
+    """Berkas dengan header JPEG tetapi isi rusak ditolak dengan DAMAGED_IMAGE 422."""
+    corrupted = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+    expect_pas_foto_error(lambda: pas_foto(corrupted), PAS_FOTO_DAMAGED_IMAGE, 422)
+
+
+def test_pas_foto_dimensi_sisi_terlalu_besar() -> None:
+    """Sisi melebihi 12.000 px ditolak dengan SIDE_TOO_LARGE 413."""
+    img_side = Image.new("1", (12001, 10), 0)
+    buf = io.BytesIO()
+    img_side.save(buf, format="PNG")
+    expect_pas_foto_error(lambda: pas_foto(buf.getvalue()), PAS_FOTO_SIDE_TOO_LARGE, 413)
+
+
+def test_pas_foto_piksel_terlalu_banyak() -> None:
+    """Piksel melebihi 40.000.000 ditolak dengan TOO_MANY_PIXELS 413."""
+    img_huge = Image.new("1", (7000, 6000), 0)
+    buf = io.BytesIO()
+    img_huge.save(buf, format="PNG")
+    expect_pas_foto_error(lambda: pas_foto(buf.getvalue()), PAS_FOTO_TOO_MANY_PIXELS, 413)
+
+
+def test_pas_foto_ukuran_lewat_batas() -> None:
+    """Ukuran berkas melebihi batas 20 MB ditolak dengan TOO_LARGE 413."""
+    expect_pas_foto_error(lambda: check_pas_foto_total_size(PAS_FOTO_MAX_BYTES + 1), PAS_FOTO_TOO_LARGE, 413)
+
+
+def test_pas_foto_parameter_tidak_valid() -> None:
+    """Validasi parameter size, dpi, fokus, dan max_kb."""
+    img_data = make_image("JPEG", size=(500, 600))
+
+    # Size tidak didukung -> UNSUPPORTED_SIZE 400
+    expect_pas_foto_error(lambda: pas_foto(img_data, size="5x7"), PAS_FOTO_UNSUPPORTED_SIZE, 400)
+
+    # DPI tidak valid -> INVALID_DPI 400
+    expect_pas_foto_error(lambda: pas_foto(img_data, dpi=150), PAS_FOTO_INVALID_DPI, 400)
+    expect_pas_foto_error(lambda: pas_foto(img_data, dpi="seratus"), PAS_FOTO_INVALID_DPI, 400)
+
+    # Fokus tidak valid -> INVALID_FOCUS 400
+    expect_pas_foto_error(lambda: pas_foto(img_data, fokus="kiri"), PAS_FOTO_INVALID_FOCUS, 400)
+
+    # Max KB tidak valid -> INVALID_MAX_KB 400
+    expect_pas_foto_error(lambda: pas_foto(img_data, max_kb=5), PAS_FOTO_INVALID_MAX_KB, 400)
+    expect_pas_foto_error(lambda: pas_foto(img_data, max_kb=6000), PAS_FOTO_INVALID_MAX_KB, 400)
+    expect_pas_foto_error(lambda: pas_foto(img_data, max_kb="bukan-angka"), PAS_FOTO_INVALID_MAX_KB, 400)
+
+
+def test_pas_foto_semua_ukuran_dan_dpi() -> None:
+    """Uji konversi semua kombinasi ukuran (2x3, 3x4, 4x6) dan DPI (300, 600)."""
+    img_data = make_image("PNG", size=(600, 800), color="blue")
+
+    expected_pixels = {
+        ("2x3", 300): (236, 354),
+        ("3x4", 300): (354, 472),
+        ("4x6", 300): (472, 709),
+        ("2x3", 600): (472, 709),
+        ("3x4", 600): (709, 945),
+        ("4x6", 600): (945, 1417),
+    }
+
+    for (s, d), (exp_w, exp_h) in expected_pixels.items():
+        res = pas_foto(img_data, size=s, dpi=d, fokus="atas")
+        assert res.size == s
+        assert res.dpi == d
+        assert res.width == exp_w
+        assert res.height == exp_h
+        assert res.output_bytes > 0
+        assert res.output_kb > 0
+
+        # Verifikasi gambar keluaran adalah JPEG yang sah dan memiliki metadata DPI tepat
+        out_pil = Image.open(io.BytesIO(res.data))
+        assert out_pil.format == "JPEG"
+        assert out_pil.size == (exp_w, exp_h)
+        assert out_pil.info.get("dpi") == (d, d)
+
+
+def test_pas_foto_diperbesar() -> None:
+    """Uji pelaporan diperbesar=True jika foto asal lebih kecil dari target cetak."""
+    # Foto kecil 100x100 dengan target 3x4 @300 (354x472) -> diperbesar=True
+    small_data = make_image("JPEG", size=(100, 100))
+    res_small = pas_foto(small_data, size="3x4", dpi=300)
+    assert res_small.diperbesar is True
+    assert res_small.width == 354
+    assert res_small.height == 472
+
+    # Foto besar 1000x1200 dengan target 3x4 @300 -> diperbesar=False
+    large_data = make_image("JPEG", size=(1000, 1200))
+    res_large = pas_foto(large_data, size="3x4", dpi=300)
+    assert res_large.diperbesar is False
+
+
+def test_pas_foto_fokus_dan_crop() -> None:
+    """Uji fokus vertikal 'atas', 'tengah', dan 'bawah' memotong bagian yang tepat."""
+    # Buat gambar 400 x 900: bagian atas merah (0..300), tengah hijau (300..600), bawah biru (600..900)
+    img = Image.new("RGB", (400, 900))
+    for y in range(900):
+        for x in range(400):
+            if y < 300:
+                color = (255, 0, 0)
+            elif y < 600:
+                color = (0, 255, 0)
+            else:
+                color = (0, 0, 255)
+            img.putpixel((x, y), color)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    payload = buf.getvalue()
+
+    # Target 2x3 @300 -> 236 x 354 (rasio ~0.667). 400 x 900 (rasio 0.444) lebih tinggi, sehingga dipotong vertikal
+    # Crop height = round(400 / (236/354)) = 600 px.
+    # Atas: crop y 0..600 -> titik tengah crop adalah y=300
+    res_atas = pas_foto(payload, size="2x3", dpi=300, fokus="atas")
+    pil_atas = Image.open(io.BytesIO(res_atas.data))
+    # Piksel atas (misal y=20) harus merah dominan
+    r, g, b = pil_atas.getpixel((pil_atas.width // 2, 20))
+    assert r > 200 and b < 50
+
+    # Bawah: crop y 300..900 -> piksel bawah harus biru dominan
+    res_bawah = pas_foto(payload, size="2x3", dpi=300, fokus="bawah")
+    pil_bawah = Image.open(io.BytesIO(res_bawah.data))
+    r, g, b = pil_bawah.getpixel((pil_bawah.width // 2, pil_bawah.height - 20))
+    assert b > 200 and r < 50
+
+
+def test_pas_foto_max_kb_terpenuhi() -> None:
+    """Uji penurunan kualitas JPEG saat max_kb diisi dan berhasil memenuhi target."""
+    large_data = make_image("PNG", size=(800, 1000), color="blue")
+    # Batas 40 KB
+    res = pas_foto(large_data, size="3x4", dpi=300, max_kb=40)
+    assert res.output_bytes <= 40 * 1024
+    assert res.batas_terpenuhi is True
+    assert res.quality <= 95
+
+
+def test_pas_foto_max_kb_tidak_terpenuhi() -> None:
+    """Uji saat batas max_kb terlalu kecil, kualitas 30 digunakan dan batas_terpenuhi=False."""
+    import os
+    # Buat gambar berderau tinggi yang sulit dikompres kecil
+    raw = os.urandom(600 * 800 * 3)
+    img = Image.frombytes("RGB", (600, 800), raw)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    noise_data = buf.getvalue()
+
+    # Batas 10 KB pada 4x6 @300 (472x709) yang berderau penuh
+    res = pas_foto(noise_data, size="4x6", dpi=300, max_kb=10)
+    assert res.quality == 30
+    assert res.batas_terpenuhi is False
+    assert res.output_bytes > 0
+
+
+def test_pas_foto_transparansi_latar_putih() -> None:
+    """Uji PNG dengan transparansi RGBA diratakan ke latar putih tanpa saluran alfa."""
+    img = Image.new("RGBA", (400, 500), (0, 0, 0, 0))  # transparan penuh
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    res = pas_foto(buf.getvalue(), size="3x4", dpi=300)
+
+    out_pil = Image.open(io.BytesIO(res.data))
+    assert out_pil.mode == "RGB"
+    # Latar putih (255, 255, 255)
+    r, g, b = out_pil.getpixel((50, 50))
+    assert r >= 250 and g >= 250 and b >= 250
+
+
+def test_pas_foto_exif_transpose() -> None:
+    """Uji bahwa EXIF orientation ditransposisi dengan ImageOps.exif_transpose."""
+    from PIL import ImageDraw
+    # Buat gambar 200 x 400 (vertikal)
+    img = Image.new("RGB", (200, 400), "red")
+    exif = img.getexif()
+    # Tag 0x0112 adalah Orientation: 6 = putar 90 CW (sehingga saat ditransposisi dimensinya terbalik jadi 400x200)
+    exif[0x0112] = 6
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    jpeg_data = buf.getvalue()
+
+    res = pas_foto(jpeg_data, size="3x4", dpi=300)
+    assert res.width == 354
+    assert res.height == 472
+
+
+def test_pas_foto_limits_payload_logika() -> None:
+    """Uji fungsi pas_foto_limits_payload mengembalikan struktur yang sesuai."""
+    payload = pas_foto_limits_payload_func()
+    assert payload["max_mb"] == 20
+    assert payload["max_files"] == 1
+    assert payload["max_pixels"] == PAS_FOTO_MAX_PIXELS
+    assert payload["max_side"] == PAS_FOTO_MAX_SIDE
+    assert "jpeg" in payload["formats"]
+    assert "png" in payload["formats"]
+    assert "webp" in payload["formats"]
+    assert payload["dpis"] == [300, 600]
+    assert payload["default_dpi"] == 300
+    assert payload["focuses"] == ["atas", "tengah", "bawah"]
+    assert payload["default_focus"] == "atas"
+    assert payload["max_kb"]["min"] == 10
+    assert payload["max_kb"]["max"] == 5000
+
+    size_ids = [s["id"] for s in payload["sizes"]]
+    assert "2x3" in size_ids
+    assert "3x4" in size_ids
+    assert "4x6" in size_ids
+
+
+def test_http_pas_foto_limits() -> None:
+    """Uji endpoint GET /api/pas-foto/limits."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/pas-foto/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["max_mb"] == 20
+    assert data["default_dpi"] == 300
+    assert len(data["sizes"]) == 3
+
+
+def test_http_pas_foto_sukses() -> None:
+    """Uji endpoint POST /api/pas-foto berhasil mengembalikan binary JPEG dan header lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    png_data = make_image("PNG", size=(600, 800), color="green")
+
+    # 1. Bawaan (3x4 @300 dpi)
+    resp = client.post(
+        "/api/pas-foto",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"size": "3x4", "dpi": "300", "fokus": "atas"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+    assert 'filename="pas-foto-3x4.jpg"' in resp.headers["content-disposition"]
+    assert resp.headers["x-output-width"] == "354"
+    assert resp.headers["x-output-height"] == "472"
+    assert resp.headers["x-output-dpi"] == "300"
+    assert "x-output-bytes" in resp.headers
+    assert "x-output-kb" in resp.headers
+    assert "x-output-quality" in resp.headers
+    assert resp.headers["x-output-px"] == "354x472"
+    assert resp.headers["x-upscaled"] == "false"
+    assert resp.headers["x-target-met"] == "true"
+    assert "x-processing-ms" in resp.headers
+
+    # Verifikasi berkas JPEG yang diterima
+    pil_out = Image.open(io.BytesIO(resp.content))
+    assert pil_out.format == "JPEG"
+    assert pil_out.size == (354, 472)
+
+    # 2. Ukuran 4x6 @600 dpi dengan batas max_kb
+    resp_600 = client.post(
+        "/api/pas-foto",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"size": "4x6", "dpi": "600", "fokus": "tengah", "max_kb": "300"},
+    )
+    assert resp_600.status_code == 200
+    assert 'filename="pas-foto-4x6.jpg"' in resp_600.headers["content-disposition"]
+    assert resp_600.headers["x-output-width"] == "945"
+    assert resp_600.headers["x-output-height"] == "1417"
+    assert resp_600.headers["x-output-dpi"] == "600"
+
+
+def test_http_pas_foto_galat() -> None:
+    """Uji respons error HTTP pada POST /api/pas-foto."""
+    client = _test_client()
+    if client is None:
+        return
+
+    png_data = make_image("PNG")
+
+    # 1. Tanpa berkas -> 400 NO_FILE
+    resp_no_file = client.post("/api/pas-foto", data={"size": "3x4"})
+    assert resp_no_file.status_code == 400
+    assert resp_no_file.json()["error"]["code"] == PAS_FOTO_NO_FILE
+
+    # 2. Berkas kosong -> 400 EMPTY_FILE
+    resp_empty = client.post(
+        "/api/pas-foto",
+        files={"file": ("kosong.png", b"", "image/png")},
+    )
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["error"]["code"] == PAS_FOTO_EMPTY_FILE
+
+    # 3. Berkas bukan gambar -> 400 UNSUPPORTED_FILE
+    resp_txt = client.post(
+        "/api/pas-foto",
+        files={"file": ("teks.txt", b"bukan gambar", "text/plain")},
+    )
+    assert resp_txt.status_code == 400
+    assert resp_txt.json()["error"]["code"] == PAS_FOTO_UNSUPPORTED_FILE
+
+    # 4. Ukuran tidak didukung -> 400 UNSUPPORTED_SIZE
+    resp_size = client.post(
+        "/api/pas-foto",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"size": "10x15"},
+    )
+    assert resp_size.status_code == 400
+    assert resp_size.json()["error"]["code"] == PAS_FOTO_UNSUPPORTED_SIZE
+
+    # 5. DPI tidak valid -> 400 INVALID_DPI
+    resp_dpi = client.post(
+        "/api/pas-foto",
+        files={"file": ("foto.png", png_data, "image/png")},
+        data={"dpi": "1200"},
+    )
+    assert resp_dpi.status_code == 400
+    assert resp_dpi.json()["error"]["code"] == PAS_FOTO_INVALID_DPI
+
+    # 6. Request JSON -> 400 INVALID_REQUEST
+    resp_json = client.post("/api/pas-foto", json={"size": "3x4"})
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == PAS_FOTO_INVALID_REQUEST
+
+
+def test_http_pas_foto_root_dan_regresi() -> None:
+    """Pastikan pas-foto terdaftar di root dan endpoint lain tetap berjalan normal."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "pas-foto" in root_resp.json()["tools"]
+
+    compress_resp = client.get("/api/image/compress/limits")
+    assert compress_resp.status_code == 200
+
+
 
 # --- Runner mandiri ---------------------------------------------------------
 def main() -> int:
