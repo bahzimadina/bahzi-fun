@@ -405,6 +405,21 @@ from app.percent_calc import (
     limits_payload as percent_calc_limits_payload_func,
     parse_number as parse_percent_number,
 )
+from app.keramik import (
+    INVALID_CADANGAN as KR_INVALID_CADANGAN,
+    INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
+    INVALID_HARGA as KR_INVALID_HARGA,
+    INVALID_ISI_DUS as KR_INVALID_ISI_DUS,
+    INVALID_NUMBER as KR_INVALID_NUMBER,
+    INVALID_REQUEST as KR_INVALID_REQUEST,
+    OUT_OF_RANGE as KR_OUT_OF_RANGE,
+    TOO_MANY_TILES as KR_TOO_MANY_TILES,
+    UNSUPPORTED_MODE as KR_UNSUPPORTED_MODE,
+    UNSUPPORTED_SIZE as KR_UNSUPPORTED_SIZE,
+    KeramikError,
+    hitung_keramik,
+    limits_payload as keramik_limits_payload_func,
+)
 from app.ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -13758,6 +13773,368 @@ def test_http_pas_foto_root_dan_regresi() -> None:
 
     compress_resp = client.get("/api/image/compress/limits")
     assert compress_resp.status_code == 200
+
+
+def test_keramik_logika_dasar_dan_mode() -> None:
+    """Uji logika murni hitung_keramik: mode ruangan, orientasi hemat, mode luas, cadangan, isi dus, dan harga."""
+    # 1. Mode ruangan 3x4 m keramik 40x40, cadangan 5
+    # Eksplisit: kolom=10, baris=8, keping_dasar=80, keping_cadangan=84, isi_dus bawaan 6, dus=14, keping_dibeli=84, sisa=4
+    res1 = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="40x40", cadangan=5)
+    assert res1["kolom"] == 10
+    assert res1["baris"] == 8
+    assert res1["keping_dasar"] == 80
+    assert res1["keping_cadangan"] == 84
+    assert res1["isi_dus"] == 6
+    assert res1["isi_dus_perkiraan"] is False
+    assert res1["dus"] == 14
+    assert res1["keping_dibeli"] == 84
+    assert res1["sisa_keping"] == 4
+    assert res1["sisa_persen"] == 5.0
+    assert res1["luas_m2"] == 12.0
+    assert res1["perkiraan_berbasis_luas"] is False
+    assert not any("perkiraan standar" in c for c in res1["catatan"])
+
+    # Ukuran kustom tanpa isi_dus: isi_dus_perkiraan tetap True dan catatan muncul
+    res_kustom = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="kustom", ukuran_panjang="50", ukuran_lebar="50")
+    assert res_kustom["isi_dus_perkiraan"] is True
+    assert any("perkiraan standar" in c for c in res_kustom["catatan"])
+
+    # 2. Orientasi lebih hemat (ruangan 3,1 x 2,9 m keramik 30x60)
+    # 30 cm searah panjang (310/30=11) x (290/60=5) = 55 keping
+    # 60 cm searah panjang (310/60=6) x (290/30=10) = 60 keping
+    # Harus memilih orientasi 30 cm searah panjang (55 keping)
+    res_orientasi = hitung_keramik("ruangan", panjang="3.1", lebar="2.9", ukuran="30x60")
+    assert res_orientasi["keping_dasar"] == 55
+    assert res_orientasi["orientasi"] == "30 cm searah panjang ruangan"
+
+    # 3. Mode luas 12 m2 keramik 60x60 -> keping_dasar 34 (12/0,36 = 33,33 -> 34) dan perkiraan_berbasis_luas true
+    res_luas = hitung_keramik("luas", luas="12", ukuran="60x60")
+    assert res_luas["keping_dasar"] == 34
+    assert res_luas["perkiraan_berbasis_luas"] is True
+    assert res_luas["orientasi"] is None
+
+    # 4. isi_dus diisi sendiri mengubah jumlah dus
+    res_custom_dus = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="40x40", cadangan=5, isi_dus=8)
+    assert res_custom_dus["isi_dus"] == 8
+    assert res_custom_dus["isi_dus_perkiraan"] is False
+    assert res_custom_dus["dus"] == 11  # ceil(84 / 8) = 11
+    assert res_custom_dus["keping_dibeli"] == 88  # 11 * 8 = 88
+    assert res_custom_dus["sisa_keping"] == 8  # 88 - 80 = 8
+
+    # 5. harga_dus mengisi biaya_total dan biaya_per_m2, dan null bila kosong
+    res_harga = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="40x40", cadangan=5, harga_dus="75000")
+    assert res_harga["harga_dus"] == 75000
+    assert res_harga["biaya_total"] == 14 * 75000  # 1.050.000
+    assert res_harga["biaya_per_m2"] == round(1050000 / 12)  # 87500
+
+    res_tanpa_harga = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="40x40", cadangan=5, harga_dus="")
+    assert res_tanpa_harga["harga_dus"] is None
+    assert res_tanpa_harga["biaya_total"] is None
+    assert res_tanpa_harga["biaya_per_m2"] is None
+
+    # 6. cadangan 0 dan 30
+    res_cad_0 = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="40x40", cadangan=0)
+    assert res_cad_0["cadangan_persen"] == 0
+    assert res_cad_0["keping_cadangan"] == 80
+
+    res_cad_30 = hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="40x40", cadangan=30)
+    assert res_cad_30["cadangan_persen"] == 30
+    assert res_cad_30["keping_cadangan"] == 104  # ceil(80 * 1.30) = 104
+
+
+def test_keramik_logika_galat() -> None:
+    """Uji kode galat dan penolakan pada modul hitung_keramik."""
+    # Mode salah
+    try:
+        hitung_keramik("ngawur", panjang="4", lebar="3")
+        assert False, "Harus gagal mode salah"
+    except KeramikError as e:
+        assert e.code == KR_UNSUPPORTED_MODE
+        assert e.status_code == 400
+
+    # Angka tidak terbaca
+    try:
+        hitung_keramik("ruangan", panjang="empat", lebar="3")
+        assert False, "Harus gagal angka tidak terbaca"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_NUMBER
+        assert e.status_code == 400
+
+    # "1,2,3" (lebih dari 1 tanda desimal)
+    try:
+        hitung_keramik("ruangan", panjang="1,2,3", lebar="3")
+        assert False, "Harus gagal lebih dari 1 tanda desimal"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_NUMBER
+        assert e.status_code == 400
+
+    # Panjang 0
+    try:
+        hitung_keramik("ruangan", panjang="0", lebar="3")
+        assert False, "Harus gagal panjang 0"
+    except KeramikError as e:
+        assert e.code == KR_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # Panjang 101
+    try:
+        hitung_keramik("ruangan", panjang="101", lebar="3")
+        assert False, "Harus gagal panjang 101"
+    except KeramikError as e:
+        assert e.code == KR_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # Luas 3000
+    try:
+        hitung_keramik("luas", luas="3000")
+        assert False, "Harus gagal luas 3000"
+    except KeramikError as e:
+        assert e.code == KR_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # Ukuran "33x33"
+    try:
+        hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="33x33")
+        assert False, "Harus gagal ukuran tidak didukung"
+    except KeramikError as e:
+        assert e.code == KR_UNSUPPORTED_SIZE
+        assert e.status_code == 400
+
+    # Kustom tanpa ukuran_panjang
+    try:
+        hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="kustom", ukuran_lebar=40)
+        assert False, "Harus gagal kustom tanpa ukuran_panjang"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_CUSTOM_SIZE
+        assert e.status_code == 400
+
+    # Ukuran panjang 300
+    try:
+        hitung_keramik("ruangan", panjang="4", lebar="3", ukuran="kustom", ukuran_panjang=300, ukuran_lebar=40)
+        assert False, "Harus gagal ukuran panjang 300"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_CUSTOM_SIZE
+        assert e.status_code == 400
+
+    # Cadangan 40
+    try:
+        hitung_keramik("ruangan", panjang="4", lebar="3", cadangan=40)
+        assert False, "Harus gagal cadangan 40"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_CADANGAN
+        assert e.status_code == 400
+
+    # Isi dus 0
+    try:
+        hitung_keramik("ruangan", panjang="4", lebar="3", isi_dus=0)
+        assert False, "Harus gagal isi dus 0"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_ISI_DUS
+        assert e.status_code == 400
+
+    # Harga negatif
+    try:
+        hitung_keramik("ruangan", panjang="4", lebar="3", harga_dus="-50000")
+        assert False, "Harus gagal harga negatif"
+    except KeramikError as e:
+        assert e.code == KR_INVALID_HARGA
+        assert e.status_code == 400
+
+    # Keping lebih dari 200000 -> 413 TOO_MANY_TILES (ruangan 100x100 m keramik 20x20)
+    try:
+        hitung_keramik("ruangan", panjang="100", lebar="100", ukuran="20x20")
+        assert False, "Harus gagal keping lebih dari 200000"
+    except KeramikError as e:
+        assert e.code == KR_TOO_MANY_TILES
+        assert e.status_code == 413
+
+
+def test_http_keramik_limits() -> None:
+    """GET /api/keramik/limits mengembalikan HTTP 200 dan isi konfigurasi lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/keramik/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("Cache-Control") == "no-store"
+
+    data = resp.json()
+    assert "modes" in data
+    assert len(data["modes"]) == 2
+    assert "ukuran_pilihan" in data
+    assert len(data["ukuran_pilihan"]) >= 9
+    assert "rentang_cadangan" in data
+    assert data["rentang_cadangan"]["min"] == 0
+    assert data["rentang_cadangan"]["max"] == 30
+    assert "rentang_isi_dus" in data
+    assert "rentang_harga_dus" in data
+    assert "batas_dimensi" in data
+    assert "batas_keping" in data
+    assert data["batas_keping"] == 200000
+
+
+def test_http_keramik_sukses_dan_headers() -> None:
+    """POST /api/keramik sukses mengembalikan hasil terstruktur dan header yang tepat."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Mode ruangan 3x4 m keramik 40x40
+    resp = client.post(
+        "/api/keramik",
+        data={
+            "mode": "ruangan",
+            "panjang": "4",
+            "lebar": "3",
+            "ukuran": "40x40",
+            "cadangan": "5",
+            "harga_dus": "75000",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp.headers
+
+    data = resp.json()
+    assert data["kolom"] == 10
+    assert data["baris"] == 8
+    assert data["keping_dasar"] == 80
+    assert data["keping_cadangan"] == 84
+    assert data["isi_dus"] == 6
+    assert data["dus"] == 14
+    assert data["keping_dibeli"] == 84
+    assert data["sisa_keping"] == 4
+    assert data["biaya_total"] == 1050000
+    assert data["biaya_per_m2"] == 87500
+    assert isinstance(data["catatan"], list)
+    assert len(data["catatan"]) > 0
+
+    # Mode luas 12 m2 keramik 60x60
+    resp_luas = client.post(
+        "/api/keramik",
+        data={
+            "mode": "luas",
+            "luas": "12",
+            "ukuran": "60x60",
+        },
+    )
+    assert resp_luas.status_code == 200
+    data_luas = resp_luas.json()
+    assert data_luas["keping_dasar"] == 34
+    assert data_luas["perkiraan_berbasis_luas"] is True
+    assert data_luas["biaya_total"] is None
+
+
+def test_http_keramik_galat() -> None:
+    """Uji seluruh skenario galat HTTP pada endpoint POST /api/keramik."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Field mode tidak ada -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/keramik", data={"panjang": "4", "lebar": "3"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == KR_INVALID_REQUEST
+
+    # 2. JSON (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post("/api/keramik", json={"mode": "ruangan", "panjang": "4", "lebar": "3"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == KR_INVALID_REQUEST
+
+    # 3. Mode salah -> 400 UNSUPPORTED_MODE
+    r_mode = client.post("/api/keramik", data={"mode": "salah", "panjang": "4", "lebar": "3"})
+    assert r_mode.status_code == 400
+    assert r_mode.json()["error"]["code"] == KR_UNSUPPORTED_MODE
+
+    # 4. Angka tidak terbaca -> 400 INVALID_NUMBER
+    r_nan = client.post("/api/keramik", data={"mode": "ruangan", "panjang": "xyz", "lebar": "3"})
+    assert r_nan.status_code == 400
+    assert r_nan.json()["error"]["code"] == KR_INVALID_NUMBER
+
+    # 5. "1,2,3" -> 400 INVALID_NUMBER
+    r_multi_dec = client.post("/api/keramik", data={"mode": "ruangan", "panjang": "1,2,3", "lebar": "3"})
+    assert r_multi_dec.status_code == 400
+    assert r_multi_dec.json()["error"]["code"] == KR_INVALID_NUMBER
+
+    # 6. Panjang 0 -> 400 OUT_OF_RANGE
+    r_p0 = client.post("/api/keramik", data={"mode": "ruangan", "panjang": "0", "lebar": "3"})
+    assert r_p0.status_code == 400
+    assert r_p0.json()["error"]["code"] == KR_OUT_OF_RANGE
+
+    # 7. Panjang 101 -> 400 OUT_OF_RANGE
+    r_p101 = client.post("/api/keramik", data={"mode": "ruangan", "panjang": "101", "lebar": "3"})
+    assert r_p101.status_code == 400
+    assert r_p101.json()["error"]["code"] == KR_OUT_OF_RANGE
+
+    # 8. Luas 3000 -> 400 OUT_OF_RANGE
+    r_l3000 = client.post("/api/keramik", data={"mode": "luas", "luas": "3000"})
+    assert r_l3000.status_code == 400
+    assert r_l3000.json()["error"]["code"] == KR_OUT_OF_RANGE
+
+    # 9. Ukuran "33x33" -> 400 UNSUPPORTED_SIZE
+    r_sz = client.post("/api/keramik", data={"mode": "ruangan", "panjang": "4", "lebar": "3", "ukuran": "33x33"})
+    assert r_sz.status_code == 400
+    assert r_sz.json()["error"]["code"] == KR_UNSUPPORTED_SIZE
+
+    # 10. Kustom tanpa ukuran_panjang -> 400 INVALID_CUSTOM_SIZE
+    r_c_no_p = client.post(
+        "/api/keramik",
+        data={"mode": "ruangan", "panjang": "4", "lebar": "3", "ukuran": "kustom", "ukuran_lebar": "40"},
+    )
+    assert r_c_no_p.status_code == 400
+    assert r_c_no_p.json()["error"]["code"] == KR_INVALID_CUSTOM_SIZE
+
+    # 11. Ukuran panjang 300 -> 400 INVALID_CUSTOM_SIZE
+    r_c_300 = client.post(
+        "/api/keramik",
+        data={"mode": "ruangan", "panjang": "4", "lebar": "3", "ukuran": "kustom", "ukuran_panjang": "300", "ukuran_lebar": "40"},
+    )
+    assert r_c_300.status_code == 400
+    assert r_c_300.json()["error"]["code"] == KR_INVALID_CUSTOM_SIZE
+
+    # 12. Cadangan 40 -> 400 INVALID_CADANGAN
+    r_cad40 = client.post(
+        "/api/keramik",
+        data={"mode": "ruangan", "panjang": "4", "lebar": "3", "cadangan": "40"},
+    )
+    assert r_cad40.status_code == 400
+    assert r_cad40.json()["error"]["code"] == KR_INVALID_CADANGAN
+
+    # 13. Isi dus 0 -> 400 INVALID_ISI_DUS
+    r_dus0 = client.post(
+        "/api/keramik",
+        data={"mode": "ruangan", "panjang": "4", "lebar": "3", "isi_dus": "0"},
+    )
+    assert r_dus0.status_code == 400
+    assert r_dus0.json()["error"]["code"] == KR_INVALID_ISI_DUS
+
+    # 14. Harga negatif -> 400 INVALID_HARGA
+    r_neg_harga = client.post(
+        "/api/keramik",
+        data={"mode": "ruangan", "panjang": "4", "lebar": "3", "harga_dus": "-1000"},
+    )
+    assert r_neg_harga.status_code == 400
+    assert r_neg_harga.json()["error"]["code"] == KR_INVALID_HARGA
+
+    # 15. Keping lebih dari 200000 -> 413 TOO_MANY_TILES (100x100m, 20x20)
+    r_too_many = client.post(
+        "/api/keramik",
+        data={"mode": "ruangan", "panjang": "100", "lebar": "100", "ukuran": "20x20"},
+    )
+    assert r_too_many.status_code == 413
+    assert r_too_many.json()["error"]["code"] == KR_TOO_MANY_TILES
+
+
+def test_http_keramik_root_endpoint() -> None:
+    """Pastikan 'keramik' terdaftar pada root endpoint tools."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "keramik" in root_resp.json()["tools"]
 
 
 

@@ -9920,12 +9920,258 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   max-width: 520px;
 }
 
+/* ================= Panel: Hitung Keramik Lantai ================= */
+.kr__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+
+.kr__field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.kr__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: .15rem;
+}
+
+.kr__radios {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.kr__radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .5rem .85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  font-size: .9rem;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.kr__radio-label input[type="radio"] {
+  accent-color: var(--md-sys-color-primary);
+  cursor: pointer;
+  margin: 0;
+}
+
+.kr__inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kr__inputs-row--opts {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+@media (max-width: 520px) {
+  .kr__inputs-row {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+}
+
+.kr__input {
+  width: 100%;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.kr__input:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.kr__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .9rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.kr__select:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.kr__hint-text {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.4;
+}
+
+.kr__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+
+.kr__hint {
+  padding: 1.25rem;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px dashed var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.kr__hint[hidden] {
+  display: none;
+}
+
+.kr__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.kr__output-wrap[hidden] {
+  display: none;
+}
+
+.kr__hero {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+
+.kr__hero-main {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.kr__hero-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  font-family: var(--font-mono);
+  line-height: 1.15;
+}
+
+.kr__hero-symbol {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.kr__sentence {
+  font-size: .95rem;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+
+.kr__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kr__stat {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.kr__stat[hidden] {
+  display: none;
+}
+
+.kr__stat-label {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.kr__stat-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--md-sys-color-on-surface);
+}
+
+.kr__notes {
+  margin: .25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: .84rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.5;
+}
+
+.kr__disclaimer {
+  margin: .4rem 0 0;
+  font-size: .82rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.kr__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+  flex-wrap: wrap;
+}
+
 @media (pointer: coarse) {
   #pas-foto-panel input,
   #pas-foto-panel select,
   #pas-foto-panel button,
   #pas-foto-panel a.btn,
-  #pas-foto-panel .pas-foto__radio-label {
+  #pas-foto-panel .pas-foto__radio-label,
+  #keramik-panel input,
+  #keramik-panel select,
+  #keramik-panel button,
+  #keramik-panel .kr__radio-label,
+  .kr__input,
+  .kr__select,
+  .kr__radio-label {
     min-height: 44px;
   }
 }

@@ -331,6 +331,21 @@ from .percent_calc import (
     compute_percent,
     limits_payload as percent_calc_limits_payload_func,
 )
+from .keramik import (
+    INVALID_CADANGAN as KR_INVALID_CADANGAN,
+    INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
+    INVALID_HARGA as KR_INVALID_HARGA,
+    INVALID_ISI_DUS as KR_INVALID_ISI_DUS,
+    INVALID_NUMBER as KR_INVALID_NUMBER,
+    INVALID_REQUEST as KR_INVALID_REQUEST,
+    OUT_OF_RANGE as KR_OUT_OF_RANGE,
+    TOO_MANY_TILES as KR_TOO_MANY_TILES,
+    UNSUPPORTED_MODE as KR_UNSUPPORTED_MODE,
+    UNSUPPORTED_SIZE as KR_UNSUPPORTED_SIZE,
+    KeramikError,
+    hitung_keramik,
+    limits_payload as keramik_limits_payload_func,
+)
 from .ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -956,6 +971,17 @@ async def handle_unit_convert_error(request: Request, exc: UnitConvertError) -> 
 async def handle_percent_calc_error(request: Request, exc: PercentCalcError) -> JSONResponse:
     """Error kalkulator persen yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
     logger.warning("hitung persen ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.exception_handler(KeramikError)
+async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
+    """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung keramik ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),
@@ -1878,6 +1904,27 @@ def _reject_oversized_percent_content_length(request: Request) -> None:
 
 def _percent_calc_limits_payload() -> dict:
     return percent_calc_limits_payload_func()
+
+
+def _reject_oversized_keramik_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator keramik."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise KeramikError(
+            KR_INVALID_REQUEST,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            400,
+        )
+
+
+def _keramik_limits_payload() -> dict:
+    return keramik_limits_payload_func()
 
 
 def _reject_oversized_ipk_content_length(request: Request) -> None:
@@ -3687,6 +3734,103 @@ async def percent_calc_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/keramik/limits")
+async def keramik_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
+    return JSONResponse(content=_keramik_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/keramik")
+async def keramik_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    panjang: str = Form(default=None),
+    lebar: str = Form(default=None),
+    luas: str = Form(default=None),
+    ukuran: str = Form(default=None),
+    ukuran_panjang: str = Form(default=None),
+    ukuran_lebar: str = Form(default=None),
+    cadangan: str = Form(default=None),
+    isi_dus: str = Form(default=None),
+    harga_dus: str = Form(default=None),
+):
+    """Hitung kebutuhan keramik lantai di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_keramik_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise KeramikError(
+            KR_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise KeramikError(
+            KR_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for val in form.values():
+        if isinstance(val, UploadFile):
+            raise KeramikError(
+                KR_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if "mode" not in form and mode is None:
+        raise KeramikError(
+            KR_INVALID_REQUEST,
+            "Field 'mode' wajib disertakan dalam permintaan multipart/form-data.",
+            400,
+        )
+
+    mode_val = mode if mode is not None else form.get("mode")
+    panjang_val = panjang if panjang is not None else form.get("panjang")
+    lebar_val = lebar if lebar is not None else form.get("lebar")
+    luas_val = luas if luas is not None else form.get("luas")
+    ukuran_val = ukuran if ukuran is not None else form.get("ukuran", "40x40")
+    ukuran_panjang_val = ukuran_panjang if ukuran_panjang is not None else form.get("ukuran_panjang")
+    ukuran_lebar_val = ukuran_lebar if ukuran_lebar is not None else form.get("ukuran_lebar")
+    cadangan_val = cadangan if cadangan is not None else form.get("cadangan")
+    isi_dus_val = isi_dus if isi_dus is not None else form.get("isi_dus")
+    harga_dus_val = harga_dus if harga_dus is not None else form.get("harga_dus")
+
+    result = hitung_keramik(
+        mode=mode_val,
+        panjang=panjang_val,
+        lebar=lebar_val,
+        luas=luas_val,
+        ukuran=ukuran_val,
+        ukuran_panjang=ukuran_panjang_val,
+        ukuran_lebar=ukuran_lebar_val,
+        cadangan=cadangan_val,
+        isi_dus=isi_dus_val,
+        harga_dus=harga_dus_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode dan durasi.
+    logger.info(
+        "hitung keramik selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/ipk/limits")
 async def ipk_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung IPK."""
@@ -5122,6 +5266,7 @@ async def root() -> dict:
             "zakat",
             "terbilang",
             "cicilan",
+            "keramik",
             "hijriah",
             "json",
             "xml",
