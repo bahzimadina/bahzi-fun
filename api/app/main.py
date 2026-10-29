@@ -346,6 +346,20 @@ from .keramik import (
     hitung_keramik,
     limits_payload as keramik_limits_payload_func,
 )
+from .cat import (
+    INVALID_DAYA_SEBAR as CT_INVALID_DAYA_SEBAR,
+    INVALID_HARGA as CT_INVALID_HARGA,
+    INVALID_KEMASAN as CT_INVALID_KEMASAN,
+    INVALID_LAPIS as CT_INVALID_LAPIS,
+    INVALID_NUMBER as CT_INVALID_NUMBER,
+    INVALID_REQUEST as CT_INVALID_REQUEST,
+    OUT_OF_RANGE as CT_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CT_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as CT_UNSUPPORTED_MODE,
+    CatError,
+    hitung_cat,
+    limits_payload as cat_limits_payload_func,
+)
 from .ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -989,6 +1003,17 @@ async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONRespo
     )
 
 
+@app.exception_handler(CatError)
+async def handle_cat_error(request: Request, exc: CatError) -> JSONResponse:
+    """Error kalkulator cat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung cat ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(IpkError)
 async def handle_ipk_error(request: Request, exc: IpkError) -> JSONResponse:
     """Error kalkulator IPK yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1239,6 +1264,10 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     elif request.url.path.startswith("/api/pdf/split"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
+    elif request.url.path.startswith("/api/keramik"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/cat"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     else:
         msg = (
             "Permintaan tidak valid. Kirim multipart/form-data dengan satu "
@@ -1925,6 +1954,27 @@ def _reject_oversized_keramik_content_length(request: Request) -> None:
 
 def _keramik_limits_payload() -> dict:
     return keramik_limits_payload_func()
+
+
+def _reject_oversized_cat_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator cat."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise CatError(
+            CT_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _cat_limits_payload() -> dict:
+    return cat_limits_payload_func()
 
 
 def _reject_oversized_ipk_content_length(request: Request) -> None:
@@ -3831,6 +3881,109 @@ async def keramik_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/cat/limits")
+async def cat_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Kebutuhan Cat."""
+    return JSONResponse(content=_cat_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/cat")
+async def cat_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    panjang: str = Form(default=None),
+    lebar: str = Form(default=None),
+    tinggi: str = Form(default=None),
+    luas_dinding: str = Form(default=None),
+    pintu: str = Form(default=None),
+    jendela: str = Form(default=None),
+    lapis: str = Form(default=None),
+    daya_sebar: str = Form(default=None),
+    kemasan: str = Form(default=None),
+    kemasan_kustom: str = Form(default=None),
+    harga: str = Form(default=None),
+):
+    """Hitung kebutuhan cat dinding di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_cat_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise CatError(
+            CT_INVALID_REQUEST,
+            "Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise CatError(
+            CT_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for val in form.values():
+        if isinstance(val, UploadFile):
+            raise CatError(
+                CT_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if "mode" not in form and mode is None:
+        raise CatError(
+            CT_INVALID_REQUEST,
+            "Field 'mode' wajib disertakan dalam permintaan multipart/form-data.",
+            400,
+        )
+
+    mode_val = mode if mode is not None else form.get("mode")
+    panjang_val = panjang if panjang is not None else form.get("panjang")
+    lebar_val = lebar if lebar is not None else form.get("lebar")
+    tinggi_val = tinggi if tinggi is not None else form.get("tinggi")
+    luas_dinding_val = luas_dinding if luas_dinding is not None else form.get("luas_dinding")
+    pintu_val = pintu if pintu is not None else form.get("pintu")
+    jendela_val = jendela if jendela is not None else form.get("jendela")
+    lapis_val = lapis if lapis is not None else form.get("lapis")
+    daya_sebar_val = daya_sebar if daya_sebar is not None else form.get("daya_sebar")
+    kemasan_val = kemasan if kemasan is not None else form.get("kemasan")
+    kemasan_kustom_val = kemasan_kustom if kemasan_kustom is not None else form.get("kemasan_kustom")
+    harga_val = harga if harga is not None else form.get("harga")
+
+    result = hitung_cat(
+        mode=mode_val,
+        panjang=panjang_val,
+        lebar=lebar_val,
+        tinggi=tinggi_val,
+        luas_dinding=luas_dinding_val,
+        pintu=pintu_val,
+        jendela=jendela_val,
+        lapis=lapis_val,
+        daya_sebar=daya_sebar_val,
+        kemasan=kemasan_val,
+        kemasan_kustom=kemasan_kustom_val,
+        harga=harga_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode dan durasi.
+    logger.info(
+        "hitung cat selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/ipk/limits")
 async def ipk_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung IPK."""
@@ -5267,6 +5420,7 @@ async def root() -> dict:
             "terbilang",
             "cicilan",
             "keramik",
+            "cat",
             "hijriah",
             "json",
             "xml",

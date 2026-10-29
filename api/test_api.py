@@ -420,6 +420,20 @@ from app.keramik import (
     hitung_keramik,
     limits_payload as keramik_limits_payload_func,
 )
+from app.cat import (
+    INVALID_DAYA_SEBAR as CT_INVALID_DAYA_SEBAR,
+    INVALID_HARGA as CT_INVALID_HARGA,
+    INVALID_KEMASAN as CT_INVALID_KEMASAN,
+    INVALID_LAPIS as CT_INVALID_LAPIS,
+    INVALID_NUMBER as CT_INVALID_NUMBER,
+    INVALID_REQUEST as CT_INVALID_REQUEST,
+    OUT_OF_RANGE as CT_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CT_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as CT_UNSUPPORTED_MODE,
+    CatError,
+    hitung_cat,
+    limits_payload as cat_limits_payload_func,
+)
 from app.ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -14135,6 +14149,336 @@ def test_http_keramik_root_endpoint() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "keramik" in root_resp.json()["tools"]
+
+
+def test_cat_logika_dasar_dan_mode() -> None:
+    """Uji logika murni hitung_cat: mode ruangan, mode luas, lapis, daya sebar, kemasan kustom, dan harga."""
+    # 1. Mode ruangan 4x3 m tinggi 3 m, 1 pintu, 2 jendela, 2 lapis, daya sebar 10, kemasan 5, harga 150000
+    res1 = hitung_cat(
+        mode="ruangan",
+        panjang="4",
+        lebar="3",
+        tinggi="3",
+        pintu="1",
+        jendela="2",
+        lapis="2",
+        daya_sebar="10",
+        kemasan="5",
+        harga="150000",
+    )
+    assert res1["mode"] == "ruangan"
+    assert res1["luas_kotor_m2"] == 42.0
+    assert res1["luas_bukaan_m2"] == 4.2
+    assert res1["luas_dinding_m2"] == 37.8
+    assert res1["lapis"] == 2
+    assert res1["daya_sebar"] == 10.0
+    assert res1["liter_per_lapis"] == 3.8
+    assert res1["liter_total"] == 7.6
+    assert res1["kemasan_liter"] == 5.0
+    assert res1["kaleng"] == 2
+    assert res1["liter_dibeli"] == 10.0
+    assert res1["sisa_liter"] == 2.4
+    assert res1["harga_kaleng"] == 150000
+    assert res1["biaya_total"] == 300000
+    assert res1["biaya_per_m2"] == 7937
+    assert isinstance(res1["catatan"], list)
+    assert len(res1["catatan"]) >= 3
+
+    # 2. Mode luas 50 m², kemasan 2.5 L, tanpa harga
+    res2 = hitung_cat(
+        mode="luas",
+        luas_dinding="50",
+        kemasan="2.5",
+        lapis=2,
+        daya_sebar=10,
+    )
+    assert res2["mode"] == "luas"
+    assert res2["luas_dinding_m2"] == 50.0
+    assert res2["luas_kotor_m2"] == 50.0
+    assert res2["luas_bukaan_m2"] == 0.0
+    assert res2["liter_per_lapis"] == 5.0
+    assert res2["liter_total"] == 10.0
+    assert res2["kemasan_liter"] == 2.5
+    assert res2["kaleng"] == 4
+    assert res2["liter_dibeli"] == 10.0
+    assert res2["sisa_liter"] == 0.0
+    assert res2["harga_kaleng"] is None
+    assert res2["biaya_total"] is None
+    assert res2["biaya_per_m2"] is None
+
+    # 3. Kemasan kustom 3.5 L + harga
+    res3 = hitung_cat(
+        mode="luas",
+        luas_dinding="20",
+        kemasan="kustom",
+        kemasan_kustom="3.5",
+        harga="90000",
+    )
+    assert res3["kemasan_liter"] == 3.5
+    assert res3["kaleng"] == 2
+    assert res3["liter_dibeli"] == 7.0
+    assert res3["sisa_liter"] == 3.0
+    assert res3["biaya_total"] == 180000
+    assert res3["biaya_per_m2"] == 9000
+    assert any("kustom" in c for c in res3["catatan"])
+
+    # 4. Nilai bawaan (default lapis=2, daya_sebar=10, kemasan=5, pintu=0, jendela=0)
+    res4 = hitung_cat(mode="ruangan", panjang=5, lebar=4, tinggi=3)
+    assert res4["luas_kotor_m2"] == 54.0
+    assert res4["luas_bukaan_m2"] == 0.0
+    assert res4["luas_dinding_m2"] == 54.0
+    assert res4["lapis"] == 2
+    assert res4["daya_sebar"] == 10.0
+    assert res4["kemasan_liter"] == 5.0
+
+
+def test_cat_logika_galat() -> None:
+    """Uji kode galat dan validasi batas logika hitung_cat."""
+    # Mode salah
+    try:
+        hitung_cat("salah", panjang=4, lebar=3, tinggi=3)
+        assert False, "Harus gagal mode tidak dikenal"
+    except CatError as e:
+        assert e.code == CT_UNSUPPORTED_MODE
+        assert e.status_code == 400
+
+    # Angka tidak valid
+    try:
+        hitung_cat("ruangan", panjang="abc", lebar=3, tinggi=3)
+        assert False, "Harus gagal angka bukan angka"
+    except CatError as e:
+        assert e.code == CT_INVALID_NUMBER
+
+    try:
+        hitung_cat("ruangan", panjang="1,2,3", lebar=3, tinggi=3)
+        assert False, "Harus gagal tanda desimal ganda"
+    except CatError as e:
+        assert e.code == CT_INVALID_NUMBER
+
+    # Di luar rentang
+    try:
+        hitung_cat("ruangan", panjang=0.2, lebar=3, tinggi=3)
+        assert False, "Harus gagal panjang < 0.5"
+    except CatError as e:
+        assert e.code == CT_OUT_OF_RANGE
+
+    try:
+        hitung_cat("ruangan", panjang=4, lebar=3, tinggi=15)
+        assert False, "Harus gagal tinggi > 10"
+    except CatError as e:
+        assert e.code == CT_OUT_OF_RANGE
+
+    try:
+        hitung_cat("luas", luas_dinding=2500)
+        assert False, "Harus gagal luas > 2000"
+    except CatError as e:
+        assert e.code == CT_OUT_OF_RANGE
+
+    # Bukaan melebihi luas kotor
+    try:
+        hitung_cat("ruangan", panjang=1, lebar=1, tinggi=1, pintu=3)
+        assert False, "Harus gagal luas dinding <= 0"
+    except CatError as e:
+        assert e.code == CT_OUT_OF_RANGE
+
+    # Lapisan salah
+    try:
+        hitung_cat("ruangan", panjang=4, lebar=3, tinggi=3, lapis=5)
+        assert False, "Harus gagal lapis > 3"
+    except CatError as e:
+        assert e.code == CT_INVALID_LAPIS
+
+    # Daya sebar salah
+    try:
+        hitung_cat("ruangan", panjang=4, lebar=3, tinggi=3, daya_sebar=3)
+        assert False, "Harus gagal daya sebar < 6"
+    except CatError as e:
+        assert e.code == CT_INVALID_DAYA_SEBAR
+
+    # Kemasan kustom tanpa nilai atau di luar rentang
+    try:
+        hitung_cat("ruangan", panjang=4, lebar=3, tinggi=3, kemasan="kustom")
+        assert False, "Harus gagal kemasan kustom tanpa nilai"
+    except CatError as e:
+        assert e.code == CT_INVALID_KEMASAN
+
+    try:
+        hitung_cat("ruangan", panjang=4, lebar=3, tinggi=3, kemasan="kustom", kemasan_kustom=0.1)
+        assert False, "Harus gagal kemasan kustom < 0.5"
+    except CatError as e:
+        assert e.code == CT_INVALID_KEMASAN
+
+    # Harga negatif
+    try:
+        hitung_cat("ruangan", panjang=4, lebar=3, tinggi=3, harga="-5000")
+        assert False, "Harus gagal harga negatif"
+    except CatError as e:
+        assert e.code == CT_INVALID_HARGA
+
+
+def test_http_cat_limits() -> None:
+    """GET /api/cat/limits mengembalikan HTTP 200, no-store, dan isi konfigurasi lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/cat/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("Cache-Control") == "no-store"
+
+    data = resp.json()
+    assert "modes" in data
+    assert len(data["modes"]) == 2
+    assert "kemasan_pilihan" in data
+    assert len(data["kemasan_pilihan"]) == 4
+    assert "rentang_lapis" in data
+    assert data["rentang_lapis"]["min"] == 1
+    assert data["rentang_lapis"]["max"] == 3
+    assert "rentang_daya_sebar" in data
+    assert data["rentang_daya_sebar"]["min"] == 6.0
+    assert data["rentang_daya_sebar"]["max"] == 14.0
+    assert "rentang_kemasan_kustom" in data
+    assert "rentang_harga" in data
+    assert "batas_dimensi" in data
+
+
+def test_http_cat_sukses_dan_headers() -> None:
+    """POST /api/cat sukses mengembalikan hasil terstruktur dan header cache-control no-store."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Mode ruangan
+    resp = client.post(
+        "/api/cat",
+        data={
+            "mode": "ruangan",
+            "panjang": "4",
+            "lebar": "3",
+            "tinggi": "3",
+            "pintu": "1",
+            "jendela": "2",
+            "lapis": "2",
+            "daya_sebar": "10",
+            "kemasan": "5",
+            "harga": "150000",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp.headers
+
+    data = resp.json()
+    assert data["mode"] == "ruangan"
+    assert data["luas_dinding_m2"] == 37.8
+    assert data["kaleng"] == 2
+    assert data["liter_total"] == 7.6
+    assert data["biaya_total"] == 300000
+    assert data["biaya_per_m2"] == 7937
+
+    # Mode luas dengan kemasan kustom
+    resp_luas = client.post(
+        "/api/cat",
+        data={
+            "mode": "luas",
+            "luas_dinding": "40",
+            "kemasan": "kustom",
+            "kemasan_kustom": "4",
+            "harga": "120000",
+        },
+    )
+    assert resp_luas.status_code == 200
+    data_luas = resp_luas.json()
+    assert data_luas["mode"] == "luas"
+    assert data_luas["luas_dinding_m2"] == 40.0
+    assert data_luas["kaleng"] == 2
+    assert data_luas["biaya_total"] == 240000
+
+
+def test_http_cat_galat() -> None:
+    """Uji skenario galat HTTP pada endpoint POST /api/cat."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Field mode tidak ada -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/cat", data={"panjang": "4", "lebar": "3", "tinggi": "3"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == CT_INVALID_REQUEST
+
+    # 2. JSON (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post("/api/cat", json={"mode": "ruangan", "panjang": "4", "lebar": "3", "tinggi": "3"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == CT_INVALID_REQUEST
+    assert "Kirim formulir multipart/form-data, bukan JSON." in r_json.json()["error"]["message"]
+
+    # 3. Mode tidak dikenal -> 400 UNSUPPORTED_MODE
+    r_mode = client.post("/api/cat", data={"mode": "kamar", "panjang": "4", "lebar": "3", "tinggi": "3"})
+    assert r_mode.status_code == 400
+    assert r_mode.json()["error"]["code"] == CT_UNSUPPORTED_MODE
+
+    # 4. Angka tidak valid -> 400 INVALID_NUMBER
+    r_nan = client.post("/api/cat", data={"mode": "ruangan", "panjang": "xyz", "lebar": "3", "tinggi": "3"})
+    assert r_nan.status_code == 400
+    assert r_nan.json()["error"]["code"] == CT_INVALID_NUMBER
+
+    # 5. Di luar rentang (panjang > 50) -> 400 OUT_OF_RANGE
+    r_range = client.post("/api/cat", data={"mode": "ruangan", "panjang": "60", "lebar": "3", "tinggi": "3"})
+    assert r_range.status_code == 400
+    assert r_range.json()["error"]["code"] == CT_OUT_OF_RANGE
+
+    # 6. Lapisan salah -> 400 INVALID_LAPIS
+    r_lapis = client.post("/api/cat", data={"mode": "ruangan", "panjang": "4", "lebar": "3", "tinggi": "3", "lapis": "0"})
+    assert r_lapis.status_code == 400
+    assert r_lapis.json()["error"]["code"] == CT_INVALID_LAPIS
+
+    # 7. Daya sebar salah -> 400 INVALID_DAYA_SEBAR
+    r_ds = client.post("/api/cat", data={"mode": "ruangan", "panjang": "4", "lebar": "3", "tinggi": "3", "daya_sebar": "25"})
+    assert r_ds.status_code == 400
+    assert r_ds.json()["error"]["code"] == CT_INVALID_DAYA_SEBAR
+
+    # 8. Kemasan kustom tanpa ukuran -> 400 INVALID_KEMASAN
+    r_kemasan = client.post("/api/cat", data={"mode": "ruangan", "panjang": "4", "lebar": "3", "tinggi": "3", "kemasan": "kustom"})
+    assert r_kemasan.status_code == 400
+    assert r_kemasan.json()["error"]["code"] == CT_INVALID_KEMASAN
+
+    # 9. Harga negatif -> 400 INVALID_HARGA
+    r_harga = client.post("/api/cat", data={"mode": "ruangan", "panjang": "4", "lebar": "3", "tinggi": "3", "harga": "-1000"})
+    assert r_harga.status_code == 400
+    assert r_harga.json()["error"]["code"] == CT_INVALID_HARGA
+
+    # 10. Body terlalu besar (Content-Length > 64 KB) -> 413 PAYLOAD_TOO_LARGE
+    r_big = client.post("/api/cat", data={"mode": "ruangan"}, headers={"Content-Length": "70000"})
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == CT_PAYLOAD_TOO_LARGE
+
+
+def test_http_cat_root_endpoint() -> None:
+    """Pastikan 'cat' terdaftar pada root endpoint tools."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "cat" in root_resp.json()["tools"]
+
+
+def test_http_cat_field_berkas_unggahan_ditolak_400() -> None:
+    """POST /api/cat dengan field berkas unggahan harus 400 INVALID_REQUEST tanpa kata PDF."""
+    client = _test_client()
+    if client is None:
+        return
+
+    response = client.post(
+        "/api/cat",
+        files={"luas_dinding": ("a.txt", b"x", "text/plain")},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "INVALID_REQUEST"
+    assert "PDF" not in body["error"]["message"]
+    assert "field 'mode' dan angka yang diminta" in body["error"]["message"]
 
 
 
