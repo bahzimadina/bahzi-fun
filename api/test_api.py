@@ -448,6 +448,20 @@ from app.harga_jual import (
     INVALID_PEMBULATAN as HJ_INVALID_PEMBULATAN,
     TARGET_TOO_HIGH as HJ_TARGET_TOO_HIGH,
 )
+from app.travel_cost import (
+    TravelCostError,
+    hitung_biaya_perjalanan,
+    limits_payload as travel_cost_limits_payload_func,
+    INVALID_REQUEST as TC_INVALID_REQUEST,
+    INVALID_NUMBER as TC_INVALID_NUMBER,
+    INVALID_JARAK as TC_INVALID_JARAK,
+    INVALID_KONSUMSI as TC_INVALID_KONSUMSI,
+    INVALID_HARGA as TC_INVALID_HARGA,
+    INVALID_PENUMPANG as TC_INVALID_PENUMPANG,
+    INVALID_BIAYA_LAIN as TC_INVALID_BIAYA_LAIN,
+    INVALID_BOOLEAN as TC_INVALID_BOOLEAN,
+    PAYLOAD_TOO_LARGE as TC_PAYLOAD_TOO_LARGE,
+)
 from app.ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -14824,6 +14838,289 @@ def test_http_harga_jual_root_endpoint() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "harga-jual" in root_resp.json()["tools"]
+
+
+def test_travel_cost_logika_dasar() -> None:
+    """Uji logika murni hitung_biaya_perjalanan dengan nilai pasti dan hitungan manual."""
+    res = hitung_biaya_perjalanan(
+        jarak=122,
+        pulang_pergi=True,
+        konsumsi=12,
+        harga_bbm=10000,
+        penumpang=2,
+        biaya_lain=50000,
+    )
+    assert res["jarak_total"] == 244.0
+    assert res["liter"] == 20.33
+    assert res["biaya_bbm"] == 203300
+    assert res["biaya_lain"] == 50000
+    assert res["total_biaya"] == 253300
+    assert res["biaya_per_orang"] == 126650
+    assert res["biaya_per_km"] == 1038
+    assert res["penumpang"] == 2
+    assert res["pulang_pergi"] is True
+    assert res["rincian"] == {
+        "jarak_satu_arah": 122.0,
+        "konsumsi": 12.0,
+        "harga_bbm": 10000,
+        "biaya_lain": 50000,
+    }
+    assert len(res["tabel_patungan"]) == 6
+    assert res["tabel_patungan"][0] == {"penumpang": 1, "biaya_per_orang": 253300}
+    assert res["tabel_patungan"][1] == {"penumpang": 2, "biaya_per_orang": 126650}
+    assert res["tabel_patungan"][2] == {"penumpang": 3, "biaya_per_orang": 84434}
+    assert res["tabel_patungan"][3] == {"penumpang": 4, "biaya_per_orang": 63325}
+    assert res["tabel_patungan"][4] == {"penumpang": 5, "biaya_per_orang": 50660}
+    assert res["tabel_patungan"][5] == {"penumpang": 6, "biaya_per_orang": 42217}
+    assert len(res["catatan"]) == 3
+    assert "Ini perkiraan bahan bakar saja" in res["catatan"][0]
+    assert "tidak ikut dikali dua" in res["catatan"][1]
+    assert "dibulatkan ke atas" in res["catatan"][2]
+
+
+def test_travel_cost_pulang_pergi_dan_biaya_lain() -> None:
+    """Uji dampak pulang-pergi (jarak x 2), biaya lain tetap tidak dikali dua, dan variasi penumpang."""
+    # Jarak satu arah tanpa PP
+    r_satu_arah = hitung_biaya_perjalanan(jarak=100, pulang_pergi=False, konsumsi=10, harga_bbm=10000, biaya_lain=25000)
+    assert r_satu_arah["jarak_total"] == 100.0
+    assert r_satu_arah["liter"] == 10.0
+    assert r_satu_arah["biaya_bbm"] == 100000
+    assert r_satu_arah["biaya_lain"] == 25000
+    assert r_satu_arah["total_biaya"] == 125000
+
+    # Jarak dengan PP: jarak_total dikali dua (200 km), biaya lain tetap 25.000
+    r_pp = hitung_biaya_perjalanan(jarak=100, pulang_pergi=True, konsumsi=10, harga_bbm=10000, biaya_lain=25000)
+    assert r_pp["jarak_total"] == 200.0
+    assert r_pp["liter"] == 20.0
+    assert r_pp["biaya_bbm"] == 200000
+    assert r_pp["biaya_lain"] == 25000
+    assert r_pp["total_biaya"] == 225000
+
+    # Penumpang mempengaruhi biaya_per_orang (pembulatan ke atas)
+    r_p7 = hitung_biaya_perjalanan(jarak=100, pulang_pergi=True, konsumsi=10, harga_bbm=10000, penumpang=7, biaya_lain=25000)
+    assert r_p7["penumpang"] == 7
+    assert r_p7["biaya_per_orang"] == 32143
+
+    # Format angka string dengan koma dan titik
+    r_format = hitung_biaya_perjalanan(
+        jarak="1.500,5",
+        pulang_pergi="true",
+        konsumsi="12,5",
+        harga_bbm="14.500",
+        penumpang="3",
+        biaya_lain="150.000",
+    )
+    assert r_format["jarak_total"] == 3001.0
+    assert r_format["penumpang"] == 3
+    assert r_format["pulang_pergi"] is True
+
+
+def test_travel_cost_logika_galat() -> None:
+    """Uji semua jalur galat kalkulator biaya perjalanan."""
+    # 1. Jarak bukan angka / kosong
+    for bad_jarak in ["abc", "!@#", None, "", "12.3.4"]:
+        try:
+            hitung_biaya_perjalanan(jarak=bad_jarak, konsumsi=12, harga_bbm=10000)
+            assert False, f"Harus gagal jarak {bad_jarak}"
+        except TravelCostError as e:
+            assert e.code in (TC_INVALID_JARAK, TC_INVALID_REQUEST)
+            assert e.status_code == 400
+
+    # 2. Jarak 0 atau di luar batas (0.1 .. 20.000)
+    for oob_jarak in [0, "0", "0.05", "20001", "-10"]:
+        try:
+            hitung_biaya_perjalanan(jarak=oob_jarak, konsumsi=12, harga_bbm=10000)
+            assert False, f"Harus gagal jarak {oob_jarak}"
+        except TravelCostError as e:
+            assert e.code == TC_INVALID_JARAK
+            assert e.status_code == 400
+
+    # 3. Konsumsi bukan angka / kosong / di luar batas (1 .. 100)
+    for bad_k in [None, "", "abc", "0", 0, "101", 101, "-5"]:
+        try:
+            hitung_biaya_perjalanan(jarak=100, konsumsi=bad_k, harga_bbm=10000)
+            assert False, f"Harus gagal konsumsi {bad_k}"
+        except TravelCostError as e:
+            assert e.code in (TC_INVALID_KONSUMSI, TC_INVALID_REQUEST)
+            assert e.status_code == 400
+
+    # 4. Harga BBM bukan angka / kosong / di luar batas (1.000 .. 100.000)
+    for bad_h in [None, "", "abc", "999", 999, "100001", 100001, "-1000"]:
+        try:
+            hitung_biaya_perjalanan(jarak=100, konsumsi=12, harga_bbm=bad_h)
+            assert False, f"Harus gagal harga {bad_h}"
+        except TravelCostError as e:
+            assert e.code in (TC_INVALID_HARGA, TC_INVALID_REQUEST)
+            assert e.status_code == 400
+
+    # 5. Penumpang di luar batas (1 .. 50) atau bukan bulat
+    for bad_p in ["0", 0, "51", 51, "-1", "2.5", "abc"]:
+        try:
+            hitung_biaya_perjalanan(jarak=100, konsumsi=12, harga_bbm=10000, penumpang=bad_p)
+            assert False, f"Harus gagal penumpang {bad_p}"
+        except TravelCostError as e:
+            assert e.code == TC_INVALID_PENUMPANG
+            assert e.status_code == 400
+
+    # 6. Biaya lain negatif, di luar batas (> 100.000.000), atau bukan angka
+    for bad_bl in ["-1", -1, "-500", "100000001", "abc"]:
+        try:
+            hitung_biaya_perjalanan(jarak=100, konsumsi=12, harga_bbm=10000, biaya_lain=bad_bl)
+            assert False, f"Harus gagal biaya_lain {bad_bl}"
+        except TravelCostError as e:
+            assert e.code == TC_INVALID_BIAYA_LAIN
+            assert e.status_code == 400
+
+    # 7. Pulang pergi bukan boolean
+    for bad_pp in ["ya", "tidak", "2", "abc"]:
+        try:
+            hitung_biaya_perjalanan(jarak=100, konsumsi=12, harga_bbm=10000, pulang_pergi=bad_pp)
+            assert False, f"Harus gagal pulang_pergi {bad_pp}"
+        except TravelCostError as e:
+            assert e.code == TC_INVALID_BOOLEAN
+            assert e.status_code == 400
+
+    # 8. Masukan > 40 karakter -> INVALID_NUMBER
+    try:
+        hitung_biaya_perjalanan(jarak="1" * 45, konsumsi=12, harga_bbm=10000)
+        assert False, "Harus gagal input > 40 karakter"
+    except TravelCostError as e:
+        assert e.code == TC_INVALID_NUMBER
+        assert e.status_code == 400
+
+
+def test_http_travel_cost_limits() -> None:
+    """GET /api/travel-cost/limits mengembalikan HTTP 200, no-store, dan isi konfigurasi lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/travel-cost/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("Cache-Control") == "no-store"
+
+    data = resp.json()
+    assert "batas" in data
+    assert "jarak" in data["batas"]
+    assert "konsumsi" in data["batas"]
+    assert "harga_bbm" in data["batas"]
+    assert "penumpang" in data["batas"]
+    assert "biaya_lain" in data["batas"]
+    assert data["batas"]["jarak"]["min"] == 0.1
+    assert data["batas"]["jarak"]["max"] == 20000
+
+
+def test_http_travel_cost_sukses_dan_headers() -> None:
+    """POST /api/travel-cost sukses mengembalikan hasil terstruktur dan header no-store serta X-Processing-Ms."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.post(
+        "/api/travel-cost",
+        data={
+            "jarak": "122",
+            "pulang_pergi": "true",
+            "konsumsi": "12",
+            "harga_bbm": "10.000",
+            "penumpang": "2",
+            "biaya_lain": "50.000",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("Cache-Control") == "no-store"
+    assert "X-Processing-Ms" in resp.headers
+
+    data = resp.json()
+    assert data["jarak_total"] == 244.0
+    assert data["liter"] == 20.33
+    assert data["biaya_bbm"] == 203300
+    assert data["biaya_lain"] == 50000
+    assert data["total_biaya"] == 253300
+    assert data["biaya_per_orang"] == 126650
+    assert data["biaya_per_km"] == 1038
+    assert data["penumpang"] == 2
+    assert data["pulang_pergi"] is True
+    assert len(data["tabel_patungan"]) == 6
+    assert len(data["catatan"]) == 3
+
+
+def test_http_travel_cost_galat() -> None:
+    """Uji skenario galat HTTP pada endpoint POST /api/travel-cost."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. JSON (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post(
+        "/api/travel-cost",
+        json={"jarak": "122", "konsumsi": "12", "harga_bbm": "10000"},
+    )
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == TC_INVALID_REQUEST
+    assert "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON." in r_json.json()["error"]["message"]
+
+    # 2. Field berkas unggahan -> 400 INVALID_REQUEST
+    r_file = client.post(
+        "/api/travel-cost",
+        data={"jarak": "122", "konsumsi": "12", "harga_bbm": "10000"},
+        files={"dokumen": ("a.txt", b"x", "text/plain")},
+    )
+    assert r_file.status_code == 400
+    assert r_file.json()["error"]["code"] == TC_INVALID_REQUEST
+    assert "Field formulir tidak boleh berupa berkas unggahan." in r_file.json()["error"]["message"]
+
+    # 3. Jarak kosong -> 400 INVALID_JARAK
+    r_no_jarak = client.post(
+        "/api/travel-cost",
+        data={"konsumsi": "12", "harga_bbm": "10000"},
+    )
+    assert r_no_jarak.status_code == 400
+    assert r_no_jarak.json()["error"]["code"] == TC_INVALID_JARAK
+
+    # 4. Konsumsi kosong -> 400 INVALID_KONSUMSI
+    r_no_kons = client.post(
+        "/api/travel-cost",
+        data={"jarak": "122", "harga_bbm": "10000"},
+    )
+    assert r_no_kons.status_code == 400
+    assert r_no_kons.json()["error"]["code"] == TC_INVALID_KONSUMSI
+
+    # 5. Harga kosong -> 400 INVALID_HARGA
+    r_no_harga = client.post(
+        "/api/travel-cost",
+        data={"jarak": "122", "konsumsi": "12"},
+    )
+    assert r_no_harga.status_code == 400
+    assert r_no_harga.json()["error"]["code"] == TC_INVALID_HARGA
+
+    # 6. Pulang pergi tidak valid -> 400 INVALID_BOOLEAN
+    r_bad_pp = client.post(
+        "/api/travel-cost",
+        data={"jarak": "122", "konsumsi": "12", "harga_bbm": "10000", "pulang_pergi": "ya"},
+    )
+    assert r_bad_pp.status_code == 400
+    assert r_bad_pp.json()["error"]["code"] == TC_INVALID_BOOLEAN
+
+    # 7. Content-length melebihi 64 KB -> 413 PAYLOAD_TOO_LARGE
+    r_big = client.post(
+        "/api/travel-cost",
+        data={"jarak": "122", "konsumsi": "12", "harga_bbm": "10000"},
+        headers={"Content-Length": "70000"},
+    )
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == TC_PAYLOAD_TOO_LARGE
+
+
+def test_http_travel_cost_root_endpoint() -> None:
+    """Pastikan 'biaya-perjalanan' terdaftar pada root endpoint tools."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "biaya-perjalanan" in root_resp.json()["tools"]
 
 
 

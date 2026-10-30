@@ -366,6 +366,13 @@ from .harga_jual import (
     limits_payload as harga_jual_limits_payload_func,
     INVALID_REQUEST as HJ_INVALID_REQUEST,
 )
+from .travel_cost import (
+    TravelCostError,
+    hitung_biaya_perjalanan,
+    limits_payload as travel_cost_limits_payload_func,
+    INVALID_REQUEST as TC_INVALID_REQUEST,
+    PAYLOAD_TOO_LARGE as TC_PAYLOAD_TOO_LARGE,
+)
 from .ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -1031,6 +1038,17 @@ async def handle_harga_jual_error(request: Request, exc: HargaJualError) -> JSON
     )
 
 
+@app.exception_handler(TravelCostError)
+async def handle_travel_cost_error(request: Request, exc: TravelCostError) -> JSONResponse:
+    """Error kalkulator biaya perjalanan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung biaya perjalanan ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(IpkError)
 async def handle_ipk_error(request: Request, exc: IpkError) -> JSONResponse:
     """Error kalkulator IPK yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1286,6 +1304,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/cat"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/harga-jual"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON."
+    elif request.url.path.startswith("/api/travel-cost"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON."
     else:
         msg = (
@@ -2015,6 +2035,27 @@ def _reject_oversized_harga_jual_content_length(request: Request) -> None:
 
 def _harga_jual_limits_payload() -> dict:
     return harga_jual_limits_payload_func()
+
+
+def _reject_oversized_travel_cost_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator biaya perjalanan (64 KB)."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise TravelCostError(
+            TC_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _travel_cost_limits_payload() -> dict:
+    return travel_cost_limits_payload_func()
 
 
 def _reject_oversized_ipk_content_length(request: Request) -> None:
@@ -4108,6 +4149,82 @@ async def harga_jual_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/travel-cost/limits")
+async def travel_cost_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Biaya Perjalanan."""
+    return JSONResponse(content=_travel_cost_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/travel-cost")
+async def travel_cost_endpoint(
+    request: Request,
+    jarak: str = Form(default=None),
+    pulang_pergi: str = Form(default=None),
+    konsumsi: str = Form(default=None),
+    harga_bbm: str = Form(default=None),
+    penumpang: str = Form(default=None),
+    biaya_lain: str = Form(default=None),
+):
+    """Hitung perkiraan biaya perjalanan di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_travel_cost_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise TravelCostError(
+            TC_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise TravelCostError(
+            TC_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for val in form.values():
+        if hasattr(val, "filename") or isinstance(val, UploadFile):
+            raise TravelCostError(
+                TC_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    jarak_val = jarak if jarak is not None else form.get("jarak")
+    pulang_pergi_val = pulang_pergi if pulang_pergi is not None else form.get("pulang_pergi")
+    konsumsi_val = konsumsi if konsumsi is not None else form.get("konsumsi")
+    harga_bbm_val = harga_bbm if harga_bbm is not None else form.get("harga_bbm")
+    penumpang_val = penumpang if penumpang is not None else form.get("penumpang")
+    biaya_lain_val = biaya_lain if biaya_lain is not None else form.get("biaya_lain")
+
+    result = hitung_biaya_perjalanan(
+        jarak=jarak_val,
+        pulang_pergi=pulang_pergi_val,
+        konsumsi=konsumsi_val,
+        harga_bbm=harga_bbm_val,
+        penumpang=penumpang_val,
+        biaya_lain=biaya_lain_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup durasi.
+    logger.info(
+        "hitung biaya perjalanan selesai: durasi=%.0fms",
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/ipk/limits")
 async def ipk_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung IPK."""
@@ -5546,6 +5663,7 @@ async def root() -> dict:
             "keramik",
             "cat",
             "harga-jual",
+            "biaya-perjalanan",
             "hijriah",
             "json",
             "xml",
