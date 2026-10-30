@@ -434,6 +434,20 @@ from app.cat import (
     hitung_cat,
     limits_payload as cat_limits_payload_func,
 )
+from app.harga_jual import (
+    HargaJualError,
+    hitung_harga_jual,
+    limits_payload as harga_jual_limits_payload_func,
+    INVALID_REQUEST as HJ_INVALID_REQUEST,
+    UNSUPPORTED_MODE as HJ_UNSUPPORTED_MODE,
+    INVALID_NUMBER as HJ_INVALID_NUMBER,
+    INVALID_MODAL as HJ_INVALID_MODAL,
+    INVALID_BIAYA as HJ_INVALID_BIAYA,
+    INVALID_PLATFORM as HJ_INVALID_PLATFORM,
+    INVALID_TARGET as HJ_INVALID_TARGET,
+    INVALID_PEMBULATAN as HJ_INVALID_PEMBULATAN,
+    TARGET_TOO_HIGH as HJ_TARGET_TOO_HIGH,
+)
 from app.ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -14479,6 +14493,337 @@ def test_http_cat_field_berkas_unggahan_ditolak_400() -> None:
     assert body["error"]["code"] == "INVALID_REQUEST"
     assert "PDF" not in body["error"]["message"]
     assert "field 'mode' dan angka yang diminta" in body["error"]["message"]
+
+
+def test_harga_jual_logika_margin_dan_markup() -> None:
+    """Uji logika murni hitung_harga_jual untuk mode margin dan mode markup."""
+    # 1. Mode margin sukses dengan angka pasti manual
+    res_margin = hitung_harga_jual(
+        mode="margin",
+        modal="75.000",
+        biaya_tambahan="12.500",
+        potongan_platform="10",
+        target="20",
+        pembulatan="500",
+    )
+    assert res_margin["mode"] == "margin"
+    assert res_margin["harga_jual"] == 125000
+    assert res_margin["harga_sebelum_pembulatan"] == 125000.0
+    assert res_margin["laba_per_unit"] == 25000
+    assert res_margin["laba_persen"] == 20.0
+    assert res_margin["markup_persen"] == 28.57
+    assert res_margin["harga_titik_balik"] == 87500
+    assert res_margin["pembulatan"] == 500
+    assert res_margin["rincian"] == {
+        "modal": 75000,
+        "biaya_tambahan": 12500,
+        "potongan_platform": 12500,
+        "total_biaya": 100000,
+    }
+    assert len(res_margin["skenario"]) == 5
+    assert res_margin["skenario"][0] == {"target": 10, "harga_jual": 109500, "laba_per_unit": 11050, "laba_persen": 10.09}
+    assert res_margin["skenario"][1] == {"target": 20, "harga_jual": 125000, "laba_per_unit": 25000, "laba_persen": 20.0}
+    assert res_margin["skenario"][2] == {"target": 30, "harga_jual": 146000, "laba_per_unit": 43900, "laba_persen": 30.07}
+    assert res_margin["skenario"][3] == {"target": 40, "harga_jual": 175000, "laba_per_unit": 70000, "laba_persen": 40.0}
+    assert res_margin["skenario"][4] == {"target": 50, "harga_jual": 219000, "laba_per_unit": 109600, "laba_persen": 50.05}
+    assert len(res_margin["catatan"]) >= 2
+
+    # 2. Mode markup sukses dengan angka pasti manual
+    res_markup = hitung_harga_jual(
+        mode="markup",
+        modal="50000",
+        biaya_tambahan="0",
+        potongan_platform="5",
+        target="25",
+        pembulatan="100",
+    )
+    assert res_markup["mode"] == "markup"
+    assert res_markup["harga_jual"] == 65800
+    assert res_markup["harga_sebelum_pembulatan"] == 65789.47
+    assert res_markup["laba_per_unit"] == 12510
+    assert res_markup["laba_persen"] == 19.01
+    assert res_markup["markup_persen"] == 25.02
+    assert res_markup["harga_titik_balik"] == 50000
+    assert res_markup["pembulatan"] == 100
+    assert res_markup["rincian"] == {
+        "modal": 50000,
+        "biaya_tambahan": 0,
+        "potongan_platform": 3290,
+        "total_biaya": 53290,
+    }
+
+
+def test_harga_jual_nilai_tepi() -> None:
+    """Uji nilai tepi operasional kalkulator harga jual."""
+    # 1. Nilai tepi minimum: modal 1 rupiah, target 0, potongan 0, pembulatan 0
+    res_min = hitung_harga_jual(
+        mode="margin",
+        modal="1",
+        biaya_tambahan="0",
+        potongan_platform="0",
+        target="0",
+        pembulatan="0",
+    )
+    assert res_min["harga_jual"] == 1
+    assert res_min["harga_sebelum_pembulatan"] == 1.0
+    assert res_min["laba_per_unit"] == 0
+    assert res_min["laba_persen"] == 0.0
+    assert res_min["markup_persen"] == 0.0
+    assert res_min["harga_titik_balik"] == 1
+
+    # 2. Nilai tepi target 95% mode margin
+    res_t95 = hitung_harga_jual(
+        mode="margin",
+        modal="1000",
+        potongan_platform="0",
+        target="95",
+        pembulatan="100",
+    )
+    assert res_t95["harga_jual"] == 20000
+    assert res_t95["harga_sebelum_pembulatan"] == 20000.0
+    assert res_t95["laba_per_unit"] == 19000
+    assert res_t95["laba_persen"] == 95.0
+    assert res_t95["markup_persen"] == 1900.0
+
+    # 3. Nilai tepi potongan 40% mode margin
+    res_p40 = hitung_harga_jual(
+        mode="margin",
+        modal="6000",
+        potongan_platform="40",
+        target="20",
+        pembulatan="1000",
+    )
+    assert res_p40["harga_jual"] == 15000
+    assert res_p40["harga_sebelum_pembulatan"] == 15000.0
+    assert res_p40["rincian"]["potongan_platform"] == 6000
+    assert res_p40["laba_per_unit"] == 3000
+    assert res_p40["laba_persen"] == 20.0
+    assert res_p40["markup_persen"] == 50.0
+
+    # 4. Variasi pembulatan: 0, 100, 500, 1000
+    # modal 105, target 10% markup, pot 0% -> sebelum = 105 * 1.1 = 115.5
+    b0 = hitung_harga_jual(mode="markup", modal=105, target=10, pembulatan=0)
+    assert b0["harga_jual"] == 116
+
+    b100 = hitung_harga_jual(mode="markup", modal=105, target=10, pembulatan=100)
+    assert b100["harga_jual"] == 200
+
+    b500 = hitung_harga_jual(mode="markup", modal=105, target=10, pembulatan=500)
+    assert b500["harga_jual"] == 500
+
+    b1000 = hitung_harga_jual(mode="markup", modal=105, target=10, pembulatan=1000)
+    assert b1000["harga_jual"] == 1000
+
+    # 5. Format desimal koma dan titik pemisah ribuan
+    res_format = hitung_harga_jual(
+        mode="margin",
+        modal="1.250.000,50",
+        biaya_tambahan="50.000,25",
+        potongan_platform="12,5",
+        target="15,5",
+        pembulatan="500",
+    )
+    assert res_format["mode"] == "margin"
+    assert res_format["rincian"]["modal"] == 1250001
+    assert res_format["rincian"]["biaya_tambahan"] == 50000
+
+
+def test_harga_jual_logika_galat() -> None:
+    """Uji semua jalur galat kalkulator harga jual."""
+    # 1. Mode margin dengan target + potongan >= 100% -> TARGET_TOO_HIGH
+    try:
+        hitung_harga_jual(mode="margin", modal="10000", potongan_platform="40", target="60")
+        assert False, "Harus gagal target + potongan >= 100"
+    except HargaJualError as e:
+        assert e.code == HJ_TARGET_TOO_HIGH
+        assert e.status_code == 400
+        assert "Target laba ditambah potongan marketplace harus di bawah 100%" in e.message
+
+    # 2. Mode tidak didukung -> UNSUPPORTED_MODE
+    try:
+        hitung_harga_jual(mode="diskon", modal="10000", target="20")
+        assert False, "Harus gagal mode tidak didukung"
+    except HargaJualError as e:
+        assert e.code == HJ_UNSUPPORTED_MODE
+        assert e.status_code == 400
+
+    # 3. Field mode kosong / None -> INVALID_REQUEST
+    try:
+        hitung_harga_jual(mode=None, modal="10000", target="20")
+        assert False, "Harus gagal mode None"
+    except HargaJualError as e:
+        assert e.code == HJ_INVALID_REQUEST
+        assert e.status_code == 400
+
+    # 4. Modal tidak valid -> INVALID_MODAL
+    for bad_modal in [None, "", "0", "-500", "1000000001", "abc"]:
+        try:
+            hitung_harga_jual(mode="margin", modal=bad_modal, target="20")
+            assert False, f"Harus gagal modal {bad_modal}"
+        except HargaJualError as e:
+            assert e.code == HJ_INVALID_MODAL
+            assert e.status_code == 400
+
+    # 5. Biaya tambahan tidak valid -> INVALID_BIAYA
+    for bad_biaya in ["-1", "1000000001", "xyz"]:
+        try:
+            hitung_harga_jual(mode="margin", modal="10000", biaya_tambahan=bad_biaya, target="20")
+            assert False, f"Harus gagal biaya {bad_biaya}"
+        except HargaJualError as e:
+            assert e.code == HJ_INVALID_BIAYA
+            assert e.status_code == 400
+
+    # 6. Potongan platform tidak valid -> INVALID_PLATFORM
+    for bad_plat in ["-1", "41", "xyz", "12.3.4"]:
+        try:
+            hitung_harga_jual(mode="margin", modal="10000", potongan_platform=bad_plat, target="20")
+            assert False, f"Harus gagal platform {bad_plat}"
+        except HargaJualError as e:
+            assert e.code == HJ_INVALID_PLATFORM
+            assert e.status_code == 400
+
+    # 7. Target tidak valid -> INVALID_TARGET
+    for bad_target in [None, "", "-1", "96", "abc"]:
+        try:
+            hitung_harga_jual(mode="margin", modal="10000", target=bad_target)
+            assert False, f"Harus gagal margin target {bad_target}"
+        except HargaJualError as e:
+            assert e.code == HJ_INVALID_TARGET
+            assert e.status_code == 400
+
+    try:
+        hitung_harga_jual(mode="markup", modal="10000", target="1001")
+        assert False, "Harus gagal markup target 1001"
+    except HargaJualError as e:
+        assert e.code == HJ_INVALID_TARGET
+        assert e.status_code == 400
+
+    # 8. Pembulatan tidak valid -> INVALID_PEMBULATAN
+    for bad_pemb in ["250", "abc"]:
+        try:
+            hitung_harga_jual(mode="margin", modal="10000", target="20", pembulatan=bad_pemb)
+            assert False, f"Harus gagal pembulatan {bad_pemb}"
+        except HargaJualError as e:
+            assert e.code == HJ_INVALID_PEMBULATAN
+            assert e.status_code == 400
+
+    # 9. Masukan > 40 karakter -> INVALID_NUMBER
+    try:
+        hitung_harga_jual(mode="margin", modal="1" * 45, target="20")
+        assert False, "Harus gagal input > 40 karakter"
+    except HargaJualError as e:
+        assert e.code == HJ_INVALID_NUMBER
+        assert e.status_code == 400
+
+
+def test_http_harga_jual_limits() -> None:
+    """GET /api/harga-jual/limits mengembalikan HTTP 200, no-store, dan isi konfigurasi lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/harga-jual/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("Cache-Control") == "no-store"
+
+    data = resp.json()
+    assert "modes" in data
+    assert len(data["modes"]) == 2
+    assert "batas" in data
+    assert "modal" in data["batas"]
+    assert "pilihan_pembulatan" in data
+    assert len(data["pilihan_pembulatan"]) == 4
+
+
+def test_http_harga_jual_sukses_dan_headers() -> None:
+    """POST /api/harga-jual sukses mengembalikan hasil terstruktur dan header no-store serta X-Processing-Ms."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.post(
+        "/api/harga-jual",
+        data={
+            "mode": "margin",
+            "modal": "75.000",
+            "biaya_tambahan": "12.500",
+            "potongan_platform": "10",
+            "target": "20",
+            "pembulatan": "500",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp.headers
+
+    data = resp.json()
+    assert data["mode"] == "margin"
+    assert data["harga_jual"] == 125000
+    assert data["harga_sebelum_pembulatan"] == 125000.0
+    assert data["laba_per_unit"] == 25000
+    assert data["laba_persen"] == 20.0
+    assert data["markup_persen"] == 28.57
+    assert data["harga_titik_balik"] == 87500
+    assert data["pembulatan"] == 500
+
+
+def test_http_harga_jual_galat() -> None:
+    """Uji skenario galat HTTP pada endpoint POST /api/harga-jual."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. JSON (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post(
+        "/api/harga-jual",
+        json={"mode": "margin", "modal": "75000", "target": "20"},
+    )
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == HJ_INVALID_REQUEST
+    assert "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON." in r_json.json()["error"]["message"]
+
+    # 2. Mode tidak ada -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/harga-jual", data={"modal": "75000", "target": "20"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == HJ_INVALID_REQUEST
+
+    # 3. Field berkas unggahan -> 400 INVALID_REQUEST
+    r_file = client.post(
+        "/api/harga-jual",
+        data={"mode": "margin", "modal": "75000", "target": "20"},
+        files={"dokumen": ("a.txt", b"x", "text/plain")},
+    )
+    assert r_file.status_code == 400
+    assert r_file.json()["error"]["code"] == HJ_INVALID_REQUEST
+    assert "Field formulir tidak boleh berupa berkas unggahan." in r_file.json()["error"]["message"]
+
+    # 4. Mode margin target + potongan >= 100 -> 400 TARGET_TOO_HIGH
+    r_high = client.post(
+        "/api/harga-jual",
+        data={"mode": "margin", "modal": "75000", "potongan_platform": "40", "target": "65"},
+    )
+    assert r_high.status_code == 400
+    assert r_high.json()["error"]["code"] == HJ_TARGET_TOO_HIGH
+
+    # 5. Content-length melebihi 64 KB -> 400 INVALID_REQUEST
+    r_big = client.post(
+        "/api/harga-jual",
+        data={"mode": "margin", "modal": "75000", "target": "20"},
+        headers={"Content-Length": "70000"},
+    )
+    assert r_big.status_code == 400
+    assert r_big.json()["error"]["code"] == HJ_INVALID_REQUEST
+
+
+def test_http_harga_jual_root_endpoint() -> None:
+    """Pastikan 'harga-jual' terdaftar pada root endpoint tools."""
+    client = _test_client()
+    if client is None:
+        return
+
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "harga-jual" in root_resp.json()["tools"]
 
 
 

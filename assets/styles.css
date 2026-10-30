@@ -10438,3 +10438,322 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* =========================================================================
+   Panel alat: Hitung harga jual (.hj__*)
+   ========================================================================= */
+
+.hj__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  margin-top: .75rem;
+}
+
+.hj__field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.hj__field--mode {
+  gap: .5rem;
+}
+
+.hj__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.hj__req {
+  color: var(--md-sys-color-primary);
+}
+
+.hj__radios {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.hj__radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .88rem;
+  font-weight: 500;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+
+.hj__radio-label:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.hj__radio-label:has(input:checked) {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+}
+
+.hj__radio-label input {
+  margin: 0;
+  accent-color: var(--md-sys-color-primary);
+  cursor: pointer;
+}
+
+.hj__inputs-row {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.hj__inputs-row .hj__field {
+  min-width: 200px;
+}
+
+.hj__inputs-row--opts .hj__field {
+  min-width: 140px;
+}
+
+.hj__input {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .95rem;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.hj__input:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.hj__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .95rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.hj__select:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.hj__hint-text {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.4;
+}
+
+.hj__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+
+.hj__hint {
+  padding: 1.25rem;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px dashed var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.hj__hint[hidden] {
+  display: none;
+}
+
+.hj__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.hj__output-wrap[hidden] {
+  display: none;
+}
+
+.hj__hero {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+
+.hj__hero-main {
+  display: flex;
+  align-items: baseline;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.hj__hero-label {
+  font-size: .95rem;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.hj__hero-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  font-family: var(--font-mono);
+  line-height: 1.15;
+}
+
+.hj__sentence {
+  font-size: .95rem;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+
+.hj__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.hj__stat {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.hj__stat-label {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.hj__stat-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--md-sys-color-on-surface);
+}
+
+.hj__table-section {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin-top: .25rem;
+  width: 100%;
+}
+
+.hj__table-title {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  margin: 0;
+}
+
+.hj__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.hj__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .88rem;
+  text-align: left;
+}
+
+.hj__table th,
+.hj__table td {
+  padding: .65rem .85rem;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  white-space: nowrap;
+}
+
+.hj__table th {
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface-variant);
+  font-weight: 600;
+  font-size: .82rem;
+}
+
+.hj__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.hj__table tbody tr:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.hj__table-num {
+  font-family: var(--font-mono);
+}
+
+.hj__notes {
+  margin: .25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: .84rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.5;
+}
+
+.hj__disclaimer {
+  margin: .4rem 0 0;
+  font-size: .82rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.hj__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+  flex-wrap: wrap;
+}
+
+@media (pointer: coarse) {
+  #harga-jual-panel input,
+  #harga-jual-panel select,
+  #harga-jual-panel button,
+  .hj__radio-label {
+    min-height: 44px;
+  }
+}
+

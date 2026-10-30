@@ -360,6 +360,12 @@ from .cat import (
     hitung_cat,
     limits_payload as cat_limits_payload_func,
 )
+from .harga_jual import (
+    HargaJualError,
+    hitung_harga_jual,
+    limits_payload as harga_jual_limits_payload_func,
+    INVALID_REQUEST as HJ_INVALID_REQUEST,
+)
 from .ipk import (
     INVALID_COURSE_NAME as IPK_INVALID_COURSE_NAME,
     INVALID_REQUEST as IPK_INVALID_REQUEST,
@@ -1014,6 +1020,17 @@ async def handle_cat_error(request: Request, exc: CatError) -> JSONResponse:
     )
 
 
+@app.exception_handler(HargaJualError)
+async def handle_harga_jual_error(request: Request, exc: HargaJualError) -> JSONResponse:
+    """Error kalkulator harga jual yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung harga jual ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(IpkError)
 async def handle_ipk_error(request: Request, exc: IpkError) -> JSONResponse:
     """Error kalkulator IPK yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1268,6 +1285,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/cat"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/harga-jual"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON."
     else:
         msg = (
             "Permintaan tidak valid. Kirim multipart/form-data dengan satu "
@@ -1975,6 +1994,27 @@ def _reject_oversized_cat_content_length(request: Request) -> None:
 
 def _cat_limits_payload() -> dict:
     return cat_limits_payload_func()
+
+
+def _reject_oversized_harga_jual_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator harga jual."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise HargaJualError(
+            HJ_INVALID_REQUEST,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            400,
+        )
+
+
+def _harga_jual_limits_payload() -> dict:
+    return harga_jual_limits_payload_func()
 
 
 def _reject_oversized_ipk_content_length(request: Request) -> None:
@@ -3984,6 +4024,90 @@ async def cat_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/harga-jual/limits")
+async def harga_jual_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Harga Jual."""
+    return JSONResponse(content=_harga_jual_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/harga-jual")
+async def harga_jual_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    modal: str = Form(default=None),
+    biaya_tambahan: str = Form(default=None),
+    potongan_platform: str = Form(default=None),
+    target: str = Form(default=None),
+    pembulatan: str = Form(default=None),
+):
+    """Hitung harga jual produk di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_harga_jual_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise HargaJualError(
+            HJ_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise HargaJualError(
+            HJ_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for val in form.values():
+        if hasattr(val, "filename") or isinstance(val, UploadFile):
+            raise HargaJualError(
+                HJ_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if "mode" not in form and mode is None:
+        raise HargaJualError(
+            HJ_INVALID_REQUEST,
+            "Field 'mode' wajib disertakan dalam permintaan multipart/form-data.",
+            400,
+        )
+
+    mode_val = mode if mode is not None else form.get("mode")
+    modal_val = modal if modal is not None else form.get("modal")
+    biaya_tambahan_val = biaya_tambahan if biaya_tambahan is not None else form.get("biaya_tambahan")
+    potongan_platform_val = potongan_platform if potongan_platform is not None else form.get("potongan_platform")
+    target_val = target if target is not None else form.get("target")
+    pembulatan_val = pembulatan if pembulatan is not None else form.get("pembulatan")
+
+    result = hitung_harga_jual(
+        mode=mode_val,
+        modal=modal_val,
+        biaya_tambahan=biaya_tambahan_val,
+        potongan_platform=potongan_platform_val,
+        target=target_val,
+        pembulatan=pembulatan_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode dan durasi.
+    logger.info(
+        "hitung harga jual selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/ipk/limits")
 async def ipk_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung IPK."""
@@ -5421,6 +5545,7 @@ async def root() -> dict:
             "cicilan",
             "keramik",
             "cat",
+            "harga-jual",
             "hijriah",
             "json",
             "xml",
