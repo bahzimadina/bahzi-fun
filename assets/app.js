@@ -92,6 +92,7 @@
         { name: 'Hitung IPK', desc: 'Hitung IPK dari daftar mata kuliah, lihat predikatnya, dan cek berapa SKS nilai A lagi yang perlu dikejar untuk mencapai target.', status: 'available', action: 'ipk' },
         { name: 'Hitung keramik lantai', desc: 'Hitung jumlah keping dan dus keramik untuk sebuah ruangan, plus perkiraan biayanya.', status: 'available', action: 'keramik' },
         { name: 'Hitung kebutuhan cat', desc: 'Hitung luas dinding yang dicat, liter cat yang dibutuhkan, jumlah kaleng, dan perkiraan biayanya.', status: 'available', action: 'cat' },
+        { name: 'Hitung kebutuhan bata', desc: 'Hitung jumlah bata, sak semen, pasir, dan perkiraan biaya untuk memasang dinding.', status: 'available', action: 'bata' },
         { name: 'Hitung harga jual', desc: 'Hitung harga jual dari modal, biaya tambahan, potongan marketplace, dan target laba.', status: 'available', action: 'harga-jual' },
         { name: 'Hitung biaya perjalanan', desc: 'Perkirakan biaya BBM, tol, dan parkir untuk sebuah perjalanan, lalu lihat patungan per orang.', status: 'available', action: 'biaya-perjalanan' }
       ]

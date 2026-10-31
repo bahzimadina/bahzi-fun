@@ -434,6 +434,22 @@ from app.cat import (
     hitung_cat,
     limits_payload as cat_limits_payload_func,
 )
+from app.bata import (
+    INVALID_BUKAAN as BT_INVALID_BUKAAN,
+    INVALID_CADANGAN as BT_INVALID_CADANGAN,
+    INVALID_HARGA as BT_INVALID_HARGA,
+    INVALID_NUMBER as BT_INVALID_NUMBER,
+    INVALID_REQUEST as BT_INVALID_REQUEST,
+    OUT_OF_RANGE as BT_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as BT_PAYLOAD_TOO_LARGE,
+    TOO_MANY_BATA as BT_TOO_MANY_BATA,
+    UNSUPPORTED_CAMPURAN as BT_UNSUPPORTED_CAMPURAN,
+    UNSUPPORTED_JENIS as BT_UNSUPPORTED_JENIS,
+    UNSUPPORTED_MODE as BT_UNSUPPORTED_MODE,
+    BataError,
+    hitung_bata,
+    limits_payload as bata_limits_payload_func,
+)
 from app.harga_jual import (
     HargaJualError,
     hitung_harga_jual,
@@ -15121,6 +15137,469 @@ def test_http_travel_cost_root_endpoint() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "biaya-perjalanan" in root_resp.json()["tools"]
+
+
+def test_bata_logika_dasar_dan_mode() -> None:
+    """Uji logika murni hitung_bata: mode dimensi, bukaan, mode luas, cadangan 0, dan tiap jenis bata."""
+    # 1. Bata merah 1:4, dimensi 6 x 3 m, bukaan 2 m2, cadangan 5%
+    # Luas dinding = 16 m2
+    # bata_pasang = 16 * 70 = 1120, cadangan = ceil(1120 * 0.05) = 56, dibeli = 1176
+    # semen_kg = 16 * 9.7 = 155.2 kg -> semen_sak = ceil(155.2 / 50) = 4 sak
+    # pasir_m3 = ceil(16 * 0.047 = 0.752 -> 0.76) m3
+    res1 = hitung_bata(
+        mode="dimensi",
+        panjang="6",
+        tinggi="3",
+        bukaan="2",
+        jenis="bata-merah",
+        campuran="1:4",
+        cadangan="5",
+    )
+    assert res1["mode"] == "dimensi"
+    assert res1["jenis"] == "bata-merah"
+    assert res1["campuran"] == "1:4"
+    assert res1["luas_kotor_m2"] == 18.0
+    assert res1["bukaan_m2"] == 2.0
+    assert res1["luas_dinding_m2"] == 16.0
+    assert res1["bata_per_m2"] == 70
+    assert res1["bata_pasang"] == 1120
+    assert res1["bata_cadangan_pasang"] == 56
+    assert res1["bata_dibeli"] == 1176
+    assert res1["bata_satuan"] == "buah"
+    assert res1["semen_kg"] == 155.2
+    assert res1["semen_sak"] == 4
+    assert res1["semen_berat_sak_kg"] == 50
+    assert res1["pasir_m3"] == 0.76
+    assert res1["mortar_sak"] is None
+    assert res1["mortar_berat_sak_kg"] is None
+    assert res1["cadangan_persen"] == 5
+    assert res1["biaya"] is None
+    assert res1["patokan"]["bata_per_m2"] == 70
+    assert res1["patokan"]["semen_kg_per_m2"] == 9.7
+    assert res1["patokan"]["pasir_m3_per_m2"] == 0.047
+    assert isinstance(res1["catatan"], list)
+    assert len(res1["catatan"]) > 0
+
+    # 2. Mode luas, cadangan 0%
+    # Luas dinding = 25 m2, jenis bata merah 1:4
+    # bata_pasang = 25 * 70 = 1750, cadangan = 0, dibeli = 1750
+    # semen_kg = 25 * 9.7 = 242.5 kg -> semen_sak = ceil(242.5 / 50) = 5 sak
+    # pasir_m3 = ceil(25 * 0.047 = 1.175) = 1.18 m3
+    res_luas = hitung_bata(
+        mode="luas",
+        luas="25",
+        jenis="bata-merah",
+        campuran="1:4",
+        cadangan="0",
+    )
+    assert res_luas["mode"] == "luas"
+    assert res_luas["luas_kotor_m2"] == 25.0
+    assert res_luas["bukaan_m2"] == 0.0
+    assert res_luas["luas_dinding_m2"] == 25.0
+    assert res_luas["bata_pasang"] == 1750
+    assert res_luas["bata_cadangan_pasang"] == 0
+    assert res_luas["bata_dibeli"] == 1750
+    assert res_luas["semen_kg"] == 242.5
+    assert res_luas["semen_sak"] == 5
+    assert res_luas["pasir_m3"] == 1.18
+
+    # 3. Batako (40 x 20 x 10 cm), campuran 1:3
+    # 20 m2 dinding: bata_per_m2 = 12.5 -> bata_pasang = 250
+    # cadangan 5% -> ceil(250 * 0.05 = 12.5) = 13, dibeli = 263
+    # semen 1:3 = 15.0 kg/m2 -> semen_kg = 20 * 15.0 = 300.0 kg -> semen_sak = 6
+    # pasir 1:3 = 0.045 m3/m2 -> pasir_m3 = ceil(20 * 0.045) = 0.90 m3
+    res_batako = hitung_bata(
+        mode="luas",
+        luas="20",
+        jenis="batako",
+        campuran="1:3",
+        cadangan="5",
+    )
+    assert res_batako["jenis"] == "batako"
+    assert res_batako["bata_per_m2"] == 12.5
+    assert res_batako["bata_pasang"] == 250
+    assert res_batako["bata_cadangan_pasang"] == 13
+    assert res_batako["bata_dibeli"] == 263
+    assert res_batako["semen_sak"] == 6
+    assert res_batako["pasir_m3"] == 0.90
+    assert res_batako["mortar_sak"] is None
+
+    # 4. Hebel 7,5 cm (bata ringan 60 x 20 x 7,5 cm)
+    # 20 m2 dinding: bata_per_m2 = 8.33 -> bata_pasang = ceil(20 * 8.33 = 166.6) = 167
+    # cadangan 5% -> ceil(167 * 0.05 = 8.35) = 9, dibeli = 176
+    # mortar 0.090 sak/m2 -> mortar_sak = ceil(20 * 0.090 = 1.80) = 2 sak (40 kg)
+    # semen dan pasir harus null (None)
+    res_h75 = hitung_bata(
+        mode="luas",
+        luas="20",
+        jenis="hebel-75",
+        cadangan="5",
+    )
+    assert res_h75["jenis"] == "hebel-75"
+    assert res_h75["bata_per_m2"] == 8.33
+    assert res_h75["bata_pasang"] == 167
+    assert res_h75["bata_cadangan_pasang"] == 9
+    assert res_h75["bata_dibeli"] == 176
+    assert res_h75["semen_kg"] is None
+    assert res_h75["semen_sak"] is None
+    assert res_h75["pasir_m3"] is None
+    assert res_h75["mortar_sak"] == 2
+    assert res_h75["mortar_berat_sak_kg"] == 40
+    assert res_h75["campuran"] is None
+
+    # 5. Hebel 10 cm (bata ringan 60 x 20 x 10 cm)
+    # 20 m2 dinding: mortar 0.100 sak/m2 -> mortar_sak = ceil(20 * 0.100 = 2.0) = 2 sak
+    res_h100 = hitung_bata(
+        mode="luas",
+        luas="20",
+        jenis="hebel-100",
+        cadangan="5",
+    )
+    assert res_h100["jenis"] == "hebel-100"
+    assert res_h100["mortar_sak"] == 2
+    assert res_h100["semen_sak"] is None
+    assert res_h100["pasir_m3"] is None
+
+
+def test_bata_logika_harga_dan_biaya() -> None:
+    """Uji perhitungan biaya: tanpa harga (null), sebagian diisi, dan lengkap."""
+    # 1. Tanpa harga -> biaya is None
+    res_no_price = hitung_bata(
+        mode="dimensi",
+        panjang="6",
+        tinggi="3",
+        bukaan="2",
+        jenis="bata-merah",
+    )
+    assert res_no_price["biaya"] is None
+
+    # 2. Harga lengkap bata merah (dinding 16 m2, dibeli 1176 bata, 4 sak semen, 0.76 m3 pasir)
+    # harga_bata = 1000 -> 1176 * 1000 = 1.176.000
+    # harga_semen = 65000 -> 4 * 65000 = 260.000
+    # harga_pasir = 250000 -> round(0.76 * 250000) = 190.000
+    # total = 1.176.000 + 260.000 + 190.000 = 1.626.000
+    # per_m2 = round(1.626.000 / 16) = 101.625
+    res_full = hitung_bata(
+        mode="dimensi",
+        panjang="6",
+        tinggi="3",
+        bukaan="2",
+        jenis="bata-merah",
+        campuran="1:4",
+        cadangan="5",
+        harga_bata="1000",
+        harga_semen="65000",
+        harga_pasir="250000",
+    )
+    biaya = res_full["biaya"]
+    assert biaya is not None
+    assert biaya["bata"] == 1176000
+    assert biaya["ikat"] == 260000
+    assert biaya["pasir"] == 190000
+    assert biaya["total"] == 1626000
+    assert biaya["per_m2"] == 101625
+    assert biaya["lengkap"] is True
+
+    # 3. Harga sebagian bata merah (hanya harga_bata)
+    res_part = hitung_bata(
+        mode="dimensi",
+        panjang="6",
+        tinggi="3",
+        bukaan="2",
+        jenis="bata-merah",
+        campuran="1:4",
+        cadangan="5",
+        harga_bata="1000",
+    )
+    biaya_part = res_part["biaya"]
+    assert biaya_part is not None
+    assert biaya_part["bata"] == 1176000
+    assert biaya_part["ikat"] is None
+    assert biaya_part["pasir"] is None
+    assert biaya_part["total"] == 1176000
+    assert biaya_part["per_m2"] == round(1176000 / 16)
+    assert biaya_part["lengkap"] is False
+
+    # 4. Harga hebel lengkap (hanya harga_bata dan harga_mortar)
+    # Luas 20 m2, bata dibeli 176, mortar 2 sak
+    # harga_bata = 12000 -> 176 * 12000 = 2.112.000
+    # harga_mortar = 85000 -> 2 * 85000 = 170.000
+    # total = 2.282.000, per_m2 = round(2.282.000 / 20) = 114.100
+    res_hebel = hitung_bata(
+        mode="luas",
+        luas="20",
+        jenis="hebel-75",
+        harga_bata="12000",
+        harga_mortar="85000",
+    )
+    biaya_hebel = res_hebel["biaya"]
+    assert biaya_hebel is not None
+    assert biaya_hebel["bata"] == 2112000
+    assert biaya_hebel["ikat"] == 170000
+    assert biaya_hebel["pasir"] is None
+    assert biaya_hebel["total"] == 2282000
+    assert biaya_hebel["per_m2"] == 114100
+    assert biaya_hebel["lengkap"] is True
+
+
+def test_bata_logika_galat() -> None:
+    """Uji seluruh validasi dan kode galat pada kalkulator bata."""
+    # 1. Mode tidak dikenal
+    try:
+        hitung_bata(mode="lingkaran", luas="20")
+        assert False, "Harus gagal mode lingkaran"
+    except BataError as e:
+        assert e.code == BT_UNSUPPORTED_MODE
+        assert e.status_code == 400
+
+    # 2. Jenis tidak dikenal
+    try:
+        hitung_bata(mode="luas", luas="20", jenis="batu-kali")
+        assert False, "Harus gagal jenis batu-kali"
+    except BataError as e:
+        assert e.code == BT_UNSUPPORTED_JENIS
+        assert e.status_code == 400
+
+    # 3. Campuran tidak dikenal untuk bata-merah
+    try:
+        hitung_bata(mode="luas", luas="20", jenis="bata-merah", campuran="1:10")
+        assert False, "Harus gagal campuran 1:10"
+    except BataError as e:
+        assert e.code == BT_UNSUPPORTED_CAMPURAN
+        assert e.status_code == 400
+
+    # 4. Angka bukan angka
+    try:
+        hitung_bata(mode="dimensi", panjang="enam", tinggi="3")
+        assert False, "Harus gagal panjang bukan angka"
+    except BataError as e:
+        assert e.code == BT_INVALID_NUMBER
+        assert e.status_code == 400
+
+    # 5. Lebih dari satu tanda desimal ("1,2,3")
+    try:
+        hitung_bata(mode="dimensi", panjang="1,2,3", tinggi="3")
+        assert False, "Harus gagal lebih dari 1 tanda desimal"
+    except BataError as e:
+        assert e.code == BT_INVALID_NUMBER
+        assert e.status_code == 400
+
+    # 6. Panjang di bawah minimum (0.05 m)
+    try:
+        hitung_bata(mode="dimensi", panjang="0.05", tinggi="3")
+        assert False, "Harus gagal panjang < 0.1"
+    except BataError as e:
+        assert e.code == BT_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # 7. Panjang melebihi batas (101 m)
+    try:
+        hitung_bata(mode="dimensi", panjang="101", tinggi="3")
+        assert False, "Harus gagal panjang > 100"
+    except BataError as e:
+        assert e.code == BT_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # 8. Tinggi melebihi batas (11 m)
+    try:
+        hitung_bata(mode="dimensi", panjang="6", tinggi="11")
+        assert False, "Harus gagal tinggi > 10"
+    except BataError as e:
+        assert e.code == BT_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # 9. Luas melebihi batas (5001 m2)
+    try:
+        hitung_bata(mode="luas", luas="5001")
+        assert False, "Harus gagal luas > 5000"
+    except BataError as e:
+        assert e.code == BT_OUT_OF_RANGE
+        assert e.status_code == 400
+
+    # 10. Bukaan negatif
+    try:
+        hitung_bata(mode="dimensi", panjang="6", tinggi="3", bukaan="-1")
+        assert False, "Harus gagal bukaan negatif"
+    except BataError as e:
+        assert e.code == BT_INVALID_BUKAAN
+        assert e.status_code == 400
+
+    # 11. Bukaan lebih besar dari luas kotor (bukaan 20, luas 18)
+    try:
+        hitung_bata(mode="dimensi", panjang="6", tinggi="3", bukaan="20")
+        assert False, "Harus gagal bukaan > luas"
+    except BataError as e:
+        assert e.code == BT_INVALID_BUKAAN
+        assert e.status_code == 400
+
+    # 12. Bukaan sama persis dengan luas kotor (bukaan 18, luas 18)
+    try:
+        hitung_bata(mode="dimensi", panjang="6", tinggi="3", bukaan="18")
+        assert False, "Harus gagal bukaan == luas"
+    except BataError as e:
+        assert e.code == BT_INVALID_BUKAAN
+        assert e.status_code == 400
+
+    # 13. Cadangan di luar rentang (<0 atau >30)
+    try:
+        hitung_bata(mode="dimensi", panjang="6", tinggi="3", cadangan="35")
+        assert False, "Harus gagal cadangan > 30"
+    except BataError as e:
+        assert e.code == BT_INVALID_CADANGAN
+        assert e.status_code == 400
+
+    # 14. Harga negatif
+    try:
+        hitung_bata(mode="dimensi", panjang="6", tinggi="3", harga_bata="-500")
+        assert False, "Harus gagal harga negatif"
+    except BataError as e:
+        assert e.code == BT_INVALID_HARGA
+        assert e.status_code == 400
+
+    # 15. Kebutuhan bata melebihi batas 1.000.000 buah -> 413 TOO_MANY_BATA
+    import app.bata as bata_mod
+    original_max = bata_mod.MAX_BATA
+    try:
+        bata_mod.MAX_BATA = 500
+        hitung_bata(mode="dimensi", panjang="6", tinggi="3", jenis="bata-merah")
+        assert False, "Harus gagal TOO_MANY_BATA"
+    except BataError as e:
+        assert e.code == BT_TOO_MANY_BATA
+        assert e.status_code == 413
+    finally:
+        bata_mod.MAX_BATA = original_max
+
+
+def test_http_bata_limits() -> None:
+    """GET /api/bata/limits mengembalikan HTTP 200 dan konfigurasi lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/bata/limits")
+    assert resp.status_code == 200
+    assert resp.headers.get("Cache-Control") == "no-store"
+
+    data = resp.json()
+    assert "modes" in data
+    assert len(data["modes"]) == 2
+    assert "jenis_pilihan" in data
+    assert len(data["jenis_pilihan"]) == 4
+    assert "campuran_pilihan" in data
+    assert len(data["campuran_pilihan"]) == 3
+    assert "tabel_patokan" in data
+    assert "bata-merah" in data["tabel_patokan"]
+    assert "batako" in data["tabel_patokan"]
+    assert "hebel-75" in data["tabel_patokan"]
+    assert "hebel-100" in data["tabel_patokan"]
+    assert data["batas_bata"] == 1000000
+
+
+def test_http_bata_sukses_dan_headers() -> None:
+    """POST /api/bata sukses mengembalikan hasil terstruktur dan header no-store + X-Processing-Ms."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Mode dimensi: 6 x 3 m, bukaan 2 m2
+    resp = client.post(
+        "/api/bata",
+        data={
+            "mode": "dimensi",
+            "panjang": "6",
+            "tinggi": "3",
+            "bukaan": "2",
+            "jenis": "bata-merah",
+            "campuran": "1:4",
+            "cadangan": "5",
+            "harga_bata": "1000",
+            "harga_semen": "65000",
+            "harga_pasir": "250000",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp.headers
+
+    data = resp.json()
+    assert data["bata_pasang"] == 1120
+    assert data["bata_cadangan_pasang"] == 56
+    assert data["bata_dibeli"] == 1176
+    assert data["semen_sak"] == 4
+    assert data["pasir_m3"] == 0.76
+    assert data["biaya"]["total"] == 1626000
+    assert data["biaya"]["lengkap"] is True
+
+    # Mode luas hebel: 20 m2
+    resp_hebel = client.post(
+        "/api/bata",
+        data={
+            "mode": "luas",
+            "luas": "20",
+            "jenis": "hebel-75",
+            "harga_bata": "12000",
+            "harga_mortar": "85000",
+        },
+    )
+    assert resp_hebel.status_code == 200
+    data_hebel = resp_hebel.json()
+    assert data_hebel["bata_dibeli"] == 176
+    assert data_hebel["mortar_sak"] == 2
+    assert data_hebel["semen_sak"] is None
+    assert data_hebel["biaya"]["total"] == 2282000
+
+
+def test_http_bata_galat() -> None:
+    """Uji berbagai skenario galat HTTP pada endpoint POST /api/bata."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Field mode tidak ada -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/bata", data={"panjang": "6", "tinggi": "3"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == BT_INVALID_REQUEST
+
+    # 2. JSON (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post("/api/bata", json={"mode": "dimensi", "panjang": "6", "tinggi": "3"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == BT_INVALID_REQUEST
+
+    # 3. Content-Length besar (> 64 KB) -> 413
+    r_big = client.post(
+        "/api/bata",
+        data={"mode": "dimensi", "panjang": "6", "tinggi": "3"},
+        headers={"Content-Length": "70000"},
+    )
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == BT_PAYLOAD_TOO_LARGE
+
+    # 4. Mode tidak valid -> 400 UNSUPPORTED_MODE
+    r_mode = client.post("/api/bata", data={"mode": "salah", "panjang": "6", "tinggi": "3"})
+    assert r_mode.status_code == 400
+    assert r_mode.json()["error"]["code"] == BT_UNSUPPORTED_MODE
+
+    # 5. Angka tidak valid -> 400 INVALID_NUMBER
+    r_nan = client.post("/api/bata", data={"mode": "dimensi", "panjang": "enam", "tinggi": "3"})
+    assert r_nan.status_code == 400
+    assert r_nan.json()["error"]["code"] == BT_INVALID_NUMBER
+
+    # 6. Bukaan lebih besar dari luas dinding -> 400 INVALID_BUKAAN
+    r_bukaan = client.post(
+        "/api/bata",
+        data={"mode": "dimensi", "panjang": "6", "tinggi": "3", "bukaan": "25"},
+    )
+    assert r_bukaan.status_code == 400
+    assert r_bukaan.json()["error"]["code"] == BT_INVALID_BUKAAN
+
+    # 7. Regresi endpoint lama: GET /api/cat/limits tetap 200
+    r_cat_limits = client.get("/api/cat/limits")
+    assert r_cat_limits.status_code == 200
+
+    # 8. Pastikan 'bata' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "bata" in root_resp.json()["tools"]
 
 
 

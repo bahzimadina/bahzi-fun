@@ -360,6 +360,22 @@ from .cat import (
     hitung_cat,
     limits_payload as cat_limits_payload_func,
 )
+from .bata import (
+    INVALID_BUKAAN as BT_INVALID_BUKAAN,
+    INVALID_CADANGAN as BT_INVALID_CADANGAN,
+    INVALID_HARGA as BT_INVALID_HARGA,
+    INVALID_NUMBER as BT_INVALID_NUMBER,
+    INVALID_REQUEST as BT_INVALID_REQUEST,
+    OUT_OF_RANGE as BT_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as BT_PAYLOAD_TOO_LARGE,
+    TOO_MANY_BATA as BT_TOO_MANY_BATA,
+    UNSUPPORTED_CAMPURAN as BT_UNSUPPORTED_CAMPURAN,
+    UNSUPPORTED_JENIS as BT_UNSUPPORTED_JENIS,
+    UNSUPPORTED_MODE as BT_UNSUPPORTED_MODE,
+    BataError,
+    hitung_bata,
+    limits_payload as bata_limits_payload_func,
+)
 from .harga_jual import (
     HargaJualError,
     hitung_harga_jual,
@@ -1027,6 +1043,17 @@ async def handle_cat_error(request: Request, exc: CatError) -> JSONResponse:
     )
 
 
+@app.exception_handler(BataError)
+async def handle_bata_error(request: Request, exc: BataError) -> JSONResponse:
+    """Error kalkulator kebutuhan bata yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung bata ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(HargaJualError)
 async def handle_harga_jual_error(request: Request, exc: HargaJualError) -> JSONResponse:
     """Error kalkulator harga jual yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1302,6 +1329,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/keramik"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/cat"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/bata"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/harga-jual"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON."
@@ -2014,6 +2043,27 @@ def _reject_oversized_cat_content_length(request: Request) -> None:
 
 def _cat_limits_payload() -> dict:
     return cat_limits_payload_func()
+
+
+def _reject_oversized_bata_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator bata."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise BataError(
+            BT_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _bata_limits_payload() -> dict:
+    return bata_limits_payload_func()
 
 
 def _reject_oversized_harga_jual_content_length(request: Request) -> None:
@@ -4065,6 +4115,110 @@ async def cat_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/bata/limits")
+async def bata_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Kebutuhan Bata."""
+    return JSONResponse(content=_bata_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/bata")
+async def bata_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    panjang: str = Form(default=None),
+    tinggi: str = Form(default=None),
+    luas: str = Form(default=None),
+    bukaan: str = Form(default=None),
+    jenis: str = Form(default=None),
+    campuran: str = Form(default=None),
+    cadangan: str = Form(default=None),
+    harga_bata: str = Form(default=None),
+    harga_semen: str = Form(default=None),
+    harga_pasir: str = Form(default=None),
+    harga_mortar: str = Form(default=None),
+):
+    """Hitung kebutuhan bata di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_bata_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise BataError(
+            BT_INVALID_REQUEST,
+            "Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise BataError(
+            BT_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for val in form.values():
+        if isinstance(val, UploadFile):
+            raise BataError(
+                BT_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if "mode" not in form and mode is None:
+        raise BataError(
+            BT_INVALID_REQUEST,
+            "Field 'mode' wajib disertakan dalam permintaan multipart/form-data.",
+            400,
+        )
+
+    mode_val = mode if mode is not None else form.get("mode")
+    panjang_val = panjang if panjang is not None else form.get("panjang")
+    tinggi_val = tinggi if tinggi is not None else form.get("tinggi")
+    luas_val = luas if luas is not None else form.get("luas")
+    bukaan_val = bukaan if bukaan is not None else form.get("bukaan")
+    jenis_val = jenis if jenis is not None else form.get("jenis")
+    campuran_val = campuran if campuran is not None else form.get("campuran")
+    cadangan_val = cadangan if cadangan is not None else form.get("cadangan")
+    harga_bata_val = harga_bata if harga_bata is not None else form.get("harga_bata")
+    harga_semen_val = harga_semen if harga_semen is not None else form.get("harga_semen")
+    harga_pasir_val = harga_pasir if harga_pasir is not None else form.get("harga_pasir")
+    harga_mortar_val = harga_mortar if harga_mortar is not None else form.get("harga_mortar")
+
+    result = hitung_bata(
+        mode=mode_val,
+        panjang=panjang_val,
+        tinggi=tinggi_val,
+        luas=luas_val,
+        bukaan=bukaan_val,
+        jenis=jenis_val,
+        campuran=campuran_val,
+        cadangan=cadangan_val,
+        harga_bata=harga_bata_val,
+        harga_semen=harga_semen_val,
+        harga_pasir=harga_pasir_val,
+        harga_mortar=harga_mortar_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode, jenis, dan durasi.
+    logger.info(
+        "hitung bata selesai: mode=%s jenis=%s durasi=%.0fms",
+        result["mode"],
+        result["jenis"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/harga-jual/limits")
 async def harga_jual_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Harga Jual."""
@@ -5662,6 +5816,7 @@ async def root() -> dict:
             "cicilan",
             "keramik",
             "cat",
+            "bata",
             "harga-jual",
             "biaya-perjalanan",
             "hijriah",
