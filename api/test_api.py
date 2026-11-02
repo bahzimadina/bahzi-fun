@@ -450,6 +450,18 @@ from app.bata import (
     hitung_bata,
     limits_payload as bata_limits_payload_func,
 )
+from app.sholat import (
+    INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
+    INVALID_REQUEST as SH_INVALID_REQUEST,
+    INVALID_TANGGAL as SH_INVALID_TANGGAL,
+    MAX_BODY_BYTES as SH_MAX_BODY_BYTES,
+    PAYLOAD_TOO_LARGE as SH_PAYLOAD_TOO_LARGE,
+    TANGGAL_DI_LUAR_RENTANG as SH_TANGGAL_DI_LUAR_RENTANG,
+    UNSUPPORTED_METODE as SH_UNSUPPORTED_METODE,
+    SholatError,
+    hitung_jadwal,
+    limits_payload as sholat_limits_payload_func,
+)
 from app.harga_jual import (
     HargaJualError,
     hitung_harga_jual,
@@ -15600,6 +15612,249 @@ def test_http_bata_galat() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "bata" in root_resp.json()["tools"]
+
+
+# --- Uji Alat Jadwal Sholat ---------------------------------------------------
+def test_sholat_logika_murni() -> None:
+    """Uji logika murni perhitungan jadwal sholat tanpa HTTP."""
+    import pytest
+    import re
+
+    # 1. limits_payload
+    lim = sholat_limits_payload_func()
+    assert len(lim["kota"]) == 44
+    assert len(lim["metode"]) == 4
+    assert "hari_ini" in lim
+    assert "catatan" in lim
+    assert lim["lokasi_sendiri"] is True
+
+    # 2. Jakarta 2026-11-02 Kemenag
+    res_jkt = hitung_jadwal({"kota": "Jakarta", "tanggal": "2026-11-02", "metode": "kemenag"})
+    assert res_jkt["kota"]["nama"] == "Jakarta"
+    assert res_jkt["kota"]["zona_label"] == "WIB"
+    assert res_jkt["tanggal"]["nilai"] == "2026-11-02"
+    assert "Senin" in res_jkt["tanggal"]["teks"]
+    assert "Jumadil Awal" in res_jkt["tanggal_hijriah"]["teks"]
+    assert len(res_jkt["waktu"]) == 6
+
+    waktu_map = {w["kunci"]: w["jam"] for w in res_jkt["waktu"]}
+    for k in ["subuh", "syuruq", "dzuhur", "ashar", "maghrib", "isya"]:
+        assert k in waktu_map
+        assert re.match(r"^\d{2}:\d{2}$", waktu_map[k])
+
+    assert waktu_map["subuh"] < "05:30"
+    assert "11:30" <= waktu_map["dzuhur"] <= "12:30"
+    assert "17:30" <= waktu_map["maghrib"] <= "18:30"
+
+    # 3. Bandung 2026-11-02 -> Dzuhur antara 11:30 dan 12:00
+    res_bdg = hitung_jadwal({"kota": "Bandung", "tanggal": "2026-11-02", "metode": "kemenag"})
+    w_bdg = {w["kunci"]: w["jam"] for w in res_bdg["waktu"]}
+    assert "11:30" <= w_bdg["dzuhur"] <= "12:00"
+
+    # 4. Makassar 2026-11-02 -> Dzuhur antara 11:45 dan 12:30
+    res_mks = hitung_jadwal({"kota": "Makassar", "tanggal": "2026-11-02", "metode": "kemenag"})
+    assert res_mks["kota"]["zona_label"] == "WITA"
+    w_mks = {w["kunci"]: w["jam"] for w in res_mks["waktu"]}
+    assert "11:45" <= w_mks["dzuhur"] <= "12:30"
+
+    # 5. Metode ummalqura -> Isya = Maghrib + 90 menit tepat
+    res_uq = hitung_jadwal({"kota": "Jakarta", "tanggal": "2026-11-02", "metode": "ummalqura"})
+    w_uq = {w["kunci"]: w["jam"] for w in res_uq["waktu"]}
+    m_h, m_m = map(int, w_uq["maghrib"].split(":"))
+    i_h, i_m = map(int, w_uq["isya"].split(":"))
+    selisih_uq = (i_h * 60 + i_m) - (m_h * 60 + m_m)
+    assert selisih_uq == 90
+
+    # 6. Kemenag vs MWL: Subuh kemenag lebih awal daripada MWL
+    res_mwl = hitung_jadwal({"kota": "Jakarta", "tanggal": "2026-11-02", "metode": "mwl"})
+    w_mwl = {w["kunci"]: w["jam"] for w in res_mwl["waktu"]}
+    assert waktu_map["subuh"] < w_mwl["subuh"]
+    sub_kem_min = int(waktu_map["subuh"].split(":")[0]) * 60 + int(waktu_map["subuh"].split(":")[1])
+    sub_mwl_min = int(w_mwl["subuh"].split(":")[0]) * 60 + int(w_mwl["subuh"].split(":")[1])
+    selisih_subuh = sub_mwl_min - sub_kem_min
+    assert selisih_subuh > 0
+
+    # 7. Koordinat manual (-6.9175, 107.6191, 7) sama dengan Bandung
+    res_man = hitung_jadwal({"lintang": -6.9175, "bujur": 107.6191, "zona": 7, "tanggal": "2026-11-02"})
+    w_man = {w["kunci"]: w["jam"] for w in res_man["waktu"]}
+    for k in ["subuh", "syuruq", "dzuhur", "ashar", "maghrib", "isya"]:
+        assert w_man[k] == w_bdg[k]
+
+    # 8. Validasi galat murni
+    with pytest.raises(SholatError) as exc_m:
+        hitung_jadwal({"kota": "Jakarta", "metode": "salah"})
+    assert exc_m.value.code == SH_UNSUPPORTED_METODE
+
+    with pytest.raises(SholatError) as exc_t:
+        hitung_jadwal({"kota": "Jakarta", "tanggal": "2026-02-30"})
+    assert exc_t.value.code == SH_INVALID_TANGGAL
+
+    with pytest.raises(SholatError) as exc_r:
+        hitung_jadwal({"kota": "Jakarta", "tanggal": "1999-12-31"})
+    assert exc_r.value.code == SH_TANGGAL_DI_LUAR_RENTANG
+
+    with pytest.raises(SholatError) as exc_k:
+        hitung_jadwal({"lintang": 120, "bujur": 106.8, "zona": 7})
+    assert exc_k.value.code == SH_INVALID_KOORDINAT
+
+    with pytest.raises(SholatError) as exc_unk:
+        hitung_jadwal({"kota": "KotaGaib"})
+    assert exc_unk.value.code == SH_INVALID_KOORDINAT
+
+    with pytest.raises(SholatError) as exc_req:
+        hitung_jadwal("bukan_dict")
+    assert exc_req.value.code == SH_INVALID_REQUEST
+
+
+def test_http_sholat_limits() -> None:
+    """GET /api/sholat/limits mengembalikan HTTP 200, 44 kota, 4 metode, dan cache-control no-store."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/sholat/limits")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert len(data["kota"]) == 44
+    assert len(data["metode"]) == 4
+    assert "hari_ini" in data
+    assert "catatan" in data
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+
+
+def test_http_sholat_sukses() -> None:
+    """POST /api/sholat sukses mengembalikan jadwal lengkap untuk kota dan koordinat manual."""
+    import re
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Jakarta 2026-11-02 metode kemenag
+    resp_jkt = client.post(
+        "/api/sholat",
+        json={"kota": "Jakarta", "tanggal": "2026-11-02", "metode": "kemenag"},
+    )
+    assert resp_jkt.status_code == 200
+    body_jkt = resp_jkt.json()
+    assert body_jkt["ok"] is True
+    data_jkt = body_jkt["data"]
+    assert data_jkt["kota"]["nama"] == "Jakarta"
+    assert data_jkt["kota"]["zona_label"] == "WIB"
+    assert "no-store" in resp_jkt.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp_jkt.headers
+
+    waktu_list = data_jkt["waktu"]
+    assert len(waktu_list) == 6
+    w_map = {w["kunci"]: w["jam"] for w in waktu_list}
+    for k in ["subuh", "syuruq", "dzuhur", "ashar", "maghrib", "isya"]:
+        assert re.match(r"^\d{2}:\d{2}$", w_map[k])
+
+    assert w_map["subuh"] < "05:30"
+    assert "11:30" <= w_map["dzuhur"] <= "12:30"
+    assert "17:30" <= w_map["maghrib"] <= "18:30"
+
+    # 2. Bandung 2026-11-02: Dzuhur antara 11:30 dan 12:00
+    resp_bdg = client.post(
+        "/api/sholat",
+        json={"kota": "Bandung", "tanggal": "2026-11-02", "metode": "kemenag"},
+    )
+    assert resp_bdg.status_code == 200
+    w_bdg = {w["kunci"]: w["jam"] for w in resp_bdg.json()["data"]["waktu"]}
+    assert "11:30" <= w_bdg["dzuhur"] <= "12:00"
+
+    # 3. Makassar 2026-11-02: Dzuhur antara 11:45 dan 12:30
+    resp_mks = client.post(
+        "/api/sholat",
+        json={"kota": "Makassar", "tanggal": "2026-11-02", "metode": "kemenag"},
+    )
+    assert resp_mks.status_code == 200
+    w_mks = {w["kunci"]: w["jam"] for w in resp_mks.json()["data"]["waktu"]}
+    assert "11:45" <= w_mks["dzuhur"] <= "12:30"
+
+    # 4. Metode ummalqura: Isya = Maghrib + 90 menit tepat
+    resp_uq = client.post(
+        "/api/sholat",
+        json={"kota": "Jakarta", "tanggal": "2026-11-02", "metode": "ummalqura"},
+    )
+    assert resp_uq.status_code == 200
+    w_uq = {w["kunci"]: w["jam"] for w in resp_uq.json()["data"]["waktu"]}
+    m_h, m_m = map(int, w_uq["maghrib"].split(":"))
+    i_h, i_m = map(int, w_uq["isya"].split(":"))
+    assert (i_h * 60 + i_m) - (m_h * 60 + m_m) == 90
+
+    # 5. Kemenag ihtiyat 2 menit vs MWL: Subuh kemenag lebih awal dari mwl
+    resp_mwl = client.post(
+        "/api/sholat",
+        json={"kota": "Jakarta", "tanggal": "2026-11-02", "metode": "mwl"},
+    )
+    assert resp_mwl.status_code == 200
+    w_mwl = {w["kunci"]: w["jam"] for w in resp_mwl.json()["data"]["waktu"]}
+    assert w_map["subuh"] < w_mwl["subuh"]
+    selisih_sub = (
+        int(w_mwl["subuh"].split(":")[0]) * 60 + int(w_mwl["subuh"].split(":")[1])
+    ) - (
+        int(w_map["subuh"].split(":")[0]) * 60 + int(w_map["subuh"].split(":")[1])
+    )
+    assert selisih_sub > 0
+
+    # 6. Koordinat manual (-6.9175, 107.6191, 7) sama dengan Bandung
+    resp_man = client.post(
+        "/api/sholat",
+        json={"lintang": -6.9175, "bujur": 107.6191, "zona": 7, "tanggal": "2026-11-02"},
+    )
+    assert resp_man.status_code == 200
+    w_man = {w["kunci"]: w["jam"] for w in resp_man.json()["data"]["waktu"]}
+    for k in ["subuh", "syuruq", "dzuhur", "ashar", "maghrib", "isya"]:
+        assert w_man[k] == w_bdg[k]
+
+
+def test_http_sholat_galat() -> None:
+    """Uji berbagai skenario galat HTTP pada endpoint POST /api/sholat."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Metode tidak dikenal -> 400 UNSUPPORTED_METODE
+    r_metode = client.post("/api/sholat", json={"kota": "Jakarta", "metode": "tidak_ada"})
+    assert r_metode.status_code == 400
+    assert r_metode.json()["error"]["code"] == SH_UNSUPPORTED_METODE
+
+    # 2. Tanggal "2026-02-30" -> 400 INVALID_TANGGAL
+    r_tgl_invalid = client.post("/api/sholat", json={"kota": "Jakarta", "tanggal": "2026-02-30"})
+    assert r_tgl_invalid.status_code == 400
+    assert r_tgl_invalid.json()["error"]["code"] == SH_INVALID_TANGGAL
+
+    # 3. Tanggal "1999-12-31" -> 400 TANGGAL_DI_LUAR_RENTANG
+    r_tgl_rentang = client.post("/api/sholat", json={"kota": "Jakarta", "tanggal": "1999-12-31"})
+    assert r_tgl_rentang.status_code == 400
+    assert r_tgl_rentang.json()["error"]["code"] == SH_TANGGAL_DI_LUAR_RENTANG
+
+    # 4. Koordinat lintang 120 -> 400 INVALID_KOORDINAT
+    r_lintang = client.post("/api/sholat", json={"lintang": 120, "bujur": 106.8, "zona": 7})
+    assert r_lintang.status_code == 400
+    assert r_lintang.json()["error"]["code"] == SH_INVALID_KOORDINAT
+
+    # 5. Badan bukan JSON (data form atau teks biasa) -> 400 INVALID_REQUEST
+    r_non_json = client.post("/api/sholat", content="bukan json", headers={"Content-Type": "text/plain"})
+    assert r_non_json.status_code == 400
+    assert r_non_json.json()["error"]["code"] == SH_INVALID_REQUEST
+
+    # 6. Badan > 64 KB -> 413 PAYLOAD_TOO_LARGE
+    big_payload = json.dumps({"kota": "Jakarta", "extra": "x" * 70000})
+    r_big = client.post("/api/sholat", content=big_payload, headers={"Content-Type": "application/json"})
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == SH_PAYLOAD_TOO_LARGE
+
+    # 7. Kota tidak dikenal dan tanpa koordinat -> 400 INVALID_KOORDINAT
+    r_kota_gaib = client.post("/api/sholat", json={"kota": "KotaGaib"})
+    assert r_kota_gaib.status_code == 400
+    assert r_kota_gaib.json()["error"]["code"] == SH_INVALID_KOORDINAT
+
+    # 8. Pastikan 'sholat' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "sholat" in root_resp.json()["tools"]
 
 
 

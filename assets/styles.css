@@ -11387,3 +11387,344 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Jadwal sholat ================= */
+.sh__layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+}
+@media (max-width: 768px) {
+  .sh__layout {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+}
+.sh__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.sh__field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  width: 100%;
+}
+.sh__label {
+  font-size: .85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.sh__select,
+.sh__input {
+  width: 100%;
+  padding: .65rem .85rem;
+  font-size: .95rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color var(--transition, 150ms ease), outline var(--transition, 150ms ease);
+}
+.sh__select:focus,
+.sh__input:focus {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.sh__manual-coords {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  padding: .85rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-low, rgba(255, 255, 255, 0.02));
+}
+.sh__manual-coords[hidden] {
+  display: none;
+}
+.sh__actions {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+  margin-top: .25rem;
+}
+.sh__btn {
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition, 150ms ease), border-color var(--transition, 150ms ease);
+}
+.sh__results {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.sh__hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  font-size: .9rem;
+  line-height: 1.5;
+}
+.sh__hint[hidden] {
+  display: none;
+}
+.sh__output {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.sh__output[hidden] {
+  display: none;
+}
+.sh__header-card {
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+.sh__header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.sh__header-city {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.sh__city-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.sh__zone-badge {
+  display: inline-block;
+  padding: .15rem .5rem;
+  font-size: .75rem;
+  font-weight: 700;
+  border-radius: 999px;
+  background: rgba(187, 134, 252, 0.15);
+  color: var(--brand, #bb86fc);
+  border: 1px solid rgba(187, 134, 252, 0.3);
+}
+.sh__method-badge {
+  font-size: .8rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: .2rem .55rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.sh__header-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  font-size: .88rem;
+}
+.sh__date-masehi {
+  color: var(--text);
+  font-weight: 500;
+}
+.sh__date-hijriah {
+  color: var(--brand, #bb86fc);
+}
+.sh__passed-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: rgba(187, 134, 252, 0.08);
+  border: 1px solid rgba(187, 134, 252, 0.25);
+  flex-wrap: wrap;
+}
+.sh__passed-banner[hidden] {
+  display: none;
+}
+.sh__passed-text {
+  font-size: .88rem;
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+}
+.sh__list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  width: 100%;
+}
+.sh__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: all var(--transition, 150ms ease);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+.sh__row-left,
+.sh__row-right {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+}
+.sh__row-left {
+  min-width: 0;
+}
+.sh__name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.sh__time {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--text);
+  letter-spacing: .5px;
+}
+.sh__badge-next {
+  display: inline-block;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: .15rem .5rem;
+  border-radius: 999px;
+  background: var(--brand, #bb86fc);
+  color: #150f23;
+}
+.sh__badge-next[hidden] {
+  display: none;
+}
+.sh__countdown {
+  font-size: .84rem;
+  font-weight: 500;
+  color: var(--brand, #bb86fc);
+  overflow-wrap: anywhere;
+}
+.sh__countdown[hidden] {
+  display: none;
+}
+.sh__row--next {
+  background: rgba(187, 134, 252, 0.12);
+  border-color: var(--brand, #bb86fc);
+  box-shadow: 0 0 12px rgba(187, 134, 252, 0.2);
+}
+.sh__row--next .sh__name {
+  color: var(--brand, #bb86fc);
+}
+.sh__row--next .sh__time {
+  color: #ffffff;
+}
+.sh__output-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: .2rem;
+}
+.sh__note-box {
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface-low, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border);
+  font-size: .84rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.sh__note {
+  margin: 0;
+  font-style: italic;
+}
+
+@media (max-width: 1100px) {
+  .sh__row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: .5rem;
+    row-gap: .35rem;
+    align-items: center;
+    padding: .75rem .85rem;
+    min-height: 44px;
+    width: 100%;
+    max-width: 100%;
+  }
+  .sh__row-right {
+    display: contents;
+  }
+  .sh__row-left {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    min-width: 0;
+  }
+  .sh__badge-next {
+    font-size: .68rem;
+    padding: .12rem .45rem;
+    letter-spacing: .3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .sh__name {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .sh__time {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+    justify-self: end;
+  }
+  .sh__countdown {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (pointer: coarse) {
+  #biaya-perjalanan-panel input,
+  #biaya-perjalanan-panel select,
+  #biaya-perjalanan-panel button,
+  .bp__checkbox-label,
+  #bata-panel input,
+  #bata-panel select,
+  #bata-panel button,
+  #bata-panel .bt__radio-label,
+  .bt__input,
+  .bt__select,
+  .bt__radio-label,
+  #sholat-panel input,
+  #sholat-panel select,
+  #sholat-panel button,
+  .sh__btn,
+  .sh__select,
+  .sh__input,
+  .sh__row {
+    min-height: 44px;
+  }
+}
+

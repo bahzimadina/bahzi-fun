@@ -376,6 +376,18 @@ from .bata import (
     hitung_bata,
     limits_payload as bata_limits_payload_func,
 )
+from .sholat import (
+    INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
+    INVALID_REQUEST as SH_INVALID_REQUEST,
+    INVALID_TANGGAL as SH_INVALID_TANGGAL,
+    MAX_BODY_BYTES as SH_MAX_BODY_BYTES,
+    PAYLOAD_TOO_LARGE as SH_PAYLOAD_TOO_LARGE,
+    TANGGAL_DI_LUAR_RENTANG as SH_TANGGAL_DI_LUAR_RENTANG,
+    UNSUPPORTED_METODE as SH_UNSUPPORTED_METODE,
+    SholatError,
+    hitung_jadwal,
+    limits_payload as sholat_limits_payload_func,
+)
 from .harga_jual import (
     HargaJualError,
     hitung_harga_jual,
@@ -1054,6 +1066,17 @@ async def handle_bata_error(request: Request, exc: BataError) -> JSONResponse:
     )
 
 
+@app.exception_handler(SholatError)
+async def handle_sholat_error(request: Request, exc: SholatError) -> JSONResponse:
+    """Error alat jadwal sholat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung jadwal sholat ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(HargaJualError)
 async def handle_harga_jual_error(request: Request, exc: HargaJualError) -> JSONResponse:
     """Error kalkulator harga jual yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1332,6 +1355,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/bata"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/sholat"):
+        msg = "Permintaan tidak valid. Kirim objek JSON dengan pilihan kota atau koordinat."
     elif request.url.path.startswith("/api/harga-jual"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON."
     elif request.url.path.startswith("/api/travel-cost"):
@@ -2211,6 +2236,27 @@ def _reject_oversized_hijriah_content_length(request: Request) -> None:
 
 def _hijriah_limits_payload() -> dict:
     return hijriah_limits_payload_func()
+
+
+def _reject_oversized_sholat_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas alat jadwal sholat."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > SH_MAX_BODY_BYTES:
+        raise SholatError(
+            SH_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+
+def _sholat_limits_payload() -> dict:
+    return sholat_limits_payload_func()
 
 
 def _reject_oversized_json_content_length(request: Request) -> None:
@@ -4219,6 +4265,73 @@ async def bata_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/sholat/limits")
+async def sholat_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk alat Jadwal Sholat."""
+    return JSONResponse(
+        content={"ok": True, "data": _sholat_limits_payload()},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/sholat")
+async def sholat_endpoint(request: Request) -> JSONResponse:
+    """Hitung waktu sholat di server secara mandiri di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_sholat_content_length(request)
+
+    body_bytes = await request.body()
+    if len(body_bytes) > SH_MAX_BODY_BYTES:
+        raise SholatError(
+            SH_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+    if not body_bytes or not body_bytes.strip():
+        raise SholatError(
+            SH_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim objek JSON.",
+            400,
+        )
+
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        raise SholatError(
+            SH_INVALID_REQUEST,
+            "Format JSON tidak valid.",
+            400,
+        )
+
+    if not isinstance(payload, dict):
+        raise SholatError(
+            SH_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    result = await run_in_threadpool(hitung_jadwal, payload)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN log koordinat/tanggal pengguna: cukup jumlah waktu dan durasi.
+    logger.info(
+        "hitung jadwal sholat selesai: waktu_count=%d durasi=%.0fms",
+        len(result.get("waktu", [])),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(
+        content={"ok": True, "data": result},
+        headers=headers,
+    )
+
+
 @app.get("/api/harga-jual/limits")
 async def harga_jual_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Harga Jual."""
@@ -5817,6 +5930,7 @@ async def root() -> dict:
             "keramik",
             "cat",
             "bata",
+            "sholat",
             "harga-jual",
             "biaya-perjalanan",
             "hijriah",
