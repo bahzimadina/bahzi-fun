@@ -104,6 +104,21 @@ from .pas_foto import (
     pas_foto,
     pas_foto_limits_payload,
 )
+from .gambar_pdf import (
+    CHUNK_SIZE as GAMBAR_PDF_CHUNK_SIZE,
+    MAX_FILE_BYTES as GAMBAR_PDF_MAX_FILE_BYTES,
+    MAX_FILES as GAMBAR_PDF_MAX_FILES,
+    MAX_TOTAL_BYTES as GAMBAR_PDF_MAX_TOTAL_BYTES,
+    BUSY as GAMBAR_PDF_BUSY,
+    EMPTY_FILE as GAMBAR_PDF_EMPTY_FILE,
+    NO_FILES as GAMBAR_PDF_NO_FILES,
+    TOO_LARGE as GAMBAR_PDF_TOO_LARGE,
+    TOO_MANY_FILES as GAMBAR_PDF_TOO_MANY_FILES,
+    TOTAL_TOO_LARGE as GAMBAR_PDF_TOTAL_TOO_LARGE,
+    GambarPdfError,
+    buat_pdf,
+    limits_payload as gambar_pdf_limits_payload,
+)
 from .pdf_merge import (
     CHUNK_SIZE,
     ERR_TOO_LARGE,
@@ -776,6 +791,7 @@ if _cors_origins:
             "X-Output-Cm",
             "X-Upscaled",
             "X-Target-Met",
+            "X-Source-Files",
         ],
     )
 
@@ -791,8 +807,20 @@ _audio_extract_semaphore = threading.Semaphore(1)
 # Batasi satu proses pembalikan video sekaligus di tingkat modul
 _video_reverse_semaphore = threading.Semaphore(1)
 
+# Batasi satu proses gambar ke PDF sekaligus di tingkat modul
+_gambar_pdf_semaphore = threading.Semaphore(1)
+
 
 # --- Handler error -----------------------------------------------------------
+@app.exception_handler(GambarPdfError)
+async def handle_gambar_pdf_error(request: Request, exc: GambarPdfError) -> JSONResponse:
+    """Error gambar jadi PDF yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("gambar jadi pdf ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
 @app.exception_handler(ReverseError)
 async def handle_video_reverse_error(request: Request, exc: ReverseError) -> JSONResponse:
     """Error pembalikan video yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1438,6 +1466,49 @@ def _reject_oversized_content_length(request: Request) -> None:
         return
     if declared > MAX_TOTAL_BYTES + CONTENT_LENGTH_SLACK:
         check_total_size(declared - CONTENT_LENGTH_SLACK)
+
+
+def _reject_oversized_gambar_pdf_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi total batas gambar."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > GAMBAR_PDF_MAX_TOTAL_BYTES + CONTENT_LENGTH_SLACK:
+        raise GambarPdfError(
+            GAMBAR_PDF_TOTAL_TOO_LARGE,
+            "Total semua gambar paling besar 40 MB. Kurangi dulu jumlahnya.",
+            413,
+        )
+
+
+async def _read_capped_gambar_pdf(upload: UploadFile, remaining_budget: int) -> bytes:
+    """Baca unggahan gambar sepotong-sepotong untuk gambar jadi PDF, tolak bila lewat batas."""
+    if remaining_budget <= 0:
+        raise GambarPdfError(
+            GAMBAR_PDF_TOTAL_TOO_LARGE,
+            "Total semua gambar paling besar 40 MB. Kurangi dulu jumlahnya.",
+            413,
+        )
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(GAMBAR_PDF_CHUNK_SIZE)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > remaining_budget:
+            raise GambarPdfError(
+                GAMBAR_PDF_TOTAL_TOO_LARGE,
+                "Total semua gambar paling besar 40 MB. Kurangi dulu jumlahnya.",
+                413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def _read_capped_image(upload: UploadFile, remaining_budget: int) -> bytes:
@@ -2810,6 +2881,69 @@ async def pdf_edit_endpoint(
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
+@app.get("/api/gambar-pdf/limits")
+async def gambar_pdf_limits_route() -> JSONResponse:
+    """Batas yang berlaku untuk Gambar jadi PDF."""
+    return JSONResponse(content=gambar_pdf_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/gambar-pdf")
+async def gambar_pdf_endpoint(
+    request: Request,
+    files: list[UploadFile] = File(default=[]),
+    ukuran: str = Form(default="a4"),
+    orientasi: str = Form(default="auto"),
+    margin: str | int = Form(default=10),
+) -> Response:
+    """Susun beberapa gambar menjadi satu dokumen PDF di memori."""
+    started = time.perf_counter()
+
+    uploads = [f for f in files if f is not None]
+    if not uploads:
+        raise GambarPdfError(GAMBAR_PDF_NO_FILES, "Pilih dulu gambar yang mau dijadikan PDF.", 400)
+    if len(uploads) > GAMBAR_PDF_MAX_FILES:
+        raise GambarPdfError(GAMBAR_PDF_TOO_MANY_FILES, "Paling banyak 20 gambar sekali jalan.", 400)
+
+    _reject_oversized_gambar_pdf_content_length(request)
+
+    payloads: list[tuple[bytes, str]] = []
+    read_total = 0
+    for upload in uploads:
+        filename = upload.filename or "gambar"
+        data = await _read_capped_gambar_pdf(upload, GAMBAR_PDF_MAX_TOTAL_BYTES - read_total)
+        read_total += len(data)
+        payloads.append((data, filename))
+
+    if not _gambar_pdf_semaphore.acquire(blocking=False):
+        raise GambarPdfError(GAMBAR_PDF_BUSY, "Layanan sedang memproses berkas lain. Coba lagi sebentar lagi.", 429)
+
+    try:
+        pdf_bytes, info = await run_in_threadpool(
+            buat_pdf, payloads, ukuran, orientasi, margin
+        )
+    finally:
+        _gambar_pdf_semaphore.release()
+
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "gambar pdf selesai: berkas=%d total_byte=%d halaman=%d diperkecil=%d durasi=%.0fms",
+        info["gambar"],
+        info["sumber_bytes"],
+        info["halaman"],
+        info["diperkecil"],
+        duration_ms,
+    )
+
+    headers = {
+        "Content-Disposition": 'attachment; filename="gambar-jadi-pdf.pdf"',
+        "Cache-Control": "no-store",
+        "X-Page-Count": str(info["halaman"]),
+        "X-Source-Files": str(info["gambar"]),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 @app.get("/api/image/convert/limits")
@@ -5947,6 +6081,7 @@ async def root() -> dict:
             "video-trim",
             "audio-extract",
             "video-reverse",
+            "gambar-pdf",
         ],
     }
 

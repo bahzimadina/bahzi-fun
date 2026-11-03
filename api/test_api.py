@@ -15857,6 +15857,250 @@ def test_http_sholat_galat() -> None:
     assert "sholat" in root_resp.json()["tools"]
 
 
+def _make_test_image(width: int = 100, height: int = 100, color: str = "red", fmt: str = "PNG") -> bytes:
+    """Helper membuat byte gambar uji di memori."""
+    from PIL import Image
+    mode = "RGBA" if fmt.upper() == "PNG" else "RGB"
+    img = Image.new(mode, (width, height), color=color)
+    buf = io.BytesIO()
+    img.save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def test_http_gambar_pdf_limits() -> None:
+    """Uji endpoint GET /api/gambar-pdf/limits."""
+    client = _test_client()
+    if client is None:
+        return
+
+    r = client.get("/api/gambar-pdf/limits")
+    assert r.status_code == 200, r.text
+    assert "no-store" in r.headers.get("Cache-Control", "")
+    data = r.json()
+    assert data["max_files"] == 20
+    assert data["max_file_mb"] == 15
+    assert data["max_total_mb"] == 40
+    assert data["max_pixels"] == 40_000_000
+    assert data["max_side"] == 3500
+    assert len(data["page_sizes"]) == 4
+    assert len(data["orientations"]) == 3
+    assert data["margins"] == [0, 5, 10, 15, 20]
+    assert data["default"] == {"ukuran": "a4", "orientasi": "auto", "margin": 10}
+
+
+def test_http_gambar_pdf_sukses_2_png_dan_fitz() -> None:
+    """Uji konversi 2 gambar PNG menjadi PDF 2 halaman."""
+    client = _test_client()
+    if client is None:
+        return
+
+    img1 = _make_test_image(120, 80, "red", "PNG")
+    img2 = _make_test_image(80, 160, "blue", "PNG")
+
+    r = client.post(
+        "/api/gambar-pdf",
+        files=[
+            ("files", ("foto1.png", img1, "image/png")),
+            ("files", ("foto2.png", img2, "image/png")),
+        ],
+        data={"ukuran": "a4", "orientasi": "auto", "margin": "10"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["Content-Type"] == "application/pdf"
+    assert r.headers["X-Page-Count"] == "2"
+    assert r.headers["X-Source-Files"] == "2"
+    assert 'filename="gambar-jadi-pdf.pdf"' in r.headers["Content-Disposition"]
+    assert "no-store" in r.headers.get("Cache-Control", "")
+
+    import fitz
+    doc = fitz.open(stream=r.content, filetype="pdf")
+    assert len(doc) == 2
+    doc.close()
+
+
+def test_gambar_pdf_urutan_dan_halaman() -> None:
+    """Uji logika murni: urutan gambar sesuai urutan kiriman."""
+    from app.gambar_pdf import buat_pdf
+    import fitz
+
+    # Gambar 1 lanskap, Gambar 2 potret
+    img1 = _make_test_image(300, 100, "green", "JPEG")
+    img2 = _make_test_image(100, 300, "yellow", "JPEG")
+
+    pdf_bytes, info = buat_pdf(
+        [img1, img2],
+        ukuran="auto",
+        orientasi="auto",
+        margin=10,
+    )
+    assert info["halaman"] == 2
+    assert info["gambar"] == 2
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    assert len(doc) == 2
+    # Halaman 1 dari gambar lanskap -> width > height
+    assert doc[0].rect.width > doc[0].rect.height
+    # Halaman 2 dari gambar potret -> height > width
+    assert doc[1].rect.height > doc[1].rect.width
+    doc.close()
+
+
+def test_http_gambar_pdf_ukuran_a4_vs_auto() -> None:
+    """Uji perbandingan ukuran halaman A4 vs auto."""
+    client = _test_client()
+    if client is None:
+        return
+
+    img = _make_test_image(200, 200, "purple", "PNG")
+
+    # 1. Ukuran A4
+    r_a4 = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("test.png", img, "image/png"))],
+        data={"ukuran": "a4", "orientasi": "tegak", "margin": "0"},
+    )
+    assert r_a4.status_code == 200
+
+    import fitz
+    doc_a4 = fitz.open(stream=r_a4.content, filetype="pdf")
+    # A4: 210mm x 297mm ~= 595.28 pt x 841.89 pt
+    assert abs(doc_a4[0].rect.width - 595.28) < 1.0
+    assert abs(doc_a4[0].rect.height - 841.89) < 1.0
+    doc_a4.close()
+
+    # 2. Ukuran auto pada margin 0
+    # 200 px pada 96 dpi -> 200 * 72 / 96 = 150 pt
+    r_auto = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("test.png", img, "image/png"))],
+        data={"ukuran": "auto", "orientasi": "auto", "margin": "0"},
+    )
+    assert r_auto.status_code == 200
+    doc_auto = fitz.open(stream=r_auto.content, filetype="pdf")
+    assert abs(doc_auto[0].rect.width - 150.0) < 1.0
+    assert abs(doc_auto[0].rect.height - 150.0) < 1.0
+    doc_auto.close()
+
+
+def test_http_gambar_pdf_orientasi_mendatar() -> None:
+    """Uji pilihan orientasi mendatar (lanskap)."""
+    client = _test_client()
+    if client is None:
+        return
+
+    img = _make_test_image(100, 100, "orange", "PNG")
+    r = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("kotak.png", img, "image/png"))],
+        data={"ukuran": "a4", "orientasi": "mendatar", "margin": "10"},
+    )
+    assert r.status_code == 200
+
+    import fitz
+    doc = fitz.open(stream=r.content, filetype="pdf")
+    # Mendatar: lebar > tinggi
+    assert doc[0].rect.width > doc[0].rect.height
+    doc.close()
+
+
+def test_http_gambar_pdf_margin() -> None:
+    """Uji pengaruh margin pada ukuran auto."""
+    client = _test_client()
+    if client is None:
+        return
+
+    img = _make_test_image(100, 100, "red", "PNG")
+    # Margin 0 mm
+    r0 = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("red.png", img, "image/png"))],
+        data={"ukuran": "auto", "orientasi": "auto", "margin": "0"},
+    )
+    # Margin 20 mm -> 20 * 72 / 25.4 ~= 56.69 pt per sisi (total tambah ~113.38 pt)
+    r20 = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("red.png", img, "image/png"))],
+        data={"ukuran": "auto", "orientasi": "auto", "margin": "20"},
+    )
+    assert r0.status_code == 200
+    assert r20.status_code == 200
+
+    import fitz
+    doc0 = fitz.open(stream=r0.content, filetype="pdf")
+    doc20 = fitz.open(stream=r20.content, filetype="pdf")
+    diff_w = doc20[0].rect.width - doc0[0].rect.width
+    assert diff_w > 100  # 2 * margin_pt bertambah
+    doc0.close()
+    doc20.close()
+
+
+def test_http_gambar_pdf_galat() -> None:
+    """Uji penanganan berbagai galat masukan gambar jadi PDF."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. NO_FILES
+    r_no = client.post("/api/gambar-pdf", files=[])
+    assert r_no.status_code == 400
+    assert r_no.json()["error"]["code"] == "NO_FILES"
+
+    # 2. UNSUPPORTED_FILE (berkas teks biasa)
+    r_unsupp = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("catatan.txt", b"bukan gambar", "text/plain"))],
+    )
+    assert r_unsupp.status_code == 400
+    assert r_unsupp.json()["error"]["code"] == "UNSUPPORTED_FILE"
+
+    # 3. EMPTY_FILE
+    r_empty = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("kosong.png", b"", "image/png"))],
+    )
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == "EMPTY_FILE"
+
+    # 4. TOO_MANY_FILES (21 gambar)
+    valid_png = _make_test_image(10, 10, "red", "PNG")
+    twenty_one = [("files", (f"img{i}.png", valid_png, "image/png")) for i in range(21)]
+    r_many = client.post("/api/gambar-pdf", files=twenty_one)
+    assert r_many.status_code == 400
+    assert r_many.json()["error"]["code"] == "TOO_MANY_FILES"
+
+    # 5. INVALID_MARGIN
+    r_margin = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("img.png", valid_png, "image/png"))],
+        data={"margin": "99"},
+    )
+    assert r_margin.status_code == 400
+    assert r_margin.json()["error"]["code"] == "INVALID_MARGIN"
+
+    # 6. UNSUPPORTED_PAGE_SIZE
+    r_size = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("img.png", valid_png, "image/png"))],
+        data={"ukuran": "folio"},
+    )
+    assert r_size.status_code == 400
+    assert r_size.json()["error"]["code"] == "UNSUPPORTED_PAGE_SIZE"
+
+    # 7. UNSUPPORTED_ORIENTATION
+    r_ori = client.post(
+        "/api/gambar-pdf",
+        files=[("files", ("img.png", valid_png, "image/png"))],
+        data={"orientasi": "miring"},
+    )
+    assert r_ori.status_code == 400
+    assert r_ori.json()["error"]["code"] == "UNSUPPORTED_ORIENTATION"
+
+    # 8. Pastikan 'gambar-pdf' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "gambar-pdf" in root_resp.json()["tools"]
+
+
 
 # --- Runner mandiri ---------------------------------------------------------
 def main() -> int:

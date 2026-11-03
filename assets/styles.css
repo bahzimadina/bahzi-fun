@@ -11705,6 +11705,77 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Panel: Gambar jadi PDF ================= */
+.gdp__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  padding: .85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.gdp__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .8rem;
+}
+.gdp__field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.gdp__label {
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.gdp__select {
+  width: 100%;
+  min-height: 40px;
+  padding: .45rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: .85rem;
+  transition: border-color var(--transition);
+}
+.gdp__select:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+.gdp__btn-action {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.gdp__result {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  padding: .85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.gdp__result[hidden] {
+  display: none;
+}
+.gdp__result-meta {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--text);
+}
+.gdp__result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
 @media (pointer: coarse) {
   #biaya-perjalanan-panel input,
   #biaya-perjalanan-panel select,
@@ -11723,8 +11794,15 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   .sh__btn,
   .sh__select,
   .sh__input,
-  .sh__row {
+  .sh__row,
+  #gambar-pdf-panel input,
+  #gambar-pdf-panel select,
+  #gambar-pdf-panel button,
+  .gdp__select,
+  .gdp__btn,
+  .gdp__btn-action {
     min-height: 44px;
+    min-width: 44px;
   }
 }
 
