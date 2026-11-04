@@ -11371,6 +11371,382 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   flex-wrap: wrap;
 }
 
+/* ================= Panel: Hitung Kebutuhan Cor Beton ================= */
+.cb__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+
+.cb__field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.cb__field--flex-2 {
+  grid-column: span 2;
+}
+
+.cb__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: .15rem;
+}
+
+.cb__radios {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.cb__radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .5rem .85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .9rem;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.cb__radio-label input[type="radio"] {
+  accent-color: var(--md-sys-color-primary);
+  cursor: pointer;
+  margin: 0;
+}
+
+.cb__inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cb__inputs-row--dim {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.cb__inputs-row--4col {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.cb__inputs-row--opts {
+  grid-template-columns: 2fr 1fr 1.2fr;
+}
+
+.cb__inputs-row--prices {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+@media (max-width: 768px) {
+  .cb__inputs-row--dim,
+  .cb__inputs-row--4col,
+  .cb__inputs-row--opts {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+  .cb__field--flex-2 {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .cb__inputs-row,
+  .cb__inputs-row--prices {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+}
+
+.cb__input {
+  width: 100%;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.cb__input:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.cb__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .95rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cb__select:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.cb__details {
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  padding: .5rem .75rem;
+}
+
+.cb__summary {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-primary);
+  cursor: pointer;
+  user-select: none;
+  padding: .3rem 0;
+}
+
+.cb__details-body {
+  margin-top: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.cb__sub-hint,
+.cb__hint-text {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.4;
+}
+
+.cb__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+
+.cb__hint {
+  padding: 1.25rem;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px dashed var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.cb__hint[hidden] {
+  display: none;
+}
+
+.cb__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.cb__output-wrap[hidden] {
+  display: none;
+}
+
+.cb__hero {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+
+.cb__hero-main {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.cb__hero-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  font-family: var(--font-mono);
+  line-height: 1.15;
+}
+
+.cb__hero-symbol {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.cb__sentence {
+  font-size: .95rem;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+
+.cb__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cb__stat {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.cb__stat[hidden] {
+  display: none;
+}
+
+.cb__stat-label {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.cb__stat-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--md-sys-color-on-surface);
+}
+
+.cb__section {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin-top: .2rem;
+}
+
+.cb__section-title {
+  margin: 0;
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.cb__biaya-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cb__biaya-card {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .85rem 1rem;
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.cb__biaya-card--selisih {
+  background: var(--md-sys-color-surface-container);
+  border-color: var(--md-sys-color-primary);
+}
+
+.cb__biaya-title {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.cb__biaya-total {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--md-sys-color-primary);
+}
+
+.cb__biaya-sub {
+  font-size: .8rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.35;
+}
+
+.cb__notes {
+  margin: .25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: .84rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.5;
+}
+
+.cb__notes-item {
+  margin-bottom: .3rem;
+}
+
+.cb__disclaimer {
+  margin: .4rem 0 0;
+  font-size: .82rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.cb__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+  flex-wrap: wrap;
+}
+
+.cb__related {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-top: .5rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.cb__related-label {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.cb__related-buttons {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
 @media (pointer: coarse) {
   #biaya-perjalanan-panel input,
   #biaya-perjalanan-panel select,
@@ -11382,7 +11758,14 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #bata-panel .bt__radio-label,
   .bt__input,
   .bt__select,
-  .bt__radio-label {
+  .bt__radio-label,
+  #cor-beton-panel input,
+  #cor-beton-panel select,
+  #cor-beton-panel button,
+  #cor-beton-panel .cb__radio-label,
+  .cb__input,
+  .cb__select,
+  .cb__radio-label {
     min-height: 44px;
   }
 }
@@ -11788,6 +12171,13 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   .bt__input,
   .bt__select,
   .bt__radio-label,
+  #cor-beton-panel input,
+  #cor-beton-panel select,
+  #cor-beton-panel button,
+  #cor-beton-panel .cb__radio-label,
+  .cb__input,
+  .cb__select,
+  .cb__radio-label,
   #sholat-panel input,
   #sholat-panel select,
   #sholat-panel button,

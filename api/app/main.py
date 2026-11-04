@@ -391,6 +391,21 @@ from .bata import (
     hitung_bata,
     limits_payload as bata_limits_payload_func,
 )
+from .cor_beton import (
+    INVALID_CADANGAN as CB_INVALID_CADANGAN,
+    INVALID_HARGA as CB_INVALID_HARGA,
+    INVALID_KAPASITAS_TRUK as CB_INVALID_KAPASITAS_TRUK,
+    INVALID_NUMBER as CB_INVALID_NUMBER,
+    INVALID_REQUEST as CB_INVALID_REQUEST,
+    OUT_OF_RANGE as CB_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CB_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as CB_UNSUPPORTED_MODE,
+    UNSUPPORTED_MUTU as CB_UNSUPPORTED_MUTU,
+    VOLUME_TOO_LARGE as CB_VOLUME_TOO_LARGE,
+    CorBetonError,
+    hitung_cor_beton,
+    limits_payload as cor_beton_limits_payload_func,
+)
 from .sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -1094,6 +1109,17 @@ async def handle_bata_error(request: Request, exc: BataError) -> JSONResponse:
     )
 
 
+@app.exception_handler(CorBetonError)
+async def handle_cor_beton_error(request: Request, exc: CorBetonError) -> JSONResponse:
+    """Error kalkulator cor beton yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung cor beton ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(SholatError)
 async def handle_sholat_error(request: Request, exc: SholatError) -> JSONResponse:
     """Error alat jadwal sholat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1382,6 +1408,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     elif request.url.path.startswith("/api/cat"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/bata"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/cor-beton"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/sholat"):
         msg = "Permintaan tidak valid. Kirim objek JSON dengan pilihan kota atau koordinat."
@@ -2160,6 +2188,27 @@ def _reject_oversized_bata_content_length(request: Request) -> None:
 
 def _bata_limits_payload() -> dict:
     return bata_limits_payload_func()
+
+
+def _reject_oversized_cor_beton_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator cor beton."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise CorBetonError(
+            CB_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _cor_beton_limits_payload() -> dict:
+    return cor_beton_limits_payload_func()
 
 
 def _reject_oversized_harga_jual_content_length(request: Request) -> None:
@@ -4399,6 +4448,113 @@ async def bata_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/cor-beton/limits")
+async def cor_beton_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Kebutuhan Cor Beton."""
+    return JSONResponse(content=_cor_beton_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/cor-beton")
+async def cor_beton_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    panjang: str = Form(default=None),
+    lebar: str = Form(default=None),
+    tinggi: str = Form(default=None),
+    jumlah: str = Form(default=None),
+    volume: str = Form(default=None),
+    mutu: str = Form(default=None),
+    cadangan: str = Form(default=None),
+    harga_semen: str = Form(default=None),
+    harga_pasir: str = Form(default=None),
+    harga_kerikil: str = Form(default=None),
+    harga_readymix: str = Form(default=None),
+    kapasitas_truk: str = Form(default=None),
+):
+    """Hitung kebutuhan cor beton di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_cor_beton_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise CorBetonError(
+            CB_INVALID_REQUEST,
+            "Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise CorBetonError(
+            CB_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for val in form.values():
+        if isinstance(val, UploadFile):
+            raise CorBetonError(
+                CB_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if "mode" not in form and mode is None:
+        raise CorBetonError(
+            CB_INVALID_REQUEST,
+            "Field 'mode' wajib disertakan dalam permintaan multipart/form-data.",
+            400,
+        )
+
+    mode_val = mode if mode is not None else form.get("mode")
+    panjang_val = panjang if panjang is not None else form.get("panjang")
+    lebar_val = lebar if lebar is not None else form.get("lebar")
+    tinggi_val = tinggi if tinggi is not None else form.get("tinggi")
+    jumlah_val = jumlah if jumlah is not None else form.get("jumlah")
+    volume_val = volume if volume is not None else form.get("volume")
+    mutu_val = mutu if mutu is not None else form.get("mutu")
+    cadangan_val = cadangan if cadangan is not None else form.get("cadangan")
+    harga_semen_val = harga_semen if harga_semen is not None else form.get("harga_semen")
+    harga_pasir_val = harga_pasir if harga_pasir is not None else form.get("harga_pasir")
+    harga_kerikil_val = harga_kerikil if harga_kerikil is not None else form.get("harga_kerikil")
+    harga_readymix_val = harga_readymix if harga_readymix is not None else form.get("harga_readymix")
+    kapasitas_truk_val = kapasitas_truk if kapasitas_truk is not None else form.get("kapasitas_truk")
+
+    result = hitung_cor_beton(
+        mode=mode_val,
+        panjang=panjang_val,
+        lebar=lebar_val,
+        tinggi=tinggi_val,
+        jumlah=jumlah_val,
+        volume=volume_val,
+        mutu=mutu_val,
+        cadangan=cadangan_val,
+        harga_semen=harga_semen_val,
+        harga_pasir=harga_pasir_val,
+        harga_kerikil=harga_kerikil_val,
+        harga_readymix=harga_readymix_val,
+        kapasitas_truk=kapasitas_truk_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode, mutu, dan durasi.
+    logger.info(
+        "hitung cor beton selesai: mode=%s mutu=%s durasi=%.0fms",
+        result["mode"],
+        result["mutu"]["kode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/sholat/limits")
 async def sholat_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk alat Jadwal Sholat."""
@@ -6064,6 +6220,7 @@ async def root() -> dict:
             "keramik",
             "cat",
             "bata",
+            "cor-beton",
             "sholat",
             "harga-jual",
             "biaya-perjalanan",

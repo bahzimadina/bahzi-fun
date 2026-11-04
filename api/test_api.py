@@ -450,6 +450,21 @@ from app.bata import (
     hitung_bata,
     limits_payload as bata_limits_payload_func,
 )
+from app.cor_beton import (
+    INVALID_CADANGAN as CB_INVALID_CADANGAN,
+    INVALID_HARGA as CB_INVALID_HARGA,
+    INVALID_KAPASITAS_TRUK as CB_INVALID_KAPASITAS_TRUK,
+    INVALID_NUMBER as CB_INVALID_NUMBER,
+    INVALID_REQUEST as CB_INVALID_REQUEST,
+    OUT_OF_RANGE as CB_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as CB_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_MODE as CB_UNSUPPORTED_MODE,
+    UNSUPPORTED_MUTU as CB_UNSUPPORTED_MUTU,
+    VOLUME_TOO_LARGE as CB_VOLUME_TOO_LARGE,
+    CorBetonError,
+    hitung_cor_beton,
+    limits_payload as cor_beton_limits_payload_func,
+)
 from app.sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -15612,6 +15627,306 @@ def test_http_bata_galat() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "bata" in root_resp.json()["tools"]
+
+
+# --- Uji Alat Hitung Kebutuhan Cor Beton ---------------------------------------
+def test_cor_beton_limits() -> None:
+    """GET /api/cor-beton/limits mengembalikan 200, no-store, serta memuat 4 mutu dan 4 mode."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/cor-beton/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+
+    data = resp.json()
+    assert "modes" in data
+    mode_values = [m["value"] for m in data["modes"]]
+    assert set(mode_values) == {"plat", "balok", "kolom", "volume"}
+
+    assert "mutu_pilihan" in data
+    mutu_kodes = [m["kode"] for m in data["mutu_pilihan"]]
+    assert set(mutu_kodes) == {"k175", "k225", "k250", "k300"}
+
+    assert "cadangan" in data
+    assert data["cadangan"]["min"] == 0
+    assert data["cadangan"]["max"] == 15
+    assert data["cadangan"]["bawaan"] == 5
+
+    assert "kapasitas_truk" in data
+    assert data["kapasitas_truk"]["bawaan"] == 7
+
+    assert "konstanta" in data
+    assert data["konstanta"]["semen_kg_per_sak"] == 50
+    assert data["konstanta"]["pasir_kg_per_m3"] == 1400
+    assert data["konstanta"]["kerikil_kg_per_m3"] == 1350
+
+
+def test_http_cor_beton_sukses_dan_headers() -> None:
+    """POST /api/cor-beton sukses mengembalikan hasil terstruktur dan header no-store + X-Processing-Ms."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Mode plat: 6 x 4 m tebal 12 cm, K-225, cadangan 5%
+    # volume_kotor = 6 * 4 * 0.12 = 2.88 m3
+    # volume_m3 = 2.88 * 1.05 = 3.024 m3
+    # semen_kg = 3.024 * 371 = 1121.904 -> 1121.9
+    # semen_sak = ceil(1121.904 / 50) = 23
+    # pasir_m3 = ceil(3.024 * 698 / 1400) = 1.51
+    # kerikil_m3 = ceil(3.024 * 1047 / 1350) = 2.35
+    # air_liter = ceil(3.024 * 215) = 651
+    # truk = ceil(3.024 / 7) = 1, sisa = 1 * 7 - 3.024 = 3.98 m3
+    resp_plat = client.post(
+        "/api/cor-beton",
+        data={
+            "mode": "plat",
+            "panjang": "6",
+            "lebar": "4",
+            "tinggi": "12",
+            "mutu": "k225",
+            "cadangan": "5",
+        },
+    )
+    assert resp_plat.status_code == 200
+    assert "no-store" in resp_plat.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp_plat.headers
+
+    d_plat = resp_plat.json()
+    assert d_plat["mode"] == "plat"
+    assert d_plat["volume_kotor_m3"] == 2.88
+    assert d_plat["volume_m3"] == 3.024
+    assert d_plat["bahan"]["semen_kg"] == 1121.9
+    assert d_plat["bahan"]["semen_sak"] == 23
+    assert d_plat["bahan"]["pasir_m3"] == 1.51
+    assert d_plat["bahan"]["kerikil_m3"] == 2.35
+    assert d_plat["bahan"]["air_liter"] == 651
+    assert d_plat["readymix"]["truk"] == 1
+    assert d_plat["readymix"]["sisa_kapasitas_m3"] == 3.98
+    assert d_plat["dimensi"] == {"panjang_m": 6, "lebar_m": 4, "tebal_cm": 12}
+
+    # 2. Mode balok: total panjang 20 m, lebar 20 cm, tinggi 30 cm, K-250, cadangan 5%
+    # volume_kotor = 20 * 0.2 * 0.3 = 1.2 m3
+    # volume_m3 = 1.2 * 1.05 = 1.26 m3
+    # K-250 (semen 384, pasir 692, kerikil 1039, air 215):
+    # semen_kg = 1.26 * 384 = 483.84 -> 483.8 kg, semen_sak = ceil(483.84 / 50) = 10 sak
+    # pasir_m3 = ceil(1.26 * 692 / 1400) = ceil(0.6228) = 0.63 m3
+    # kerikil_m3 = ceil(1.26 * 1039 / 1350) = ceil(0.9697) = 0.97 m3
+    # air_liter = ceil(1.26 * 215) = ceil(270.9) = 271 liter
+    # truk = ceil(1.26 / 7) = 1, sisa = 7 - 1.26 = 5.74 m3
+    resp_balok = client.post(
+        "/api/cor-beton",
+        data={
+            "mode": "balok",
+            "panjang": "20",
+            "lebar": "20",
+            "tinggi": "30",
+            "mutu": "k250",
+            "cadangan": "5",
+        },
+    )
+    assert resp_balok.status_code == 200
+    d_balok = resp_balok.json()
+    assert d_balok["mode"] == "balok"
+    assert d_balok["volume_kotor_m3"] == 1.2
+    assert d_balok["volume_m3"] == 1.26
+    assert d_balok["bahan"]["semen_sak"] == 10
+    assert d_balok["bahan"]["semen_kg"] == 483.8
+    assert d_balok["bahan"]["pasir_m3"] == 0.63
+    assert d_balok["bahan"]["kerikil_m3"] == 0.97
+    assert d_balok["bahan"]["air_liter"] == 271
+    assert d_balok["readymix"]["truk"] == 1
+    assert d_balok["readymix"]["sisa_kapasitas_m3"] == 5.74
+    assert d_balok["dimensi"] == {"panjang_m": 20, "lebar_cm": 20, "tinggi_cm": 30}
+
+    # 3. Mode kolom: 10 buah, tinggi 3 m, penampang 20 x 20 cm, K-300, cadangan 10%
+    # volume_kotor = 10 * 3 * 0.2 * 0.2 = 1.2 m3
+    # volume_m3 = 1.2 * 1.10 = 1.32 m3
+    # K-300 (semen 413, pasir 681, kerikil 1027, air 215):
+    # semen_kg = 1.32 * 413 = 545.16 -> 545.2 kg, semen_sak = ceil(545.16 / 50) = 11 sak
+    # pasir_m3 = ceil(1.32 * 681 / 1400) = ceil(0.64208) = 0.65 m3
+    # kerikil_m3 = ceil(1.32 * 1027 / 1350) = ceil(1.00417) = 1.01 m3
+    # air_liter = ceil(1.32 * 215) = ceil(283.8) = 284 liter
+    # truk = ceil(1.32 / 7) = 1, sisa = 7 - 1.32 = 5.68 m3
+    resp_kolom = client.post(
+        "/api/cor-beton",
+        data={
+            "mode": "kolom",
+            "jumlah": "10",
+            "panjang": "3",
+            "lebar": "20",
+            "tinggi": "20",
+            "mutu": "k300",
+            "cadangan": "10",
+        },
+    )
+    assert resp_kolom.status_code == 200
+    d_kolom = resp_kolom.json()
+    assert d_kolom["mode"] == "kolom"
+    assert d_kolom["volume_kotor_m3"] == 1.2
+    assert d_kolom["volume_m3"] == 1.32
+    assert d_kolom["bahan"]["semen_sak"] == 11
+    assert d_kolom["bahan"]["semen_kg"] == 545.2
+    assert d_kolom["bahan"]["pasir_m3"] == 0.65
+    assert d_kolom["bahan"]["kerikil_m3"] == 1.01
+    assert d_kolom["bahan"]["air_liter"] == 284
+    assert d_kolom["readymix"]["truk"] == 1
+    assert d_kolom["readymix"]["sisa_kapasitas_m3"] == 5.68
+    assert d_kolom["dimensi"] == {"jumlah": 10, "panjang_m": 3, "lebar_cm": 20, "tinggi_cm": 20}
+
+    # 4. Mode volume: 5 m3, K-175, cadangan 0%, truk kapasitas 3 m3
+    # volume_kotor = 5 m3, volume_m3 = 5.0 m3
+    # K-175 (semen 326, pasir 760, kerikil 1029, air 215):
+    # semen_kg = 5.0 * 326 = 1630.0 kg, semen_sak = ceil(1630 / 50) = 33 sak
+    # pasir_m3 = ceil(5.0 * 760 / 1400) = ceil(2.71428) = 2.72 m3
+    # kerikil_m3 = ceil(5.0 * 1029 / 1350) = ceil(3.8111) = 3.82 m3
+    # air_liter = ceil(5.0 * 215) = 1075 liter
+    # truk = ceil(5.0 / 3) = 2 truk, sisa = 2 * 3 - 5.0 = 1.0 m3
+    resp_vol = client.post(
+        "/api/cor-beton",
+        data={
+            "mode": "volume",
+            "volume": "5",
+            "mutu": "k175",
+            "cadangan": "0",
+            "kapasitas_truk": "3",
+        },
+    )
+    assert resp_vol.status_code == 200
+    d_vol = resp_vol.json()
+    assert d_vol["mode"] == "volume"
+    assert d_vol["volume_kotor_m3"] == 5.0
+    assert d_vol["volume_m3"] == 5.0
+    assert d_vol["bahan"]["semen_sak"] == 33
+    assert d_vol["bahan"]["semen_kg"] == 1630.0
+    assert d_vol["bahan"]["pasir_m3"] == 2.72
+    assert d_vol["bahan"]["kerikil_m3"] == 3.82
+    assert d_vol["bahan"]["air_liter"] == 1075
+    assert d_vol["readymix"]["truk"] == 2
+    assert d_vol["readymix"]["sisa_kapasitas_m3"] == 1.0
+    assert d_vol["dimensi"] == {"volume_m3": 5}
+
+
+def test_http_cor_beton_harga_lengkap() -> None:
+    """POST /api/cor-beton dengan semua harga terisi menghasilkan biaya adukan, readymix, dan selisih konsisten."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Mode plat 6 x 4 m tebal 12 cm, K-225, cadangan 5% -> volume_m3 = 3.024 m3
+    # semen_sak = 23, pasir_m3 = 1.51, kerikil_m3 = 2.35
+    # harga_semen = 65.000 / sak -> 23 * 65000 = 1.495.000
+    # harga_pasir = 250.000 / m3 -> 1.51 * 250000 = 377.500
+    # harga_kerikil = 280.000 / m3 -> 2.35 * 280000 = 658.000
+    # total biaya adukan = 1.495.000 + 377.500 + 658.000 = 2.530.500
+    # harga_readymix = 850.000 / m3 -> 3.024 * 850000 = 2.570.400
+    # selisih = 2.570.400 - 2.530.500 = 39.900
+    resp = client.post(
+        "/api/cor-beton",
+        data={
+            "mode": "plat",
+            "panjang": "6",
+            "lebar": "4",
+            "tinggi": "12",
+            "mutu": "k225",
+            "cadangan": "5",
+            "harga_semen": "65000",
+            "harga_pasir": "250000",
+            "harga_kerikil": "280000",
+            "harga_readymix": "850000",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    b = data["biaya"]
+    assert b["adukan"] == 2530500
+    assert b["readymix"] == 2570400
+    assert b["selisih"] == 39900
+    assert b["selisih"] == b["readymix"] - b["adukan"]
+    assert b["per_m3_readymix"] == 850000
+    assert b["per_m3_adukan"] == round(2530500 / 3.024)
+
+
+def test_http_cor_beton_galat() -> None:
+    """Uji berbagai skenario galat HTTP pada endpoint POST /api/cor-beton."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Field mode tidak ada -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/cor-beton", data={"panjang": "6", "lebar": "4", "tinggi": "12"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == CB_INVALID_REQUEST
+
+    # 2. Mode tidak valid -> 400 UNSUPPORTED_MODE
+    r_mode = client.post("/api/cor-beton", data={"mode": "pondasi", "panjang": "6"})
+    assert r_mode.status_code == 400
+    assert r_mode.json()["error"]["code"] == CB_UNSUPPORTED_MODE
+
+    # 3. Mutu tidak valid -> 400 UNSUPPORTED_MUTU
+    r_mutu = client.post(
+        "/api/cor-beton",
+        data={"mode": "plat", "panjang": "6", "lebar": "4", "tinggi": "12", "mutu": "k500"},
+    )
+    assert r_mutu.status_code == 400
+    assert r_mutu.json()["error"]["code"] == CB_UNSUPPORTED_MUTU
+
+    # 4. Angka bukan angka -> 400 INVALID_NUMBER
+    r_nan = client.post(
+        "/api/cor-beton",
+        data={"mode": "plat", "panjang": "enam", "lebar": "4", "tinggi": "12"},
+    )
+    assert r_nan.status_code == 400
+    assert r_nan.json()["error"]["code"] == CB_INVALID_NUMBER
+
+    # 5. Angka di luar rentang (tebal pelat 2 cm < 5 cm) -> 400 OUT_OF_RANGE
+    r_range = client.post(
+        "/api/cor-beton",
+        data={"mode": "plat", "panjang": "6", "lebar": "4", "tinggi": "2"},
+    )
+    assert r_range.status_code == 400
+    assert r_range.json()["error"]["code"] == CB_OUT_OF_RANGE
+
+    # 6. Cadangan 20 (> 15) -> 400 INVALID_CADANGAN
+    r_cad = client.post(
+        "/api/cor-beton",
+        data={"mode": "plat", "panjang": "6", "lebar": "4", "tinggi": "12", "cadangan": "20"},
+    )
+    assert r_cad.status_code == 400
+    assert r_cad.json()["error"]["code"] == CB_INVALID_CADANGAN
+
+    # 7. JSON body (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post(
+        "/api/cor-beton",
+        json={"mode": "plat", "panjang": "6", "lebar": "4", "tinggi": "12"},
+    )
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == CB_INVALID_REQUEST
+
+    # 8. Content-Length besar (> 64 KB) -> 413 PAYLOAD_TOO_LARGE
+    r_big = client.post(
+        "/api/cor-beton",
+        data={"mode": "plat", "panjang": "6", "lebar": "4", "tinggi": "12"},
+        headers={"Content-Length": "70000"},
+    )
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == CB_PAYLOAD_TOO_LARGE
+
+    # 9. Volume akhir > 2000 m3 -> 413 VOLUME_TOO_LARGE
+    r_huge = client.post(
+        "/api/cor-beton",
+        data={"mode": "volume", "volume": "1950", "cadangan": "10"},
+    )
+    assert r_huge.status_code == 413
+    assert r_huge.json()["error"]["code"] == CB_VOLUME_TOO_LARGE
+    assert "(2.145 m³)" in r_huge.json()["error"]["message"]
+    assert "2.000 m³" in r_huge.json()["error"]["message"]
+
+    # 10. Pastikan 'cor-beton' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "cor-beton" in root_resp.json()["tools"]
 
 
 # --- Uji Alat Jadwal Sholat ---------------------------------------------------
