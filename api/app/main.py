@@ -406,6 +406,19 @@ from .cor_beton import (
     hitung_cor_beton,
     limits_payload as cor_beton_limits_payload_func,
 )
+from .konsumsi import (
+    INVALID_CADANGAN as KS_INVALID_CADANGAN,
+    INVALID_NUMBER as KS_INVALID_NUMBER,
+    INVALID_REQUEST as KS_INVALID_REQUEST,
+    OUT_OF_RANGE as KS_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as KS_PAYLOAD_TOO_LARGE,
+    PORSI_TOO_LARGE as KS_PORSI_TOO_LARGE,
+    UNSUPPORTED_LAUK as KS_UNSUPPORTED_LAUK,
+    UNSUPPORTED_MODE as KS_UNSUPPORTED_MODE,
+    KonsumsiError,
+    hitung_konsumsi,
+    limits_payload as konsumsi_limits_payload_func,
+)
 from .sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -1120,6 +1133,17 @@ async def handle_cor_beton_error(request: Request, exc: CorBetonError) -> JSONRe
     )
 
 
+@app.exception_handler(KonsumsiError)
+async def handle_konsumsi_error(request: Request, exc: KonsumsiError) -> JSONResponse:
+    """Error kalkulator konsumsi acara yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung konsumsi ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(SholatError)
 async def handle_sholat_error(request: Request, exc: SholatError) -> JSONResponse:
     """Error alat jadwal sholat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1411,6 +1435,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
     elif request.url.path.startswith("/api/cor-beton"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/konsumsi"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan 'tamu'."
     elif request.url.path.startswith("/api/sholat"):
         msg = "Permintaan tidak valid. Kirim objek JSON dengan pilihan kota atau koordinat."
     elif request.url.path.startswith("/api/harga-jual"):
@@ -2209,6 +2235,27 @@ def _reject_oversized_cor_beton_content_length(request: Request) -> None:
 
 def _cor_beton_limits_payload() -> dict:
     return cor_beton_limits_payload_func()
+
+
+def _reject_oversized_konsumsi_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator konsumsi."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise KonsumsiError(
+            KS_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _konsumsi_limits_payload() -> dict:
+    return konsumsi_limits_payload_func()
 
 
 def _reject_oversized_harga_jual_content_length(request: Request) -> None:
@@ -4555,6 +4602,117 @@ async def cor_beton_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/konsumsi/limits")
+async def konsumsi_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Konsumsi Acara."""
+    return JSONResponse(content=_konsumsi_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/konsumsi")
+async def konsumsi_endpoint(
+    request: Request,
+    mode: str = Form(default=None),
+    tamu: str = Form(default=None),
+    cadangan: str = Form(default=None),
+    harga_porsi: str = Form(default=None),
+    jenis_lauk: str = Form(default=None),
+    harga_beras: str = Form(default=None),
+    harga_lauk: str = Form(default=None),
+    harga_sayur: str = Form(default=None),
+    harga_tahu_tempe: str = Form(default=None),
+    harga_minyak: str = Form(default=None),
+    harga_air: str = Form(default=None),
+    harga_perlengkapan: str = Form(default=None),
+):
+    """Hitung kebutuhan konsumsi acara di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_konsumsi_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise KonsumsiError(
+            KS_INVALID_REQUEST,
+            "Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise KonsumsiError(
+            KS_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    total_form_bytes = sum(len(str(k)) + len(str(v)) for k, v in form.items())
+    if total_form_bytes > 64 * 1024:
+        raise KonsumsiError(
+            KS_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+    for val in form.values():
+        if isinstance(val, UploadFile):
+            raise KonsumsiError(
+                KS_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if "mode" not in form and mode is None:
+        raise KonsumsiError(
+            KS_INVALID_REQUEST,
+            "Field 'mode' wajib disertakan dalam permintaan multipart/form-data.",
+            400,
+        )
+
+    mode_val = mode if mode is not None else form.get("mode")
+    tamu_val = tamu if tamu is not None else form.get("tamu")
+    cadangan_val = cadangan if cadangan is not None else form.get("cadangan")
+    harga_porsi_val = harga_porsi if harga_porsi is not None else form.get("harga_porsi")
+    jenis_lauk_val = jenis_lauk if jenis_lauk is not None else form.get("jenis_lauk")
+    harga_beras_val = harga_beras if harga_beras is not None else form.get("harga_beras")
+    harga_lauk_val = harga_lauk if harga_lauk is not None else form.get("harga_lauk")
+    harga_sayur_val = harga_sayur if harga_sayur is not None else form.get("harga_sayur")
+    harga_tahu_tempe_val = harga_tahu_tempe if harga_tahu_tempe is not None else form.get("harga_tahu_tempe")
+    harga_minyak_val = harga_minyak if harga_minyak is not None else form.get("harga_minyak")
+    harga_air_val = harga_air if harga_air is not None else form.get("harga_air")
+    harga_perlengkapan_val = harga_perlengkapan if harga_perlengkapan is not None else form.get("harga_perlengkapan")
+
+    result = hitung_konsumsi(
+        mode=mode_val,
+        tamu=tamu_val,
+        cadangan=cadangan_val,
+        harga_porsi=harga_porsi_val,
+        jenis_lauk=jenis_lauk_val,
+        harga_beras=harga_beras_val,
+        harga_lauk=harga_lauk_val,
+        harga_sayur=harga_sayur_val,
+        harga_tahu_tempe=harga_tahu_tempe_val,
+        harga_minyak=harga_minyak_val,
+        harga_air=harga_air_val,
+        harga_perlengkapan=harga_perlengkapan_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN mencatat nilai masukan pengguna ke log — cukup mode dan durasi.
+    logger.info(
+        "hitung konsumsi selesai: mode=%s durasi=%.0fms",
+        result["mode"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/sholat/limits")
 async def sholat_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk alat Jadwal Sholat."""
@@ -6221,6 +6379,7 @@ async def root() -> dict:
             "cat",
             "bata",
             "cor-beton",
+            "konsumsi",
             "sholat",
             "harga-jual",
             "biaya-perjalanan",

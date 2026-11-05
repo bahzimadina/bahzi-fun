@@ -96,6 +96,7 @@
         { name: 'Hitung kebutuhan cat', desc: 'Hitung luas dinding yang dicat, liter cat yang dibutuhkan, jumlah kaleng, dan perkiraan biayanya.', status: 'available', action: 'cat' },
         { name: 'Hitung kebutuhan bata', desc: 'Hitung jumlah bata, sak semen, pasir, dan perkiraan biaya untuk memasang dinding.', status: 'available', action: 'bata' },
         { name: 'Hitung kebutuhan cor beton', desc: 'Hitung volume cor beton, kebutuhan semen, pasir, kerikil, air, dan jumlah truk readymix, lengkap dengan perkiraan biaya.', status: 'available', action: 'cor-beton' },
+        { name: 'Hitung konsumsi acara', desc: 'Hitung porsi nasi kotak, snack, atau bahan masak untuk acara, lengkap dengan perkiraan biayanya.', status: 'available', action: 'konsumsi' },
         { name: 'Hitung harga jual', desc: 'Hitung harga jual dari modal, biaya tambahan, potongan marketplace, dan target laba.', status: 'available', action: 'harga-jual' },
         { name: 'Hitung biaya perjalanan', desc: 'Perkirakan biaya BBM, tol, dan parkir untuk sebuah perjalanan, lalu lihat patungan per orang.', status: 'available', action: 'biaya-perjalanan' }
       ]

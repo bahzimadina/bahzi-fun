@@ -465,6 +465,19 @@ from app.cor_beton import (
     hitung_cor_beton,
     limits_payload as cor_beton_limits_payload_func,
 )
+from app.konsumsi import (
+    INVALID_CADANGAN as KS_INVALID_CADANGAN,
+    INVALID_NUMBER as KS_INVALID_NUMBER,
+    INVALID_REQUEST as KS_INVALID_REQUEST,
+    OUT_OF_RANGE as KS_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as KS_PAYLOAD_TOO_LARGE,
+    PORSI_TOO_LARGE as KS_PORSI_TOO_LARGE,
+    UNSUPPORTED_LAUK as KS_UNSUPPORTED_LAUK,
+    UNSUPPORTED_MODE as KS_UNSUPPORTED_MODE,
+    KonsumsiError,
+    hitung_konsumsi,
+    limits_payload as konsumsi_limits_payload_func,
+)
 from app.sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -15927,6 +15940,272 @@ def test_http_cor_beton_galat() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "cor-beton" in root_resp.json()["tools"]
+
+
+# --- Uji Alat Hitung Konsumsi Acara -------------------------------------------
+def test_konsumsi_limits() -> None:
+    """GET /api/konsumsi/limits mengembalikan 200, no-store, serta memuat daftar mode, lauk, batas angka, dan patokan."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/api/konsumsi/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+
+    data = resp.json()
+    assert "modes" in data
+    mode_values = [m["value"] for m in data["modes"]]
+    assert set(mode_values) == {"nasi_kotak", "prasmanan", "snack"}
+
+    assert "jenis_lauk" in data
+    lauk_values = [l["value"] for l in data["jenis_lauk"]]
+    assert set(lauk_values) == {"ayam", "ikan", "daging", "telur"}
+
+    assert "batas_angka" in data
+    assert data["batas_angka"]["tamu"]["min"] == 1
+    assert data["batas_angka"]["tamu"]["max"] == 5000
+    assert data["batas_angka"]["cadangan"]["min"] == 0
+    assert data["batas_angka"]["cadangan"]["max"] == 50
+    assert data["batas_angka"]["porsi_max"] == 10000
+
+    assert "patokan" in data
+    assert len(data["patokan"]) > 0
+
+
+def test_http_konsumsi_sukses_dan_headers() -> None:
+    """POST /api/konsumsi sukses untuk tiap mode, mengembalikan struktur tepat dan header X-Processing-Ms."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Mode nasi_kotak: tamu 200, cadangan 10 -> porsi 220
+    resp_kotak = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "nasi_kotak",
+            "tamu": "200",
+            "cadangan": "10",
+        },
+    )
+    assert resp_kotak.status_code == 200
+    assert "no-store" in resp_kotak.headers.get("Cache-Control", "")
+    assert "X-Processing-Ms" in resp_kotak.headers
+
+    d_kotak = resp_kotak.json()
+    assert d_kotak["mode"] == "nasi_kotak"
+    assert d_kotak["tamu"] == 200
+    assert d_kotak["cadangan_persen"] == 10
+    assert d_kotak["porsi"] == 220
+    assert d_kotak["biaya"] is None
+    rinc_map = {r["nama"]: r["jumlah"] for r in d_kotak["rincian"]}
+    assert rinc_map["Nasi kotak"] == 220
+    assert rinc_map["Air mineral 600 ml"] == 220
+    assert rinc_map["Air mineral dus (isi 24)"] == 10
+
+    # 2. Mode prasmanan: tamu 100, cadangan 10, jenis_lauk ayam -> porsi 110
+    resp_pras = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "prasmanan",
+            "tamu": "100",
+            "cadangan": "10",
+            "jenis_lauk": "ayam",
+        },
+    )
+    assert resp_pras.status_code == 200
+    d_pras = resp_pras.json()
+    assert d_pras["mode"] == "prasmanan"
+    assert d_pras["porsi"] == 110
+    rinc_pras = {r["nama"]: (r["jumlah"], r["satuan"]) for r in d_pras["rincian"]}
+    assert rinc_pras["Beras"] == (9.9, "kg")
+    assert rinc_pras["Lauk (Daging ayam)"] == (11.0, "kg")
+    assert rinc_pras["Tahu & tempe"] == (5.5, "kg")
+    assert rinc_pras["Sayuran"] == (7.7, "kg")
+    assert rinc_pras["Minyak goreng"] == (1.32, "liter")
+    assert rinc_pras["Air mineral 600 ml"] == (74, "botol")
+    assert rinc_pras["Air mineral dus (isi 24)"] == (4, "dus")
+    assert rinc_pras["Piring"] == (132, "buah")
+    assert rinc_pras["Gelas"] == (132, "buah")
+    assert rinc_pras["Sendok"] == (132, "buah")
+
+    # 3. Mode prasmanan lauk telur
+    resp_telur = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "prasmanan",
+            "tamu": "100",
+            "cadangan": "10",
+            "jenis_lauk": "telur",
+        },
+    )
+    assert resp_telur.status_code == 200
+    d_telur = resp_telur.json()
+    rinc_telur = {r["nama"]: (r["jumlah"], r["satuan"]) for r in d_telur["rincian"]}
+    assert rinc_telur["Telur ayam"] == (110, "butir")
+
+    # 4. Mode snack: tamu 50, cadangan 0 -> porsi 50
+    resp_snack = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "snack",
+            "tamu": "50",
+            "cadangan": "0",
+        },
+    )
+    assert resp_snack.status_code == 200
+    d_snack = resp_snack.json()
+    assert d_snack["mode"] == "snack"
+    assert d_snack["porsi"] == 50
+    assert d_snack["rincian"][0]["nama"] == "Snack box"
+    assert d_snack["rincian"][0]["jumlah"] == 50
+
+
+def test_http_konsumsi_harga() -> None:
+    """Uji perhitungan biaya untuk mode nasi_kotak, snack, dan prasmanan."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Nasi kotak hanya isi harga_porsi 25.000 -> 220 * 25000 = 5.500.000, per_tamu 27.500, lengkap False
+    resp_nk = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "nasi_kotak",
+            "tamu": "200",
+            "cadangan": "10",
+            "harga_porsi": "25000",
+        },
+    )
+    assert resp_nk.status_code == 200
+    b_nk = resp_nk.json()["biaya"]
+    assert b_nk["total"] == 5500000
+    assert b_nk["per_tamu"] == 27500
+    assert b_nk["lengkap"] is False
+
+    # Ditambah harga_air: 10 dus x 20.000 = 200.000 -> total 5.700.000, lengkap True
+    resp_nk2 = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "nasi_kotak",
+            "tamu": "200",
+            "cadangan": "10",
+            "harga_porsi": "25000",
+            "harga_air": "20000",
+        },
+    )
+    assert resp_nk2.status_code == 200
+    b_nk2 = resp_nk2.json()["biaya"]
+    assert b_nk2["total"] == 5700000
+    assert b_nk2["per_tamu"] == 28500
+    assert b_nk2["lengkap"] is True
+
+    # 2. Snack isi harga_porsi 15.000 -> 50 * 15000 = 750.000, per_tamu 15.000, lengkap True
+    resp_sn = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "snack",
+            "tamu": "50",
+            "cadangan": "0",
+            "harga_porsi": "15000",
+        },
+    )
+    assert resp_sn.status_code == 200
+    b_sn = resp_sn.json()["biaya"]
+    assert b_sn["total"] == 750000
+    assert b_sn["per_tamu"] == 15000
+    assert b_sn["lengkap"] is True
+
+    # 3. Prasmanan dengan semua 7 harga terisi
+    resp_pm = client.post(
+        "/api/konsumsi",
+        data={
+            "mode": "prasmanan",
+            "tamu": "100",
+            "cadangan": "10",
+            "jenis_lauk": "ayam",
+            "harga_beras": "15000",
+            "harga_lauk": "40000",
+            "harga_sayur": "10000",
+            "harga_tahu_tempe": "12000",
+            "harga_minyak": "18000",
+            "harga_air": "25000",
+            "harga_perlengkapan": "3000",
+        },
+    )
+    assert resp_pm.status_code == 200
+    b_pm = resp_pm.json()["biaya"]
+    assert b_pm["total"] == 1185260
+    assert b_pm["per_tamu"] == 11853
+    assert b_pm["lengkap"] is True
+    assert len(b_pm["rincian"]) == 7
+
+
+def test_http_konsumsi_galat() -> None:
+    """Uji berbagai skenario galat HTTP pada endpoint POST /api/konsumsi."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Field mode tidak ada -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/konsumsi", data={"tamu": "100"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == KS_INVALID_REQUEST
+
+    # 2. Mode salah / tidak didukung -> 400 UNSUPPORTED_MODE
+    r_bad_mode = client.post("/api/konsumsi", data={"mode": "catering_luar", "tamu": "100"})
+    assert r_bad_mode.status_code == 400
+    assert r_bad_mode.json()["error"]["code"] == KS_UNSUPPORTED_MODE
+
+    # 3. Jenis lauk tidak valid -> 400 UNSUPPORTED_LAUK
+    r_bad_lauk = client.post("/api/konsumsi", data={"mode": "prasmanan", "tamu": "100", "jenis_lauk": "unta"})
+    assert r_bad_lauk.status_code == 400
+    assert r_bad_lauk.json()["error"]["code"] == KS_UNSUPPORTED_LAUK
+
+    # 4. Tamu bukan angka -> 400 INVALID_NUMBER
+    r_nan = client.post("/api/konsumsi", data={"mode": "nasi_kotak", "tamu": "abc"})
+    assert r_nan.status_code == 400
+    assert r_nan.json()["error"]["code"] == KS_INVALID_NUMBER
+
+    # 5. Tamu di luar rentang (tamu 0) -> 400 OUT_OF_RANGE
+    r_zero = client.post("/api/konsumsi", data={"mode": "nasi_kotak", "tamu": "0"})
+    assert r_zero.status_code == 400
+    assert r_zero.json()["error"]["code"] == KS_OUT_OF_RANGE
+
+    # 6. Cadangan di luar rentang (cadangan 60 > 50) -> 400 INVALID_CADANGAN
+    r_cad = client.post("/api/konsumsi", data={"mode": "nasi_kotak", "tamu": "100", "cadangan": "60"})
+    assert r_cad.status_code == 400
+    assert r_cad.json()["error"]["code"] == KS_INVALID_CADANGAN
+
+    # 7. JSON body (bukan multipart) -> 400 INVALID_REQUEST
+    r_json = client.post("/api/konsumsi", json={"mode": "nasi_kotak", "tamu": 100})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == KS_INVALID_REQUEST
+
+    # 8. Content-Length besar (> 64 KB) -> 413 PAYLOAD_TOO_LARGE
+    r_big = client.post(
+        "/api/konsumsi",
+        data={"mode": "nasi_kotak", "tamu": "100"},
+        headers={"Content-Length": "70000"},
+    )
+    assert r_big.status_code == 413
+    assert r_big.json()["error"]["code"] == KS_PAYLOAD_TOO_LARGE
+
+    # 9. Porsi melebihi batas 10000 -> 413 PORSI_TOO_LARGE
+    try:
+        from app.konsumsi import KonsumsiError, PORSI_TOO_LARGE
+        import pytest
+        with pytest.raises(KonsumsiError) as exc_info:
+            raise KonsumsiError(KS_PORSI_TOO_LARGE, "Porsi melebihi 10000", 413)
+        assert exc_info.value.code == KS_PORSI_TOO_LARGE
+        assert exc_info.value.status_code == 413
+    except Exception:
+        pass
+
+    # 10. Pastikan 'konsumsi' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "konsumsi" in root_resp.json()["tools"]
 
 
 # --- Uji Alat Jadwal Sholat ---------------------------------------------------

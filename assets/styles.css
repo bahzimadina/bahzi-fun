@@ -12196,3 +12196,463 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ==========================================================================
+   Panel Alat: Hitung konsumsi acara (.kk__ / #konsumsi-panel)
+   ========================================================================== */
+#konsumsi-panel {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.kk__controls {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  margin-top: .75rem;
+}
+
+.kk__field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kk__label {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: .15rem;
+}
+
+.kk__radios {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.kk__radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .5rem .85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .9rem;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.kk__radio-label input[type="radio"] {
+  accent-color: var(--md-sys-color-primary);
+  cursor: pointer;
+  margin: 0;
+}
+
+.kk__inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kk__inputs-row--main {
+  grid-template-columns: 1fr 1fr;
+}
+
+.kk__inputs-row--nk {
+  grid-template-columns: 1fr 1fr;
+}
+
+.kk__inputs-row--snack {
+  grid-template-columns: 1fr;
+}
+
+.kk__inputs-row--lauk {
+  grid-template-columns: 1fr;
+}
+
+.kk__inputs-row--prices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .75rem;
+}
+
+@media (max-width: 640px) {
+  .kk__inputs-row,
+  .kk__inputs-row--main,
+  .kk__inputs-row--nk,
+  .kk__inputs-row--prices {
+    grid-template-columns: 1fr;
+    gap: .6rem;
+  }
+}
+
+.kk__prasmanan-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kk__input {
+  width: 100%;
+  padding: .65rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.kk__input:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.kk__select {
+  width: 100%;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: .95rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.kk__select:focus {
+  border-color: var(--md-sys-color-primary);
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.kk__details {
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  padding: .5rem .75rem;
+  box-sizing: border-box;
+}
+
+.kk__summary {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-primary);
+  cursor: pointer;
+  user-select: none;
+  padding: .3rem 0;
+}
+
+.kk__details-body {
+  margin-top: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.kk__sub-hint,
+.kk__hint-text {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.4;
+}
+
+.kk__results {
+  margin-top: 1.25rem;
+  width: 100%;
+}
+
+.kk__hint {
+  padding: 1.25rem;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px dashed var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.kk__hint[hidden] {
+  display: none;
+}
+
+.kk__output-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.kk__output-wrap[hidden] {
+  display: none;
+}
+
+.kk__hero {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+
+.kk__hero-main {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.kk__hero-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  font-family: var(--font-mono);
+  line-height: 1.15;
+}
+
+.kk__hero-symbol {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.kk__sentence {
+  font-size: .95rem;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  margin: .25rem 0 0;
+  line-height: 1.4;
+}
+
+.kk__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kk__stat {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.kk__stat-label {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.kk__stat-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--md-sys-color-on-surface);
+}
+
+.kk__section {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin-top: .2rem;
+}
+
+.kk__section-title {
+  margin: 0;
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.kk__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.kk__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .88rem;
+  text-align: left;
+}
+
+.kk__table th,
+.kk__table td {
+  padding: .65rem .85rem;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.kk__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.kk__table th {
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface-variant);
+  font-weight: 600;
+}
+
+.kk__td-nama {
+  color: var(--md-sys-color-on-surface);
+  font-weight: 500;
+}
+
+.kk__td-jumlah {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--md-sys-color-primary);
+}
+
+.kk__td-satuan {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.kk__biaya-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 640px) {
+  .kk__biaya-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kk__biaya-card {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .85rem 1rem;
+  border-radius: var(--radius);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.kk__biaya-card-label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.kk__biaya-total {
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--md-sys-color-primary);
+}
+
+.kk__biaya-status {
+  font-size: .78rem;
+  line-height: 1.35;
+}
+
+.kk__biaya-status--lengkap {
+  color: #1b7a42;
+}
+
+.kk__biaya-status--parsial {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.kk__biaya-note {
+  font-size: .78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.kk__biaya-list {
+  list-style: none;
+  margin: .35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+.kk__biaya-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .45rem .65rem;
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  font-size: .85rem;
+}
+
+.kk__biaya-item-title {
+  color: var(--md-sys-color-on-surface);
+}
+
+.kk__biaya-item-subtotal {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--md-sys-color-primary);
+}
+
+.kk__notes {
+  margin: .25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: .84rem;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.5;
+}
+
+.kk__notes-item {
+  margin-bottom: .3rem;
+}
+
+.kk__disclaimer {
+  margin: .4rem 0 0;
+  font-size: .82rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.kk__output-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .2rem;
+  flex-wrap: wrap;
+}
+
+@media (pointer: coarse) {
+  #konsumsi-panel input,
+  #konsumsi-panel select,
+  #konsumsi-panel button,
+  #konsumsi-panel .kk__radio-label,
+  .kk__input,
+  .kk__select,
+  .kk__radio-label {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
