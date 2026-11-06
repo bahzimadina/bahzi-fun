@@ -478,6 +478,17 @@ from app.konsumsi import (
     hitung_konsumsi,
     limits_payload as konsumsi_limits_payload_func,
 )
+from app.tabungan import (
+    INVALID_NUMBER as TB_INVALID_NUMBER,
+    INVALID_REQUEST as TB_INVALID_REQUEST,
+    OUT_OF_RANGE as TB_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as TB_PAYLOAD_TOO_LARGE,
+    TARGET_UNREACHABLE as TB_TARGET_UNREACHABLE,
+    UNSUPPORTED_MODE as TB_UNSUPPORTED_MODE,
+    TabunganError,
+    hitung_tabungan,
+    limits_payload as tabungan_limits_payload_func,
+)
 from app.sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -16693,6 +16704,270 @@ def test_http_gambar_pdf_galat() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "gambar-pdf" in root_resp.json()["tools"]
+
+
+def test_tabungan_limits() -> None:
+    """GET /api/tabungan/limits mengembalikan 200, modes, max_body_bytes, dan Cache-Control no-store."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/tabungan/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    data = resp.json()
+    assert "modes" in data
+    assert len(data["modes"]) == 3
+    assert "max_body_bytes" in data
+    assert data["max_body_bytes"] == 65536
+    assert "setoran_awal" in data
+    assert "setoran_bulanan" in data
+    assert "bunga_tahunan" in data
+    assert "lama_tahun" in data
+    assert "target" in data
+
+
+def test_tabungan_logika_murni() -> None:
+    """Uji hitung_tabungan mode 'hasil' langsung: konsistensi saldo, bunga, tabel tahunan, dan loop referensi."""
+    res = hitung_tabungan(
+        mode="hasil",
+        setoran_awal=10_000_000,
+        setoran_bulanan=1_000_000,
+        bunga_tahunan=6.0,
+        lama_tahun=5,
+    )
+    assert res["total_setoran"] == 70_000_000
+    assert res["saldo_akhir"] > 70_000_000
+    assert res["total_bunga"] == res["saldo_akhir"] - res["total_setoran"]
+    assert len(res["tabel_tahunan"]) == 5
+    assert res["tabel_tahunan"][-1]["saldo_akhir"] == res["saldo_akhir"]
+    assert res["tabel_tahunan"][-1]["bunga_kumulatif"] == res["total_bunga"]
+
+    # Loop referensi sederhana terpisah
+    i = 6.0 / 100.0 / 12.0
+    saldo_ref = 10_000_000.0
+    for _ in range(60):
+        saldo_ref = saldo_ref * (1.0 + i) + 1_000_000.0
+    assert res["saldo_akhir"] == int(round(saldo_ref))
+
+
+def test_tabungan_mode_setoran() -> None:
+    """Uji hitung_tabungan mode 'setoran': kelipatan 1000, simulasi ulang >= target, dan target tercapai dari awal."""
+    res = hitung_tabungan(
+        mode="setoran",
+        target=100_000_000,
+        setoran_awal=0,
+        bunga_tahunan=6.0,
+        lama_tahun=5,
+    )
+    disarankan = res["setoran_bulanan_disarankan"]
+    assert disarankan is not None
+    assert disarankan % 1000 == 0
+    assert res["saldo_akhir"] >= 100_000_000
+    assert res["selisih_target"] == res["saldo_akhir"] - 100_000_000
+
+    # Kasus target sudah tercapai dari setoran awal (disarankan 0)
+    res_nol = hitung_tabungan(
+        mode="setoran",
+        target=50_000_000,
+        setoran_awal=60_000_000,
+        bunga_tahunan=6.0,
+        lama_tahun=5,
+    )
+    assert res_nol["setoran_bulanan_disarankan"] == 0
+    assert res_nol["saldo_akhir"] >= 50_000_000
+
+
+def test_tabungan_mode_lama() -> None:
+    """Uji hitung_tabungan mode 'lama': target 50jt, awal 5jt, bulanan 1jt, bunga 3%."""
+    target = 50_000_000
+    setoran_awal = 5_000_000
+    setoran_bulanan = 1_000_000
+    bunga_tahunan = 3.0
+
+    res = hitung_tabungan(
+        mode="lama",
+        target=target,
+        setoran_awal=setoran_awal,
+        setoran_bulanan=setoran_bulanan,
+        bunga_tahunan=bunga_tahunan,
+    )
+    assert res["saldo_akhir"] >= target
+    bulan_capai = res["bulan_ke_target"]
+    assert bulan_capai is not None
+
+    # Verifikasi dengan loop referensi di test: saldo bulan sebelumnya < target
+    i = (bunga_tahunan / 100.0) / 12.0
+    saldo = float(setoran_awal)
+    for m in range(1, bulan_capai):
+        saldo = saldo * (1.0 + i) + setoran_bulanan
+    assert int(round(saldo)) < target
+
+    saldo = saldo * (1.0 + i) + setoran_bulanan
+    assert int(round(saldo)) >= target
+    assert int(round(saldo)) == res["saldo_akhir"]
+
+
+def test_tabungan_galat() -> None:
+    """Uji galat spesifik kalkulator tabungan."""
+    import pytest
+
+    # 1. Mode tidak dikenal
+    with pytest.raises(TabunganError) as exc:
+        hitung_tabungan(mode="investasi_bodong")
+    assert exc.value.code == TB_UNSUPPORTED_MODE
+    assert exc.value.status_code == 400
+
+    # 2. Setoran negatif
+    with pytest.raises(TabunganError) as exc:
+        hitung_tabungan(
+            mode="hasil",
+            setoran_awal=-1000,
+            setoran_bulanan=100000,
+            bunga_tahunan=5,
+            lama_tahun=2,
+        )
+    assert exc.value.code == TB_OUT_OF_RANGE
+
+    # 3. Bunga 40% (di luar rentang 0..30%)
+    with pytest.raises(TabunganError) as exc:
+        hitung_tabungan(
+            mode="hasil",
+            setoran_awal=1000000,
+            setoran_bulanan=100000,
+            bunga_tahunan=40,
+            lama_tahun=2,
+        )
+    assert exc.value.code == TB_OUT_OF_RANGE
+
+    # 4. Field kosong
+    with pytest.raises(TabunganError) as exc:
+        hitung_tabungan(
+            mode="hasil",
+            setoran_awal=None,
+            setoran_bulanan=100000,
+            bunga_tahunan=5,
+            lama_tahun=2,
+        )
+    assert exc.value.code == TB_INVALID_REQUEST
+
+    # 5. Teks sampah
+    with pytest.raises(TabunganError) as exc:
+        hitung_tabungan(
+            mode="hasil",
+            setoran_awal="sepuluh juta",
+            setoran_bulanan=100000,
+            bunga_tahunan=5,
+            lama_tahun=2,
+        )
+    assert exc.value.code == TB_INVALID_NUMBER
+
+    # 6. Target tidak mungkin tercapai dalam 60 tahun (TARGET_UNREACHABLE, 400)
+    with pytest.raises(TabunganError) as exc:
+        hitung_tabungan(
+            mode="lama",
+            target=100_000_000_000,
+            setoran_awal=0,
+            setoran_bulanan=100,
+            bunga_tahunan=0,
+        )
+    assert exc.value.code == TB_TARGET_UNREACHABLE
+    assert exc.value.status_code == 400
+
+
+def test_http_tabungan_sukses_dan_headers() -> None:
+    """POST /api/tabungan multipart sukses -> 200, header X-Processing-Ms, dan no-store."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Mode hasil
+    resp = client.post(
+        "/api/tabungan",
+        data={
+            "mode": "hasil",
+            "setoran_awal": "10.000.000",
+            "setoran_bulanan": "1.000.000",
+            "bunga_tahunan": "6,5",
+            "lama_tahun": "5",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp.headers
+    data = resp.json()
+    assert data["mode"] == "hasil"
+    assert data["saldo_akhir"] > 70_000_000
+    assert len(data["tabel_tahunan"]) == 5
+
+    # Mode setoran
+    resp_setoran = client.post(
+        "/api/tabungan",
+        data={
+            "mode": "setoran",
+            "target": "50.000.000",
+            "setoran_awal": "5.000.000",
+            "bunga_tahunan": "5",
+            "lama_tahun": "3",
+        },
+    )
+    assert resp_setoran.status_code == 200
+    assert resp_setoran.json()["saldo_akhir"] >= 50_000_000
+
+    # Mode lama
+    resp_lama = client.post(
+        "/api/tabungan",
+        data={
+            "mode": "lama",
+            "target": "50.000.000",
+            "setoran_awal": "5.000.000",
+            "setoran_bulanan": "1.000.000",
+            "bunga_tahunan": "3",
+        },
+    )
+    assert resp_lama.status_code == 200
+    assert resp_lama.json()["bulan_ke_target"] == 43
+
+
+def test_http_tabungan_galat() -> None:
+    """Uji penanganan berbagai galat HTTP pada endpoint /api/tabungan."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. JSON body -> 400 INVALID_REQUEST
+    r_json = client.post("/api/tabungan", json={"mode": "hasil", "setoran_awal": "1000000"})
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == "INVALID_REQUEST"
+    assert "multipart/form-data" in r_json.json()["error"]["message"]
+
+    # 2. Field kosong / tanpa mode -> 400 INVALID_REQUEST
+    r_no_mode = client.post("/api/tabungan", data={"setoran_awal": "1000000"})
+    assert r_no_mode.status_code == 400
+    assert r_no_mode.json()["error"]["code"] == "INVALID_REQUEST"
+
+    # 3. Bentuk error body terstandar: {"error": {"code": ..., "message": ...}, "detail": {...}}
+    r_bad_num = client.post(
+        "/api/tabungan",
+        data={
+            "mode": "hasil",
+            "setoran_awal": "uang-banyak",
+            "setoran_bulanan": "1000000",
+            "bunga_tahunan": "5",
+            "lama_tahun": "3",
+        },
+    )
+    assert r_bad_num.status_code == 400
+    body = r_bad_num.json()
+    assert "error" in body
+    assert "code" in body["error"]
+    assert "message" in body["error"]
+    assert "detail" in body
+    assert body["error"]["code"] == "INVALID_NUMBER"
+
+    # 4. Pastikan 'tabungan' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "tabungan" in root_resp.json()["tools"]
 
 
 
