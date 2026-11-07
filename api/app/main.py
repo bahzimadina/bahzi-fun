@@ -430,6 +430,19 @@ from .tabungan import (
     hitung_tabungan,
     limits_payload as tabungan_limits_payload_func,
 )
+from .kalori import (
+    INVALID_NUMBER as KL_INVALID_NUMBER,
+    INVALID_REQUEST as KL_INVALID_REQUEST,
+    OUT_OF_RANGE as KL_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as KL_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_AKTIVITAS as KL_UNSUPPORTED_AKTIVITAS,
+    UNSUPPORTED_JENIS_KELAMIN as KL_UNSUPPORTED_JENIS_KELAMIN,
+    UNSUPPORTED_LAJU as KL_UNSUPPORTED_LAJU,
+    UNSUPPORTED_TARGET as KL_UNSUPPORTED_TARGET,
+    KaloriError,
+    hitung_kalori,
+    limits_payload as kalori_limits_payload_func,
+)
 from .sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -1166,6 +1179,17 @@ async def handle_tabungan_error(request: Request, exc: TabunganError) -> JSONRes
     )
 
 
+@app.exception_handler(KaloriError)
+async def handle_kalori_error(request: Request, exc: KaloriError) -> JSONResponse:
+    """Error hitung kalori yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung kalori ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(SholatError)
 async def handle_sholat_error(request: Request, exc: SholatError) -> JSONResponse:
     """Error alat jadwal sholat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1461,6 +1485,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan 'tamu'."
     elif request.url.path.startswith("/api/tabungan"):
         msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field 'mode' dan angka yang diminta."
+    elif request.url.path.startswith("/api/kalori"):
+        msg = "Permintaan tidak valid. Kirim formulir multipart/form-data dengan field yang diminta."
     elif request.url.path.startswith("/api/sholat"):
         msg = "Permintaan tidak valid. Kirim objek JSON dengan pilihan kota atau koordinat."
     elif request.url.path.startswith("/api/harga-jual"):
@@ -2301,6 +2327,27 @@ def _reject_oversized_tabungan_content_length(request: Request) -> None:
 
 def _tabungan_limits_payload() -> dict:
     return tabungan_limits_payload_func()
+
+
+def _reject_oversized_kalori_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator kalori."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise KaloriError(
+            KL_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _kalori_limits_payload() -> dict:
+    return kalori_limits_payload_func()
 
 
 def _reject_oversized_harga_jual_content_length(request: Request) -> None:
@@ -4851,6 +4898,95 @@ async def tabungan_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/kalori/limits")
+async def kalori_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Kalori."""
+    return JSONResponse(content=_kalori_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/kalori")
+async def kalori_endpoint(
+    request: Request,
+    jenis_kelamin: str = Form(default=None),
+    umur: str = Form(default=None),
+    tinggi: str = Form(default=None),
+    berat: str = Form(default=None),
+    aktivitas: str = Form(default=None),
+    target: str = Form(default=None),
+    laju: str = Form(default=None),
+):
+    """Hitung kebutuhan kalori dan berat badan ideal di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_kalori_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise KaloriError(
+            KL_INVALID_REQUEST,
+            "Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise KaloriError(
+            KL_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    total_form_bytes = sum(len(str(k)) + len(str(v)) for k, v in form.items())
+    if total_form_bytes > 64 * 1024:
+        raise KaloriError(
+            KL_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+    for val in form.values():
+        if hasattr(val, "filename") or isinstance(val, UploadFile):
+            raise KaloriError(
+                KL_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    jenis_kelamin_val = jenis_kelamin if jenis_kelamin is not None else form.get("jenis_kelamin")
+    umur_val = umur if umur is not None else form.get("umur")
+    tinggi_val = tinggi if tinggi is not None else form.get("tinggi")
+    berat_val = berat if berat is not None else form.get("berat")
+    aktivitas_val = aktivitas if aktivitas is not None else form.get("aktivitas")
+    target_val = target if target is not None else form.get("target")
+    laju_val = laju if laju is not None else form.get("laju")
+
+    result = hitung_kalori(
+        jenis_kelamin=jenis_kelamin_val,
+        umur=umur_val,
+        tinggi=tinggi_val,
+        berat=berat_val,
+        aktivitas=aktivitas_val,
+        target=target_val,
+        laju=laju_val,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung kalori selesai: target=%s laju=%s durasi=%.0fms",
+        result["target"],
+        result["laju"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/sholat/limits")
 async def sholat_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk alat Jadwal Sholat."""
@@ -6519,6 +6655,7 @@ async def root() -> dict:
             "cor-beton",
             "konsumsi",
             "tabungan",
+            "kalori",
             "sholat",
             "harga-jual",
             "biaya-perjalanan",

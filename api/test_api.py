@@ -489,6 +489,20 @@ from app.tabungan import (
     hitung_tabungan,
     limits_payload as tabungan_limits_payload_func,
 )
+from app.kalori import (
+    INVALID_NUMBER as KL_INVALID_NUMBER,
+    INVALID_REQUEST as KL_INVALID_REQUEST,
+    OUT_OF_RANGE as KL_OUT_OF_RANGE,
+    PAYLOAD_TOO_LARGE as KL_PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_AKTIVITAS as KL_UNSUPPORTED_AKTIVITAS,
+    UNSUPPORTED_JENIS_KELAMIN as KL_UNSUPPORTED_JENIS_KELAMIN,
+    UNSUPPORTED_LAJU as KL_UNSUPPORTED_LAJU,
+    UNSUPPORTED_TARGET as KL_UNSUPPORTED_TARGET,
+    KaloriError,
+    hitung_kalori,
+    limits_payload as kalori_limits_payload_func,
+    round_half_up as kalori_round_half_up,
+)
 from app.sholat import (
     INVALID_KOORDINAT as SH_INVALID_KOORDINAT,
     INVALID_REQUEST as SH_INVALID_REQUEST,
@@ -16968,6 +16982,498 @@ def test_http_tabungan_galat() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "tabungan" in root_resp.json()["tools"]
+
+
+def test_kalori_limits() -> None:
+    """GET /api/kalori/limits mengembalikan 200, batas, pilihan, dan Cache-Control no-store."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/kalori/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    data = resp.json()
+    assert data["min_umur"] == 15
+    assert data["max_umur"] == 100
+    assert data["min_tinggi"] == 120.0
+    assert data["max_tinggi"] == 230.0
+    assert data["min_berat"] == 30.0
+    assert data["max_berat"] == 300.0
+    assert data["min_kalori_aman"] == 1200
+    assert data["metode"] == "Mifflin-St Jeor"
+    assert data["batas_imt"] == "Asia-Pasifik"
+    assert len(data["jenis_kelamin"]) == 2
+    assert len(data["aktivitas"]) == 5
+    assert len(data["target"]) == 3
+    assert len(data["laju"]) == 3
+
+
+def test_kalori_logika_murni() -> None:
+    """Uji hitung_kalori langsung: pria, wanita, aktivitas, target, IMT, dan batas aman 1.200 kkal."""
+    # 1. Pria normal tetap
+    res_pria = hitung_kalori(
+        jenis_kelamin="pria",
+        umur=25,
+        tinggi=175,
+        berat=70,
+        aktivitas="sedang",
+        target="tetap",
+    )
+    # BMR = 10*70 + 6.25*175 - 5*25 + 5 = 1673.75 -> 1674
+    # TDEE = 1673.75 * 1.55 = 2594.3125 -> 2594
+    assert res_pria["bmr"] == 1674
+    assert res_pria["tdee"] == 2594
+    assert res_pria["kalori_target"] == 2594
+    assert res_pria["selisih_harian"] == 0
+    assert res_pria["imt"] == 22.86
+    assert res_pria["imt_kategori"] == "normal"
+    assert res_pria["berat_ideal_min"] == 56.7
+    assert res_pria["berat_ideal_maks"] == 70.1
+    assert res_pria["berat_sekarang"] == 70.0
+    assert res_pria["selisih_berat_ke_ideal"] is None
+    assert res_pria["perkiraan_minggu"] is None
+    assert res_pria["perkiraan_bulan_teks"] is None
+    assert res_pria["dibatasi"] is False
+    assert res_pria["kg_per_minggu"] is None
+
+    # 2. Wanita turun sedang (kelebihan berat badan)
+    res_wanita = hitung_kalori(
+        jenis_kelamin="wanita",
+        umur=30,
+        tinggi=160,
+        berat=65,
+        aktivitas="ringan",
+        target="turun",
+        laju="sedang",
+    )
+    # BMR = 10*65 + 6.25*160 - 5*30 - 161 = 650 + 1000 - 150 - 161 = 1339
+    # TDEE = 1339 * 1.375 = 1841.125 -> 1841
+    # Kalori target = 1841 - 550 = 1291
+    assert res_wanita["bmr"] == 1339
+    assert res_wanita["tdee"] == 1841
+    assert res_wanita["kalori_target"] == 1291
+    assert res_wanita["selisih_harian"] == 550
+    assert res_wanita["imt"] == 25.39
+    assert res_wanita["imt_kategori"] == "obesitas"
+    assert res_wanita["berat_ideal_maks"] == 58.6
+    assert res_wanita["selisih_berat_ke_ideal"] == 6.4
+    assert res_wanita["perkiraan_minggu"] == 13
+    assert res_wanita["perkiraan_bulan_teks"] == "sekitar 3 sampai 4 bulan"
+    assert res_wanita["dibatasi"] is False
+
+    # 3. Semua tingkat aktivitas
+    for akt, faktor in [("duduk", 1.2), ("ringan", 1.375), ("sedang", 1.55), ("berat", 1.725), ("sangat_berat", 1.9)]:
+        r = hitung_kalori("pria", 30, 170, 70, akt, "tetap")
+        bmr = 10*70 + 6.25*170 - 5*30 + 5  # 1617.5
+        assert r["aktivitas"] == akt
+        assert r["aktivitas_faktor"] == faktor
+        assert r["tdee"] == int(round(bmr * faktor))
+
+    # 4. Target naik dengan berbagai laju
+    # pelan (0.25 kg/mgg -> 275), sedang (0.5 -> 550), cepat (0.75 -> 825)
+    r_pelan = hitung_kalori("pria", 20, 175, 50, "sedang", "naik", "pelan")
+    assert r_pelan["selisih_harian"] == 275
+    assert r_pelan["kalori_target"] == r_pelan["tdee"] + 275
+    assert r_pelan["perkiraan_minggu"] is not None
+
+    r_sedang = hitung_kalori("pria", 20, 175, 50, "sedang", "naik", "sedang")
+    assert r_sedang["selisih_harian"] == 550
+    assert r_sedang["kalori_target"] == r_sedang["tdee"] + 550
+
+    r_cepat = hitung_kalori("pria", 20, 175, 50, "sedang", "naik", "cepat")
+    assert r_cepat["selisih_harian"] == 825
+    assert r_cepat["kalori_target"] == r_cepat["tdee"] + 825
+
+    # 5. Kategori IMT Asia-Pasifik lengkap
+    # < 18.5 kurang ; 18.5..22.9 normal ; 23..24.9 kelebihan ; 25..29.9 obesitas ; >= 30 obesitas berat
+    # Tinggi 170 cm (tinggi_m**2 = 2.89)
+    # Kurang: berat 45 kg -> IMT 15.57
+    assert hitung_kalori("pria", 25, 170, 45, "sedang")["imt_kategori"] == "kurang"
+    # Normal: berat 60 kg -> IMT 20.76
+    assert hitung_kalori("pria", 25, 170, 60, "sedang")["imt_kategori"] == "normal"
+    # Kelebihan: berat 68 kg -> IMT 23.53
+    assert hitung_kalori("pria", 25, 170, 68, "sedang")["imt_kategori"] == "kelebihan"
+    # Obesitas: berat 75 kg -> IMT 25.95
+    assert hitung_kalori("pria", 25, 170, 75, "sedang")["imt_kategori"] == "obesitas"
+    # Obesitas berat: berat 90 kg -> IMT 31.14
+    assert hitung_kalori("pria", 25, 170, 90, "sedang")["imt_kategori"] == "obesitas berat"
+
+    # 6. Pembatasan pengaman 1.200 kkal
+    res_limit = hitung_kalori(
+        jenis_kelamin="wanita",
+        umur=65,
+        tinggi=145,
+        berat=42,
+        aktivitas="duduk",
+        target="turun",
+        laju="cepat",
+    )
+    assert res_limit["kalori_target"] == 1200
+    assert res_limit["dibatasi"] is True
+    assert any("1.200 kkal" in c for c in res_limit["catatan"])
+
+
+def test_kalori_galat() -> None:
+    """Uji penolakan masukan tidak valid pada fungsi hitung_kalori."""
+    import pytest
+
+    # 1. Field wajib kosong -> INVALID_REQUEST
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori(None, 25, 170, 60, "sedang")
+    assert exc.value.code == KL_INVALID_REQUEST
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", None, 170, 60, "sedang")
+    assert exc.value.code == KL_INVALID_REQUEST
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, "", 60, "sedang")
+    assert exc.value.code == KL_INVALID_REQUEST
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, None, "sedang")
+    assert exc.value.code == KL_INVALID_REQUEST
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, 60, "")
+    assert exc.value.code == KL_INVALID_REQUEST
+
+    # 2. Jenis kelamin tidak didukung -> UNSUPPORTED_JENIS_KELAMIN
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("robot", 25, 170, 60, "sedang")
+    assert exc.value.code == KL_UNSUPPORTED_JENIS_KELAMIN
+
+    # 3. Aktivitas tidak didukung -> UNSUPPORTED_AKTIVITAS
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, 60, "maraton")
+    assert exc.value.code == KL_UNSUPPORTED_AKTIVITAS
+
+    # 4. Target tidak didukung -> UNSUPPORTED_TARGET
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, 60, "sedang", target="otot")
+    assert exc.value.code == KL_UNSUPPORTED_TARGET
+
+    # 5. Laju tidak didukung -> UNSUPPORTED_LAJU
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, 60, "sedang", target="turun", laju="kilat")
+    assert exc.value.code == KL_UNSUPPORTED_LAJU
+
+    # 6. Bukan angka -> INVALID_NUMBER
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", "dua puluh", 170, 60, "sedang")
+    assert exc.value.code == KL_INVALID_NUMBER
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25.5, 170, 60, "sedang")
+    assert exc.value.code == KL_INVALID_NUMBER
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, "seratus", 60, "sedang")
+    assert exc.value.code == KL_INVALID_NUMBER
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, "enam puluh", "sedang")
+    assert exc.value.code == KL_INVALID_NUMBER
+
+    # 7. Di luar rentang -> OUT_OF_RANGE
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 14, 170, 60, "sedang")
+    assert exc.value.code == KL_OUT_OF_RANGE
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 101, 170, 60, "sedang")
+    assert exc.value.code == KL_OUT_OF_RANGE
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 119, 60, "sedang")
+    assert exc.value.code == KL_OUT_OF_RANGE
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 231, 60, "sedang")
+    assert exc.value.code == KL_OUT_OF_RANGE
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, 29, "sedang")
+    assert exc.value.code == KL_OUT_OF_RANGE
+
+    with pytest.raises(KaloriError) as exc:
+        hitung_kalori("pria", 25, 170, 301, "sedang")
+    assert exc.value.code == KL_OUT_OF_RANGE
+
+
+def test_http_kalori_sukses_dan_headers() -> None:
+    """POST /api/kalori multipart sukses -> 200, header X-Processing-Ms, no-store, dan format koma."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Kasus pria dengan format koma
+    resp_pria = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "28",
+            "tinggi": "175,5",
+            "berat": "72,5",
+            "aktivitas": "sedang",
+            "target": "turun",
+            "laju": "sedang",
+        },
+    )
+    assert resp_pria.status_code == 200
+    assert "no-store" in resp_pria.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp_pria.headers
+    data_pria = resp_pria.json()
+    assert data_pria["metode"] == "Mifflin-St Jeor"
+    assert data_pria["kalori_target"] > 1200
+    assert data_pria["berat_sekarang"] == 72.5
+
+    # Kasus wanita
+    resp_wanita = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "wanita",
+            "umur": "35",
+            "tinggi": "158",
+            "berat": "52",
+            "aktivitas": "duduk",
+            "target": "tetap",
+        },
+    )
+    assert resp_wanita.status_code == 200
+    data_wanita = resp_wanita.json()
+    assert data_wanita["target"] == "tetap"
+    assert data_wanita["selisih_harian"] == 0
+    assert data_wanita["kg_per_minggu"] is None
+
+    # Pastikan 'kalori' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "kalori" in root_resp.json()["tools"]
+
+
+def test_http_kalori_galat() -> None:
+    """Uji penanganan berbagai galat HTTP pada endpoint /api/kalori."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. JSON body -> 400 INVALID_REQUEST
+    r_json = client.post(
+        "/api/kalori",
+        json={"jenis_kelamin": "pria", "umur": 25, "tinggi": 170, "berat": 60, "aktivitas": "sedang"},
+    )
+    assert r_json.status_code == 400
+    assert r_json.json()["error"]["code"] == "INVALID_REQUEST"
+    assert "multipart/form-data" in r_json.json()["error"]["message"]
+
+    # 2. Field wajib hilang -> 400 INVALID_REQUEST
+    r_no_fields = client.post("/api/kalori", data={"umur": "25"})
+    assert r_no_fields.status_code == 400
+    assert r_no_fields.json()["error"]["code"] == "INVALID_REQUEST"
+
+    # 3. Jenis kelamin tidak didukung -> 400 UNSUPPORTED_JENIS_KELAMIN
+    r_bad_jk = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "cyborg",
+            "umur": "25",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+        },
+    )
+    assert r_bad_jk.status_code == 400
+    assert r_bad_jk.json()["error"]["code"] == "UNSUPPORTED_JENIS_KELAMIN"
+
+    # 4. Aktivitas tidak didukung -> 400 UNSUPPORTED_AKTIVITAS
+    r_bad_akt = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "25",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "rebahan_total",
+        },
+    )
+    assert r_bad_akt.status_code == 400
+    assert r_bad_akt.json()["error"]["code"] == "UNSUPPORTED_AKTIVITAS"
+
+    # 5. Target tidak didukung -> 400 UNSUPPORTED_TARGET
+    r_bad_tgt = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "25",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+            "target": "jadi_atlet",
+        },
+    )
+    assert r_bad_tgt.status_code == 400
+    assert r_bad_tgt.json()["error"]["code"] == "UNSUPPORTED_TARGET"
+
+    # 6. Laju tidak didukung -> 400 UNSUPPORTED_LAJU
+    r_bad_laju = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "25",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+            "target": "turun",
+            "laju": "turbo",
+        },
+    )
+    assert r_bad_laju.status_code == 400
+    assert r_bad_laju.json()["error"]["code"] == "UNSUPPORTED_LAJU"
+
+    # 7. Bukan angka -> 400 INVALID_NUMBER
+    r_bad_num = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "muda",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+        },
+    )
+    assert r_bad_num.status_code == 400
+    assert r_bad_num.json()["error"]["code"] == "INVALID_NUMBER"
+
+    # 8. Di luar rentang -> 400 OUT_OF_RANGE
+    r_oor = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "12",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+        },
+    )
+    assert r_oor.status_code == 400
+    assert r_oor.json()["error"]["code"] == "OUT_OF_RANGE"
+
+    # 9. Unggah berkas -> 400 INVALID_REQUEST
+    r_file = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "25",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+        },
+        files={"file": ("foto.jpg", b"dummy image content", "image/jpeg")},
+    )
+    assert r_file.status_code == 400
+    assert r_file.json()["error"]["code"] == "INVALID_REQUEST"
+
+    # 10. Payload > 64 KB -> 413 PAYLOAD_TOO_LARGE
+    r_large = client.post(
+        "/api/kalori",
+        data={
+            "jenis_kelamin": "pria",
+            "umur": "25",
+            "tinggi": "170",
+            "berat": "60",
+            "aktivitas": "sedang",
+            "ekstra": "x" * (65 * 1024),
+        },
+    )
+    assert r_large.status_code == 413
+    assert r_large.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+
+def test_kalori_pembulatan_half_up() -> None:
+    """Uji pembulatan setengah ke atas (Decimal ROUND_HALF_UP):
+    Kasus pria 35 th, 170 cm, 75 kg, aktivitas sedang, target tetap -> BMR 1643 (bukan 1642).
+    """
+    res = hitung_kalori(
+        jenis_kelamin="pria",
+        umur=35,
+        tinggi=170,
+        berat=75,
+        aktivitas="sedang",
+        target="tetap",
+    )
+    # BMR: 10*75 + 6.25*170 - 5*35 + 5 = 750 + 1062.5 - 175 + 5 = 1642.5 -> dibulatkan ke atas jadi 1643
+    assert res["bmr"] == 1643
+    assert isinstance(res["bmr"], int)
+
+    # TDEE: 1642.5 * 1.55 = 2545.875 -> 2546
+    assert res["tdee"] == 2546
+    assert isinstance(res["tdee"], int)
+
+    # Kalori target (tetap): 2546
+    assert res["kalori_target"] == 2546
+    assert isinstance(res["kalori_target"], int)
+
+    # IMT (2 desimal): 75 / (1.7^2) = 25.95155... -> 25.95
+    assert res["imt"] == 25.95
+    assert isinstance(res["imt"], float)
+
+    # Rentang berat ideal (1 desimal):
+    # min: 18.5 * 2.89 = 53.465 -> 53.5
+    # maks: 22.9 * 2.89 = 66.181 -> 66.2
+    assert res["berat_ideal_min"] == 53.5
+    assert res["berat_ideal_maks"] == 66.2
+    assert isinstance(res["berat_ideal_min"], float)
+    assert isinstance(res["berat_ideal_maks"], float)
+
+    # Berat sekarang & selisih ke ideal (1 desimal):
+    assert res["berat_sekarang"] == 75.0
+    assert res["selisih_berat_ke_ideal"] == 8.8
+    assert isinstance(res["selisih_berat_ke_ideal"], float)
+
+
+def test_kalori_dibatasi_konsistensi() -> None:
+    """Uji konsistensi saat angka target dinaikkan ke batas aman minimum 1.200 kkal."""
+    # Wanita 40 th, 150 cm, 45 kg, duduk, target turun, laju cepat (selisih 825)
+    # BMR = 10*45 + 6.25*150 - 5*40 - 161 = 450 + 937.5 - 200 - 161 = 1026.5 -> 1027
+    # TDEE = 1026.5 * 1.2 = 1231.8 -> 1232
+    # Target raw = 1231.8 - 825 = 406.8 (< 1200), sehingga dinaikkan ke batas aman 1200
+    res = hitung_kalori(
+        jenis_kelamin="wanita",
+        umur=40,
+        tinggi=150,
+        berat=45,
+        aktivitas="duduk",
+        target="turun",
+        laju="cepat",
+    )
+    assert res["kalori_target"] == 1200
+    assert res["dibatasi"] is True
+    assert res["selisih_harian"] == 825
+    assert res["tdee"] == 1232
+    assert any("1.200 kkal" in c for c in res["catatan"])
+
+    # Uji endpoint HTTP tingkat API
+    client = _test_client()
+    if client is not None:
+        resp = client.post(
+            "/api/kalori",
+            data={
+                "jenis_kelamin": "wanita",
+                "umur": "40",
+                "tinggi": "150",
+                "berat": "45",
+                "aktivitas": "duduk",
+                "target": "turun",
+                "laju": "cepat",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["kalori_target"] == 1200
+        assert data["dibatasi"] is True
+        assert data["selisih_harian"] == 825
+        assert any("1.200 kkal" in c for c in data["catatan"])
 
 
 

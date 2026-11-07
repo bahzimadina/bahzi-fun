@@ -92,6 +92,7 @@
         { name: 'Unit Converter', desc: 'Ubah nilai antar satuan panjang, berat, suhu, luas, volume, kecepatan, waktu, dan data.', status: 'available', action: 'unit-converter' },
         { name: 'Simulasi cicilan', desc: 'Hitung perkiraan angsuran tiap bulan, total bunga, dan sisa utang bulan demi bulan.', status: 'available', action: 'cicilan' },
         { name: 'Simulasi tabungan', desc: 'Perkirakan saldo akhir tabungan berbunga, cari setoran bulanan untuk sebuah target, atau lihat berapa lama target itu tercapai.', status: 'available', action: 'tabungan' },
+        { name: 'Hitung kalori', desc: 'Perkirakan kebutuhan kalori harian, IMT, dan rentang berat ideal dari tinggi dan berat badanmu.', status: 'available', action: 'kalori' },
         { name: 'Hitung IPK', desc: 'Hitung IPK dari daftar mata kuliah, lihat predikatnya, dan cek berapa SKS nilai A lagi yang perlu dikejar untuk mencapai target.', status: 'available', action: 'ipk' },
         { name: 'Hitung keramik lantai', desc: 'Hitung jumlah keping dan dus keramik untuk sebuah ruangan, plus perkiraan biayanya.', status: 'available', action: 'keramik' },
         { name: 'Hitung kebutuhan cat', desc: 'Hitung luas dinding yang dicat, liter cat yang dibutuhkan, jumlah kaleng, dan perkiraan biayanya.', status: 'available', action: 'cat' },

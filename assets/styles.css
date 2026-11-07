@@ -12648,6 +12648,10 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #konsumsi-panel select,
   #konsumsi-panel button,
   #konsumsi-panel .kk__radio-label,
+  #kalori-panel input,
+  #kalori-panel select,
+  #kalori-panel button,
+  #kalori-panel label,
   .kk__input,
   .kk__select,
   .kk__radio-label {
