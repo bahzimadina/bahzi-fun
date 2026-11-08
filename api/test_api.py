@@ -204,6 +204,27 @@ from app.pdf_edit import (  # noqa: E402
     parse_order as parse_pdf_edit_order,
     parse_page_range as parse_pdf_edit_page_range,
 )
+from app.pdf_page_numbers import (  # noqa: E402
+    ERR_EMPTY_FILE as PNH_ERR_EMPTY_FILE,
+    ERR_INVALID_FORMAT as PNH_ERR_INVALID_FORMAT,
+    ERR_INVALID_PAGES as PNH_ERR_INVALID_PAGES,
+    ERR_INVALID_POSITION as PNH_ERR_INVALID_POSITION,
+    ERR_INVALID_SIZE as PNH_ERR_INVALID_SIZE,
+    ERR_INVALID_START as PNH_ERR_INVALID_START,
+    ERR_NO_FILE as PNH_ERR_NO_FILE,
+    ERR_NO_PAGES_SELECTED as PNH_ERR_NO_PAGES_SELECTED,
+    ERR_NOT_PDF as PNH_ERR_NOT_PDF,
+    ERR_PAYLOAD_TOO_LARGE as PNH_ERR_PAYLOAD_TOO_LARGE,
+    ERR_PDF_ENCRYPTED as PNH_ERR_PDF_ENCRYPTED,
+    ERR_PDF_UNREADABLE as PNH_ERR_PDF_UNREADABLE,
+    ERR_TOO_MANY_PAGES as PNH_ERR_TOO_MANY_PAGES,
+    MAX_FILE_BYTES as PNH_MAX_FILE_BYTES,
+    MAX_PAGES as PNH_MAX_PAGES,
+    PdfPageNumbersError,
+    PdfPageNumbersResult,
+    add_page_numbers,
+    limits_payload as pdf_page_numbers_limits_payload_func,
+)
 from app.word_count import (  # noqa: E402
     INVALID_REQUEST as WC_INVALID_REQUEST,
     MAX_BYTES as WC_MAX_BYTES,
@@ -17474,6 +17495,400 @@ def test_kalori_dibatasi_konsistensi() -> None:
         assert data["dibatasi"] is True
         assert data["selisih_harian"] == 825
         assert any("1.200 kkal" in c for c in data["catatan"])
+
+
+# --- Uji Beri Nomor Halaman PDF ---------------------------------------------
+def _make_pdf_page_numbers_doc(pages: int = 2, texts: list[str] | None = None) -> bytes:
+    """Buat berkas PDF di memori dengan PyMuPDF untuk pengujian penomoran."""
+    doc = pymupdf.open()
+    for i in range(pages):
+        page = doc.new_page(width=300, height=400)
+        t = (texts[i] if texts and i < len(texts) else f"Halaman konten {i + 1}")
+        page.insert_text((50, 150), t)
+    buf = io.BytesIO()
+    doc.save(buf)
+    data = buf.getvalue()
+    doc.close()
+    return data
+
+
+def _make_pdf_page_numbers_locked() -> bytes:
+    """Buat PDF terproteksi kata sandi dengan PyMuPDF."""
+    doc = pymupdf.open()
+    doc.new_page(width=200, height=200)
+    buf = io.BytesIO()
+    doc.save(
+        buf,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        owner_pw="kuncirahasia",
+        user_pw="kuncirahasia",
+    )
+    data = buf.getvalue()
+    doc.close()
+    return data
+
+
+def _make_pdf_page_numbers_large(pages: int = 301) -> bytes:
+    """Buat dokumen PDF dengan jumlah halaman melebihi batas 300."""
+    doc = pymupdf.open()
+    for _ in range(pages):
+        doc.new_page(width=50, height=50)
+    buf = io.BytesIO()
+    doc.save(buf)
+    data = buf.getvalue()
+    doc.close()
+    return data
+
+
+class TestPdfPageNumbers:
+    """Kelas uji untuk endpoint Beri Nomor Halaman PDF."""
+
+    def test_limits(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        r = client.get("/api/pdf/page-numbers/limits")
+        assert r.status_code == 200, r.text
+        assert "no-store" in r.headers.get("Cache-Control", "")
+        data = r.json()
+        assert data["max_bytes"] == 26214400
+        assert data["max_mb"] == 25
+        assert data["max_pages"] == 300
+        assert data["default_position"] == "bawah-tengah"
+        assert data["default_format"] == "angka"
+        assert len(data["positions"]) == 6
+        assert len(data["formats"]) == 3
+        assert len(data["notes"]) == 4
+
+        r_root = client.get("/")
+        assert r_root.status_code == 200
+        assert "pdf-page-numbers" in r_root.json()["tools"]
+
+    def test_semua_posisi(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        pdf_data = _make_pdf_page_numbers_doc(2)
+        posisi_list = [
+            "bawah-tengah",
+            "bawah-kanan",
+            "bawah-kiri",
+            "atas-tengah",
+            "atas-kanan",
+            "atas-kiri",
+        ]
+        for pos in posisi_list:
+            r = client.post(
+                "/api/pdf/page-numbers",
+                files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+                data={"position": pos},
+            )
+            assert r.status_code == 200, f"Gagal pada posisi {pos}: {r.text}"
+            assert r.headers["content-type"].startswith("application/pdf")
+            assert 'filename="pdf-bernomor.pdf"' in r.headers.get("Content-Disposition", "")
+            assert "no-store" in r.headers.get("Cache-Control", "")
+            assert r.headers.get("X-Pages-Numbered") == "2"
+            doc = pymupdf.open(stream=r.content, filetype="pdf")
+            assert len(doc) == 2
+            doc.close()
+
+    def test_semua_format(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        pdf_data = _make_pdf_page_numbers_doc(2)
+
+        # 1. format 'angka'
+        r1 = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"format": "angka"},
+        )
+        assert r1.status_code == 200, r1.text
+        d1 = pymupdf.open(stream=r1.content, filetype="pdf")
+        assert "1" in d1[0].get_text()
+        assert "2" in d1[1].get_text()
+        d1.close()
+
+        # 2. format 'angka_total'
+        r2 = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"format": "angka_total"},
+        )
+        assert r2.status_code == 200, r2.text
+        d2 = pymupdf.open(stream=r2.content, filetype="pdf")
+        assert "1 / 2" in d2[0].get_text()
+        assert "2 / 2" in d2[1].get_text()
+        d2.close()
+
+        # 3. format 'halaman_dari'
+        r3 = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"format": "halaman_dari"},
+        )
+        assert r3.status_code == 200, r3.text
+        d3 = pymupdf.open(stream=r3.content, filetype="pdf")
+        assert "Halaman 1 dari 2" in d3[0].get_text()
+        assert "Halaman 2 dari 2" in d3[1].get_text()
+        d3.close()
+
+    def test_start_bukan_satu(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        pdf_data = _make_pdf_page_numbers_doc(2)
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"start": "10"},
+        )
+        assert r.status_code == 200, r.text
+        doc = pymupdf.open(stream=r.content, filetype="pdf")
+        assert "10" in doc[0].get_text()
+        assert "11" in doc[1].get_text()
+        doc.close()
+
+    def test_size_8_dan_24(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        pdf_data = _make_pdf_page_numbers_doc(2)
+        for s in ("8", "24"):
+            r = client.post(
+                "/api/pdf/page-numbers",
+                files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+                data={"size": s},
+            )
+            assert r.status_code == 200, f"Gagal pada size {s}: {r.text}"
+
+    def test_pages_filter(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        pdf_5 = _make_pdf_page_numbers_doc(5)
+
+        # pages "1-3"
+        r1 = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_5, "application/pdf"))],
+            data={"pages": "1-3", "format": "angka_total"},
+        )
+        assert r1.status_code == 200, r1.text
+        assert r1.headers.get("X-Pages-Numbered") == "3"
+        d1 = pymupdf.open(stream=r1.content, filetype="pdf")
+        assert "1 / 5" in d1[0].get_text()
+        assert "2 / 5" in d1[1].get_text()
+        assert "3 / 5" in d1[2].get_text()
+        assert "/ 5" not in d1[3].get_text()
+        assert "/ 5" not in d1[4].get_text()
+        d1.close()
+
+        # pages "2-2,5"
+        r2 = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_5, "application/pdf"))],
+            data={"pages": "2-2,5", "format": "angka_total"},
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.headers.get("X-Pages-Numbered") == "2"
+        d2 = pymupdf.open(stream=r2.content, filetype="pdf")
+        assert "/ 5" not in d2[0].get_text()
+        assert "1 / 5" in d2[1].get_text()
+        assert "/ 5" not in d2[2].get_text()
+        assert "/ 5" not in d2[3].get_text()
+        assert "2 / 5" in d2[4].get_text()
+        d2.close()
+
+    def test_verifikasi_teks_dua_halaman(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        distinct_texts = ["KONTEN_HALAMAN_PERTAMA_UNIK", "KONTEN_HALAMAN_KEDUA_UNIK"]
+        pdf_data = _make_pdf_page_numbers_doc(2, texts=distinct_texts)
+
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"format": "halaman_dari", "position": "bawah-tengah", "start": "7"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.headers.get("X-Pages-Numbered") == "2"
+
+        doc = pymupdf.open(stream=r.content, filetype="pdf")
+        assert len(doc) == 2
+
+        txt0 = doc[0].get_text()
+        assert "KONTEN_HALAMAN_PERTAMA_UNIK" in txt0
+        assert "Halaman 7 dari 2" in txt0
+        assert "Halaman 8 dari 2" not in txt0
+
+        txt1 = doc[1].get_text()
+        assert "KONTEN_HALAMAN_KEDUA_UNIK" in txt1
+        assert "Halaman 8 dari 2" in txt1
+        assert "Halaman 7 dari 2" not in txt1
+        doc.close()
+
+    def test_pdf_terkunci(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        locked_pdf = _make_pdf_page_numbers_locked()
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("terkunci.pdf", locked_pdf, "application/pdf"))],
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "PDF_ENCRYPTED"
+
+    def test_berkas_kosong(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("kosong.pdf", b"", "application/pdf"))],
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["error"]["code"] == "EMPTY_FILE"
+
+    def test_bukan_pdf(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        fake_png = b"\x89PNG\r\n\x1a\n" + b"x" * 100
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("gambar.png", fake_png, "image/png"))],
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["error"]["code"] == "NOT_PDF"
+
+    def test_pdf_rusak(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        corrupt = b"%PDF-1.4\nini_bukan_pdf_valid_dan_rusak"
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("rusak.pdf", corrupt, "application/pdf"))],
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "PDF_UNREADABLE"
+
+    def test_terlalu_besar(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        oversized = b"%PDF-1.4\n" + b"A" * (25 * 1024 * 1024 + 1000)
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("besar.pdf", oversized, "application/pdf"))],
+        )
+        assert r.status_code == 413, r.text
+        assert r.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+    def test_terlalu_banyak_halaman(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        large_pdf = _make_pdf_page_numbers_large(301)
+        r = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("banyak.pdf", large_pdf, "application/pdf"))],
+        )
+        assert r.status_code == 413, r.text
+        assert r.json()["error"]["code"] == "TOO_MANY_PAGES"
+
+    def test_parameter_tidak_sah(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+        pdf_data = _make_pdf_page_numbers_doc(2)
+
+        r_pos = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"position": "tengah-kanan"},
+        )
+        assert r_pos.status_code == 400, r_pos.text
+        assert r_pos.json()["error"]["code"] == "INVALID_POSITION"
+
+        r_fmt = client.post(
+            "/api/pdf/page-numbers",
+            files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+            data={"format": "romawi"},
+        )
+        assert r_fmt.status_code == 400, r_fmt.text
+        assert r_fmt.json()["error"]["code"] == "INVALID_FORMAT"
+
+        for s in ("0", "100000", "bukan_angka"):
+            r_start = client.post(
+                "/api/pdf/page-numbers",
+                files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+                data={"start": s},
+            )
+            assert r_start.status_code == 400, f"Gagal tolak start {s}: {r_start.text}"
+            assert r_start.json()["error"]["code"] == "INVALID_START"
+
+        for sz in ("7", "25", "kecil"):
+            r_sz = client.post(
+                "/api/pdf/page-numbers",
+                files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+                data={"size": sz},
+            )
+            assert r_sz.status_code == 400, f"Gagal tolak size {sz}: {r_sz.text}"
+            assert r_sz.json()["error"]["code"] == "INVALID_SIZE"
+
+        for bad_p in ("abc", "0", "3-1", "10", "1,,2"):
+            r_pg = client.post(
+                "/api/pdf/page-numbers",
+                files=[("file", ("dokumen.pdf", pdf_data, "application/pdf"))],
+                data={"pages": bad_p},
+            )
+            assert r_pg.status_code == 400, f"Gagal tolak pages {bad_p}: {r_pg.text}"
+            assert r_pg.json()["error"]["code"] == "INVALID_PAGES"
+
+    def test_tanpa_field_file(self) -> None:
+        client = _test_client()
+        if client is None:
+            return
+
+        r1 = client.post(
+            "/api/pdf/page-numbers",
+            data={"position": "bawah-tengah"},
+        )
+        assert r1.status_code == 400, r1.text
+        assert r1.json()["error"]["code"] in ("NO_FILE", "INVALID_REQUEST")
+
+        r2 = client.post(
+            "/api/pdf/page-numbers",
+            json={"position": "bawah-tengah"},
+        )
+        assert r2.status_code == 400, r2.text
+        assert r2.json()["error"]["code"] == "INVALID_REQUEST"
+        assert "file" in r2.json()["error"]["message"].lower()
+
+
+def test_pdf_page_numbers_suite() -> None:
+    """Jalankan semua uji Beri Nomor Halaman PDF."""
+    suite = TestPdfPageNumbers()
+    suite.test_limits()
+    suite.test_semua_posisi()
+    suite.test_semua_format()
+    suite.test_start_bukan_satu()
+    suite.test_size_8_dan_24()
+    suite.test_pages_filter()
+    suite.test_verifikasi_teks_dua_halaman()
+    suite.test_pdf_terkunci()
+    suite.test_berkas_kosong()
+    suite.test_bukan_pdf()
+    suite.test_pdf_rusak()
+    suite.test_terlalu_besar()
+    suite.test_terlalu_banyak_halaman()
+    suite.test_parameter_tidak_sah()
+    suite.test_tanpa_field_file()
 
 
 

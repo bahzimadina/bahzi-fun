@@ -12643,6 +12643,73 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   flex-wrap: wrap;
 }
 
+/* --- Tool: Beri nomor halaman PDF --- */
+.pnh__file-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .75rem 1rem;
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+  margin-top: .5rem;
+  flex-wrap: wrap;
+}
+
+.pnh__file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  overflow: hidden;
+}
+
+.pnh__file-name {
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  word-break: break-all;
+}
+
+.pnh__file-size {
+  font-size: .85rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-family: var(--font-mono);
+}
+
+.pnh__controls {
+  margin-top: 1rem;
+}
+
+.pnh__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .75rem;
+}
+
+.pnh__field--full {
+  grid-column: 1 / -1;
+}
+
+.pnh__result {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius);
+}
+
+.pnh__result-summary {
+  margin: 0 0 .75rem;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+}
+
+.pnh__result-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
 @media (pointer: coarse) {
   #konsumsi-panel input,
   #konsumsi-panel select,
@@ -12652,6 +12719,10 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #kalori-panel select,
   #kalori-panel button,
   #kalori-panel label,
+  #nomor-halaman-panel input,
+  #nomor-halaman-panel select,
+  #nomor-halaman-panel button,
+  #nomor-halaman-panel label,
   .kk__input,
   .kk__select,
   .kk__radio-label {

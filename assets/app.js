@@ -46,6 +46,7 @@
         { name: 'PDF Splitter', desc: 'Pecah dokumen PDF menjadi beberapa berkas, atau ambil sebagian halamannya.', status: 'available', href: '/pisah-pdf/' },
         { name: 'PDF Merger', desc: 'Gabungkan beberapa PDF jadi satu berkas (diproses di server).', status: 'available', action: 'pdf-merge' },
         { name: 'PDF Editor', desc: 'Putar orientasi, hapus halaman, atau susun ulang urutan halaman dokumen PDF.', status: 'available', href: '/editor-pdf/' },
+        { name: 'Beri nomor halaman', desc: 'Tempel nomor halaman ke dokumen PDF, pilih posisi dan nomor awalnya.', status: 'available', action: 'nomor-halaman' },
         { name: 'PDF ke gambar', desc: 'Ubah setiap halaman PDF menjadi gambar PNG atau JPG, bisa diunduh satu per satu atau sekaligus.', status: 'available', href: '/pdf-ke-gambar/' },
         { name: 'Kompres PDF', desc: 'Perkecil ukuran berkas PDF sampai jauh lebih ringan, dengan pilihan tingkat kompresi.', status: 'available', href: '/kompres-pdf/' },
         { name: 'Gambar jadi PDF', desc: 'Susun beberapa foto atau hasil pindai jadi satu berkas PDF, tiap gambar satu halaman.', status: 'available', action: 'gambar-pdf' }

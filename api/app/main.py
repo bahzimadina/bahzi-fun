@@ -180,6 +180,14 @@ from .pdf_edit import (
     edit_pdf,
     limits_payload as pdf_edit_limits_payload,
 )
+from .pdf_page_numbers import (
+    MAX_FILE_BYTES as PAGE_NUMBERS_MAX_FILE_BYTES,
+    MAX_PAGES as PAGE_NUMBERS_MAX_PAGES,
+    PdfPageNumbersError,
+    PdfPageNumbersResult,
+    add_page_numbers,
+    limits_payload as pdf_page_numbers_limits_payload,
+)
 from .case_convert import (
     CHUNK_SIZE as CC_CHUNK_SIZE,
     MAX_BYTES as CC_MAX_BYTES,
@@ -957,6 +965,17 @@ async def handle_pdf_edit_error(request: Request, exc: PdfEditError) -> JSONResp
     )
 
 
+@app.exception_handler(PdfPageNumbersError)
+async def handle_pdf_page_numbers_error(request: Request, exc: PdfPageNumbersError) -> JSONResponse:
+    """Error beri nomor halaman PDF yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("pdf nomor halaman ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(ImageConvertError)
 async def handle_image_error(request: Request, exc: ImageConvertError) -> JSONResponse:
     """Error konversi gambar yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -1469,6 +1488,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/edit"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
+    elif request.url.path.startswith("/api/pdf/page-numbers"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/compress"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'mode'."
     elif request.url.path.startswith("/api/pdf/split"):
@@ -2728,6 +2749,23 @@ def _listrik_limits_payload() -> dict:
     return listrik_limits_payload_func()
 
 
+def _reject_oversized_pdf_page_numbers_content_length(request: Request) -> None:
+    """Tolak lebih awal bila header Content-Length sudah jelas melebihi batas 25 MB."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > PAGE_NUMBERS_MAX_FILE_BYTES + CONTENT_LENGTH_SLACK:
+        raise PdfPageNumbersError(
+            "PAYLOAD_TOO_LARGE",
+            f"Ukuran berkas melebihi batas {PAGE_NUMBERS_MAX_FILE_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
 # --- Endpoint -----------------------------------------------------------------
 @app.get("/health")
 async def health() -> dict:
@@ -3066,6 +3104,64 @@ async def pdf_edit_endpoint(
         "X-Source-Pages": str(result.source_pages),
         "X-Result-Pages": str(result.result_pages),
         "X-Affected-Pages": str(result.affected_pages),
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
+@app.get("/api/pdf/page-numbers/limits")
+async def pdf_page_numbers_limits() -> JSONResponse:
+    """Batas dan opsi yang berlaku untuk Beri Nomor Halaman PDF."""
+    return JSONResponse(content=pdf_page_numbers_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/pdf/page-numbers")
+async def pdf_page_numbers_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    position: str | None = Form(default=None),
+    format: str | None = Form(default=None),
+    start: str | None = Form(default=None),
+    size: str | None = Form(default=None),
+    pages: str | None = Form(default=None),
+):
+    """Beri nomor halaman pada dokumen PDF."""
+    started = time.perf_counter()
+
+    _reject_oversized_pdf_page_numbers_content_length(request)
+
+    if file is None:
+        raise PdfPageNumbersError("NO_FILE", "Tidak ada berkas yang dikirim. Sertakan berkas PDF pada field 'file'.", 400)
+
+    try:
+        data = await _read_capped(file, PAGE_NUMBERS_MAX_FILE_BYTES)
+    except PdfMergeError:
+        raise PdfPageNumbersError("PAYLOAD_TOO_LARGE", "Ukuran berkas melebihi batas 25 MB.", 413)
+
+    result = add_page_numbers(
+        data,
+        position=position,
+        format_val=format,
+        start=start,
+        size=size,
+        pages=pages,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "pdf nomor halaman selesai: total_halaman=%d bernomor=%d nomor_awal=%d durasi=%.0fms",
+        result.total_pages,
+        result.numbered_pages,
+        result.start_number,
+        duration_ms,
+    )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "Cache-Control": "no-store",
+        "X-Pages-Numbered": str(result.numbered_pages),
+        "X-Total-Pages": str(result.total_pages),
+        "X-Start-Number": str(result.start_number),
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type=result.mime_type, headers=headers)
@@ -6674,6 +6770,7 @@ async def root() -> dict:
             "audio-extract",
             "video-reverse",
             "gambar-pdf",
+            "pdf-page-numbers",
         ],
     }
 
