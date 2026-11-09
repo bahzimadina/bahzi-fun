@@ -77,7 +77,8 @@
         { name: 'Jadwal sholat', desc: 'Lihat waktu sholat hari ini untuk kotamu, lengkap dengan hitung mundur ke waktu berikutnya.', status: 'available', action: 'sholat' },
         { name: 'Time Zone Converter', desc: 'Lihat jam yang sama di beberapa kota, konversi antar zona waktu, dan cari jam rapat yang cocok.', status: 'available', action: 'timezone' },
         { name: 'Countdown Timer', desc: 'Hitung mundur ke tanggal atau waktu tertentu, berdetak tiap detik.', status: 'available', action: 'countdown' },
-        { name: 'Pomodoro Timer', desc: 'Susun jadwal fokus dan istirahat, lalu jalankan penghitung waktunya.', status: 'available', action: 'pomodoro' }
+        { name: 'Pomodoro Timer', desc: 'Susun jadwal fokus dan istirahat, lalu jalankan penghitung waktunya.', status: 'available', action: 'pomodoro' },
+        { name: 'Bagi giliran tugas', desc: 'Susun jadwal giliran piket dari daftar nama, harian atau mingguan, lalu salin atau unduh jadwalnya.', status: 'available', action: 'giliran' }
       ]
     },
     {

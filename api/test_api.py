@@ -426,6 +426,24 @@ from app.percent_calc import (
     limits_payload as percent_calc_limits_payload_func,
     parse_number as parse_percent_number,
 )
+from app.giliran import (
+    INVALID_DATE as GL_TEST_INVALID_DATE,
+    INVALID_PER_SLOT as GL_TEST_INVALID_PER_SLOT,
+    INVALID_REQUEST as GL_TEST_INVALID_REQUEST,
+    INVALID_SEED as GL_TEST_INVALID_SEED,
+    INVALID_SLOTS as GL_TEST_INVALID_SLOTS,
+    NAME_TOO_LONG as GL_TEST_NAME_TOO_LONG,
+    NO_NAMES as GL_TEST_NO_NAMES,
+    PAYLOAD_TOO_LARGE as GL_TEST_PAYLOAD_TOO_LARGE,
+    TEXT_TOO_LONG as GL_TEST_TEXT_TOO_LONG,
+    TOO_MANY_ASSIGNMENTS as GL_TEST_TOO_MANY_ASSIGNMENTS,
+    TOO_MANY_NAMES as GL_TEST_TOO_MANY_NAMES,
+    UNSUPPORTED_MODE as GL_TEST_UNSUPPORTED_MODE,
+    UNSUPPORTED_ORDER as GL_TEST_UNSUPPORTED_ORDER,
+    GiliranError,
+    bagi_giliran,
+    limits_payload as giliran_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -17889,6 +17907,564 @@ def test_pdf_page_numbers_suite() -> None:
     suite.test_terlalu_banyak_halaman()
     suite.test_parameter_tidak_sah()
     suite.test_tanpa_field_file()
+
+
+# --- Uji Bagi Giliran Tugas (giliran) ---------------------------------------
+def test_giliran_limits_200() -> None:
+    data = giliran_limits_payload()
+    wajib_keys = [
+        "max_names",
+        "min_names",
+        "max_name_chars",
+        "max_slots",
+        "min_slots",
+        "max_per_slot",
+        "min_per_slot",
+        "max_text_chars",
+        "modes",
+        "orders",
+        "default_mode",
+        "default_order",
+        "default_per_slot",
+        "default_slots",
+        "default_tanggal_mulai",
+        "timeout_seconds",
+        "notes",
+        "processed_on",
+    ]
+    for k in wajib_keys:
+        assert k in data, f"Kunci wajib {k} tidak ada di limits_payload"
+    assert data["max_names"] == 100
+    assert data["min_names"] == 1
+    assert data["max_slots"] == 200
+    assert data["min_slots"] == 1
+    assert data["max_per_slot"] == 20
+    assert data["min_per_slot"] == 1
+    assert data["max_text_chars"] == 20000
+    assert data["processed_on"] == "server"
+    assert len(data["modes"]) == 2
+    assert len(data["orders"]) == 3
+
+
+def test_giliran_harian_dasar() -> None:
+    names = "Ani\nBudi\nCitra\nDewi\nEko"
+    res = bagi_giliran(
+        names=names,
+        mode="harian",
+        per_slot=2,
+        slots=6,
+        tanggal_mulai="2026-11-09",
+        urutan="maju",
+        lewati_akhir_pekan=False,
+    )
+    assert res["mode"] == "harian"
+    assert res["urutan"] == "maju"
+    assert res["seed"] is None
+    assert res["jumlah_nama"] == 5
+    assert res["duplikat_dibuang"] == 0
+    assert res["jumlah_giliran"] == 6
+    assert res["tanggal_mulai"] == "2026-11-09"
+    assert res["lewati_akhir_pekan"] is False
+    assert res["lewati_akhir_pekan_dipakai"] is False
+
+    giliran = res["giliran"]
+    assert len(giliran) == 6
+
+    # Giliran 1 = 2 nama pertama
+    assert giliran[0]["nomor"] == 1
+    assert giliran[0]["orang"] == ["Ani", "Budi"]
+    assert giliran[0]["tanggal"] == "2026-11-09"
+    assert giliran[0]["tanggal_selesai"] == "2026-11-09"
+    assert giliran[0]["label"] == "Senin, 9 November 2026"
+
+    # Tanggal berurutan
+    expected_dates = [
+        "2026-11-09",
+        "2026-11-10",
+        "2026-11-11",
+        "2026-11-12",
+        "2026-11-13",
+        "2026-11-14",
+    ]
+    for idx, expected in enumerate(expected_dates):
+        assert giliran[idx]["tanggal"] == expected
+        assert giliran[idx]["tanggal_selesai"] == expected
+
+    # Verifikasi urutan giliran round-robin
+    assert giliran[1]["orang"] == ["Citra", "Dewi"]
+    assert giliran[2]["orang"] == ["Eko", "Ani"]
+    assert giliran[3]["orang"] == ["Budi", "Citra"]
+    assert giliran[4]["orang"] == ["Dewi", "Eko"]
+    assert giliran[5]["orang"] == ["Ani", "Budi"]
+
+    assert len(res["catatan"]) >= 2
+
+
+def test_giliran_lewati_akhir_pekan() -> None:
+    # 2026-11-13 adalah hari Jumat
+    names = "Ani\nBudi\nCitra\nDewi"
+    res = bagi_giliran(
+        names=names,
+        mode="harian",
+        per_slot=2,
+        slots=2,
+        tanggal_mulai="2026-11-13",
+        lewati_akhir_pekan=True,
+    )
+    assert res["lewati_akhir_pekan_dipakai"] is True
+    assert res["giliran"][0]["tanggal"] == "2026-11-13"
+    assert res["giliran"][0]["label"] == "Jumat, 13 November 2026"
+
+    # Giliran ke-2 harus melompati Sabtu & Minggu -> Senin 16 November 2026
+    assert res["giliran"][1]["tanggal"] == "2026-11-16"
+    assert res["giliran"][1]["label"] == "Senin, 16 November 2026"
+
+    # Jika mulai Sabtu (2026-11-14), otomatis maju ke Senin (2026-11-16)
+    res_sabtu = bagi_giliran(
+        names=names,
+        mode="harian",
+        per_slot=2,
+        slots=1,
+        tanggal_mulai="2026-11-14",
+        lewati_akhir_pekan=True,
+    )
+    assert res_sabtu["giliran"][0]["tanggal"] == "2026-11-16"
+
+
+def test_giliran_mode_mingguan() -> None:
+    names = "Ani\nBudi\nCitra"
+    res = bagi_giliran(
+        names=names,
+        mode="mingguan",
+        per_slot=1,
+        slots=4,
+        tanggal_mulai="2026-11-09",
+        lewati_akhir_pekan=True,
+    )
+    assert res["mode"] == "mingguan"
+    assert res["lewati_akhir_pekan_dipakai"] is False
+    assert len(res["giliran"]) == 4
+
+    # Slot 1: 9 - 15 November 2026 (+6 hari)
+    assert res["giliran"][0]["nomor"] == 1
+    assert res["giliran"][0]["minggu_ke"] == 1
+    assert res["giliran"][0]["tanggal"] == "2026-11-09"
+    assert res["giliran"][0]["tanggal_selesai"] == "2026-11-15"
+    assert res["giliran"][0]["label"] == "9 - 15 November 2026"
+
+    # Slot 2: minggu_ke naik, tanggal +7 hari
+    assert res["giliran"][1]["nomor"] == 2
+    assert res["giliran"][1]["minggu_ke"] == 2
+    assert res["giliran"][1]["tanggal"] == "2026-11-16"
+    assert res["giliran"][1]["tanggal_selesai"] == "2026-11-22"
+    assert res["giliran"][1]["label"] == "16 - 22 November 2026"
+
+    # Beda bulan: mulai 30 November 2026
+    res_beda_bulan = bagi_giliran(
+        names=names,
+        mode="mingguan",
+        per_slot=1,
+        slots=1,
+        tanggal_mulai="2026-11-30",
+    )
+    assert res_beda_bulan["giliran"][0]["tanggal"] == "2026-11-30"
+    assert res_beda_bulan["giliran"][0]["tanggal_selesai"] == "2026-12-06"
+    assert res_beda_bulan["giliran"][0]["label"] == "30 November - 6 Desember 2026"
+
+
+def test_giliran_urutan_acak_dan_seed() -> None:
+    names = "Ani\nBudi\nCitra\nDewi\nEko\nFani\nGita\nHadi"
+    # Seed sama -> urutan identik
+    res1 = bagi_giliran(names=names, urutan="acak", seed=987654321, slots=5, per_slot=2)
+    res2 = bagi_giliran(names=names, urutan="acak", seed=987654321, slots=5, per_slot=2)
+
+    assert res1["seed"] == 987654321
+    assert res2["seed"] == 987654321
+    assert res1["giliran"] == res2["giliran"]
+    assert res1["hitungan"] == res2["hitungan"]
+
+    # Seed kosong -> server membuat sendiri dan melaporkan di respons
+    res_auto = bagi_giliran(names=names, urutan="acak", seed=None, slots=3, per_slot=2)
+    assert res_auto["seed"] is not None
+    assert isinstance(res_auto["seed"], int)
+    assert 0 <= res_auto["seed"] <= 4294967295
+
+    # Ulangi dengan seed yang dilaporkan
+    res_replay = bagi_giliran(names=names, urutan="acak", seed=res_auto["seed"], slots=3, per_slot=2)
+    assert res_replay["giliran"] == res_auto["giliran"]
+
+    # Urutan mundur
+    res_mundur = bagi_giliran(names="Ani\nBudi\nCitra", urutan="mundur", slots=1, per_slot=2)
+    assert res_mundur["giliran"][0]["orang"] == ["Citra", "Budi"]
+
+
+def test_giliran_pembagian_rata() -> None:
+    # 5 nama, 1 orang/giliran, 10 giliran -> setiap nama 2 kali
+    names = "Ani\nBudi\nCitra\nDewi\nEko"
+    res = bagi_giliran(names=names, per_slot=1, slots=10)
+    assert res["jumlah_nama"] == 5
+    assert res["jumlah_giliran"] == 10
+    assert len(res["hitungan"]) == 5
+    for h in res["hitungan"]:
+        assert h["kali"] == 2
+        assert len(h["giliran"]) == 2
+
+
+def test_giliran_duplikat_dibuang() -> None:
+    names = "  Ani  \nBudi\nani\nBUDI\nCitra\n  citra  "
+    res = bagi_giliran(names=names, per_slot=1, slots=3)
+    assert res["jumlah_nama"] == 3
+    assert res["duplikat_dibuang"] == 3
+    # Urutan nama pertama dipertahankan
+    orang_pertama = [h["nama"] for h in res["hitungan"]]
+    assert set(orang_pertama) == {"Ani", "Budi", "Citra"}
+
+
+def test_giliran_nama_unik_per_giliran() -> None:
+    # 1 nama dengan per_slot 2
+    res1 = bagi_giliran(names="Ani", mode="harian", per_slot=2, slots=2)
+    assert res1["jumlah_nama"] == 1
+    assert res1["per_slot"] == 2
+    assert len(res1["giliran"]) == 2
+    for slot in res1["giliran"]:
+        assert slot["orang"] == ["Ani"]
+        assert len(slot["orang"]) == len(set(slot["orang"]))
+    assert len(res1["hitungan"]) == 1
+    assert res1["hitungan"][0]["nama"] == "Ani"
+    assert res1["hitungan"][0]["kali"] == 2
+    assert res1["hitungan"][0]["giliran"] == [1, 2]
+    pesan_catatan = "Jumlah nama lebih sedikit daripada orang per giliran, jadi tiap giliran diisi semua nama yang ada."
+    assert pesan_catatan in res1["catatan"]
+
+    # 2 nama dengan per_slot 5
+    res2 = bagi_giliran(names="Ani\nBudi", mode="harian", per_slot=5, slots=2)
+    assert res2["jumlah_nama"] == 2
+    assert res2["per_slot"] == 5
+    assert len(res2["giliran"]) == 2
+    assert res2["giliran"][0]["orang"] == ["Ani", "Budi"]
+    assert res2["giliran"][1]["orang"] == ["Budi", "Ani"]
+    for slot in res2["giliran"]:
+        assert len(slot["orang"]) == 2
+        assert len(slot["orang"]) == len(set(slot["orang"]))
+    hitungan_dict = {h["nama"]: h for h in res2["hitungan"]}
+    assert hitungan_dict["Ani"]["kali"] == 2
+    assert hitungan_dict["Ani"]["giliran"] == [1, 2]
+    assert hitungan_dict["Budi"]["kali"] == 2
+    assert hitungan_dict["Budi"]["giliran"] == [1, 2]
+    assert pesan_catatan in res2["catatan"]
+
+    # Pastikan catatan tidak muncul jika jumlah_nama >= per_slot
+    res3 = bagi_giliran(names="Ani\nBudi", mode="harian", per_slot=2, slots=2)
+    assert pesan_catatan not in res3["catatan"]
+
+
+def test_giliran_galat_logika() -> None:
+    # NO_NAMES
+    try:
+        bagi_giliran(names="")
+        assert False, "Harus gagal NO_NAMES"
+    except GiliranError as e:
+        assert e.code == GL_TEST_NO_NAMES
+        assert e.status_code == 400
+
+    try:
+        bagi_giliran(names="   \n   \n   ")
+        assert False, "Harus gagal NO_NAMES"
+    except GiliranError as e:
+        assert e.code == GL_TEST_NO_NAMES
+
+    # TOO_MANY_NAMES (batas 100)
+    many_names = "\n".join(f"OrangKe{i}" for i in range(101))
+    try:
+        bagi_giliran(names=many_names)
+        assert False, "Harus gagal TOO_MANY_NAMES"
+    except GiliranError as e:
+        assert e.code == GL_TEST_TOO_MANY_NAMES
+        assert e.status_code == 400
+
+    # NAME_TOO_LONG (panjang > 40 karakter)
+    try:
+        bagi_giliran(names="Ani\n" + "A" * 41)
+        assert False, "Harus gagal NAME_TOO_LONG"
+    except GiliranError as e:
+        assert e.code == GL_TEST_NAME_TOO_LONG
+        assert e.status_code == 400
+
+    # UNSUPPORTED_MODE
+    try:
+        bagi_giliran(names="Ani\nBudi", mode="bulanan")
+        assert False, "Harus gagal UNSUPPORTED_MODE"
+    except GiliranError as e:
+        assert e.code == GL_TEST_UNSUPPORTED_MODE
+        assert e.status_code == 400
+        assert e.message == "Mode yang dipilih tidak dikenal. Pilih harian atau mingguan."
+
+    # UNSUPPORTED_ORDER
+    try:
+        bagi_giliran(names="Ani\nBudi", urutan="diagonal")
+        assert False, "Harus gagal UNSUPPORTED_ORDER"
+    except GiliranError as e:
+        assert e.code == GL_TEST_UNSUPPORTED_ORDER
+        assert e.status_code == 400
+        assert e.message == "Urutan yang dipilih tidak dikenal. Pilih maju, mundur, atau acak."
+
+    # INVALID_PER_SLOT
+    for bad_slot in [0, 21, "bukan_angka"]:
+        try:
+            bagi_giliran(names="Ani\nBudi", per_slot=bad_slot)
+            assert False, f"Harus gagal INVALID_PER_SLOT: {bad_slot}"
+        except GiliranError as e:
+            assert e.code == GL_TEST_INVALID_PER_SLOT
+            assert e.status_code == 400
+
+    # INVALID_SLOTS
+    for bad_slot in [0, 201, "bukan_angka"]:
+        try:
+            bagi_giliran(names="Ani\nBudi", slots=bad_slot)
+            assert False, f"Harus gagal INVALID_SLOTS: {bad_slot}"
+        except GiliranError as e:
+            assert e.code == GL_TEST_INVALID_SLOTS
+            assert e.status_code == 400
+
+    # TOO_MANY_ASSIGNMENTS (slots * per_slot > 2000)
+    try:
+        bagi_giliran(names="Ani\nBudi", slots=200, per_slot=11)
+        assert False, "Harus gagal TOO_MANY_ASSIGNMENTS"
+    except GiliranError as e:
+        assert e.code == GL_TEST_TOO_MANY_ASSIGNMENTS
+        assert e.status_code == 400
+
+    # INVALID_DATE
+    for bad_date in ["bukan_tanggal", "2026-02-31", "1999-12-31", "2101-01-01"]:
+        try:
+            bagi_giliran(names="Ani\nBudi", tanggal_mulai=bad_date)
+            assert False, f"Harus gagal INVALID_DATE: {bad_date}"
+        except GiliranError as e:
+            assert e.code == GL_TEST_INVALID_DATE
+            assert e.status_code == 400
+
+    # INVALID_SEED
+    for bad_seed in [-1, 5000000000, "bukan_seed"]:
+        try:
+            bagi_giliran(names="Ani\nBudi", urutan="acak", seed=bad_seed)
+            assert False, f"Harus gagal INVALID_SEED: {bad_seed}"
+        except GiliranError as e:
+            assert e.code == GL_TEST_INVALID_SEED
+            assert e.status_code == 400
+
+    # TEXT_TOO_LONG (teks > 20.000 karakter)
+    long_names = "A" + ("\n" + "B") * 50 + " " * 20000
+    try:
+        bagi_giliran(names=long_names)
+        assert False, "Harus gagal TEXT_TOO_LONG"
+    except GiliranError as e:
+        assert e.code == GL_TEST_TEXT_TOO_LONG
+        assert e.status_code == 400
+
+    # PAYLOAD_TOO_LARGE (> 64 KB, 413)
+    oversized_text = "A\n" + "x" * (65 * 1024)
+    try:
+        bagi_giliran(names=oversized_text)
+        assert False, "Harus gagal PAYLOAD_TOO_LARGE"
+    except GiliranError as e:
+        assert e.code == GL_TEST_PAYLOAD_TOO_LARGE
+        assert e.status_code == 413
+
+
+def test_giliran_http_endpoints() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # GET /api/giliran/limits
+    resp_limits = client.get("/api/giliran/limits")
+    assert resp_limits.status_code == 200
+    assert "no-store" in resp_limits.headers.get("Cache-Control", "")
+    body_limits = resp_limits.json()
+    assert body_limits["max_names"] == 100
+    assert body_limits["max_slots"] == 200
+    assert body_limits["processed_on"] == "server"
+
+    # POST /api/giliran sukses
+    resp_post = client.post(
+        "/api/giliran",
+        data={
+            "names": "Ani\nBudi\nCitra\nDewi",
+            "mode": "harian",
+            "per_slot": "2",
+            "slots": "4",
+            "tanggal_mulai": "2026-11-09",
+            "urutan": "maju",
+            "lewati_akhir_pekan": "true",
+        },
+    )
+    assert resp_post.status_code == 200
+    assert "no-store" in resp_post.headers.get("Cache-Control", "")
+    assert resp_post.headers.get("Pragma") == "no-cache"
+    assert "X-Processing-Ms" in resp_post.headers
+
+    body_post = resp_post.json()
+    assert body_post["mode"] == "harian"
+    assert body_post["jumlah_nama"] == 4
+    assert body_post["jumlah_giliran"] == 4
+    assert len(body_post["giliran"]) == 4
+    assert len(body_post["hitungan"]) == 4
+
+
+def test_giliran_http_galat() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    # Tolak JSON
+    resp_json = client.post(
+        "/api/giliran",
+        json={"names": "Ani\nBudi"},
+    )
+    assert resp_json.status_code == 400
+    assert resp_json.json()["error"]["code"] == GL_TEST_INVALID_REQUEST
+
+    # Tolak UploadFile
+    resp_file = client.post(
+        "/api/giliran",
+        files={"names": ("names.txt", b"Ani\nBudi", "text/plain")},
+    )
+    assert resp_file.status_code == 400
+    assert resp_file.json()["error"]["code"] == GL_TEST_INVALID_REQUEST
+
+    # Tolak body kelewat besar (> 64 KB, 413)
+    resp_oversized = client.post(
+        "/api/giliran",
+        headers={"Content-Length": str(70 * 1024)},
+        data={"names": "Ani"},
+    )
+    assert resp_oversized.status_code == 413
+    assert resp_oversized.json()["error"]["code"] == GL_TEST_PAYLOAD_TOO_LARGE
+
+    # NO_NAMES
+    resp_no_names = client.post(
+        "/api/giliran",
+        data={"names": ""},
+    )
+    assert resp_no_names.status_code == 400
+    assert resp_no_names.json()["error"]["code"] == GL_TEST_NO_NAMES
+
+
+def test_giliran_bawaan_tanpa_mode_dan_urutan() -> None:
+    # Tanpa mode & urutan (None, string kosong, spasi) -> default harian dan maju
+    res_none = bagi_giliran(names="Ani\nBudi", mode=None, urutan=None)
+    assert res_none["mode"] == "harian"
+    assert res_none["urutan"] == "maju"
+
+    res_empty = bagi_giliran(names="Ani\nBudi", mode="", urutan="")
+    assert res_empty["mode"] == "harian"
+    assert res_empty["urutan"] == "maju"
+
+    res_spaces = bagi_giliran(names="Ani\nBudi", mode="   ", urutan="   ")
+    assert res_spaces["mode"] == "harian"
+    assert res_spaces["urutan"] == "maju"
+
+
+def test_giliran_bawaan_hanya_names_per_slot_slots() -> None:
+    # Hanya names + per_slot + slots -> sukses dengan default mode harian & urutan maju
+    res = bagi_giliran(names="Ani\nBudi\nCitra", per_slot=1, slots=3)
+    assert res["mode"] == "harian"
+    assert res["urutan"] == "maju"
+    assert res["per_slot"] == 1
+    assert res["jumlah_giliran"] == 3
+    assert len(res["giliran"]) == 3
+    assert res["giliran"][0]["orang"] == ["Ani"]
+    assert res["giliran"][1]["orang"] == ["Budi"]
+    assert res["giliran"][2]["orang"] == ["Citra"]
+
+
+def test_giliran_bawaan_per_slot_dan_slots_kosong() -> None:
+    # per_slot kosong dan slots kosong -> memakai 2 dan 8
+    res_none = bagi_giliran(names="Ani\nBudi", per_slot=None, slots=None)
+    assert res_none["per_slot"] == 2
+    assert res_none["jumlah_giliran"] == 8
+    assert len(res_none["giliran"]) == 8
+
+    res_empty = bagi_giliran(names="Ani\nBudi", per_slot="", slots="")
+    assert res_empty["per_slot"] == 2
+    assert res_empty["jumlah_giliran"] == 8
+
+    res_spaces = bagi_giliran(names="Ani\nBudi", per_slot="   ", slots="   ")
+    assert res_spaces["per_slot"] == 2
+    assert res_spaces["jumlah_giliran"] == 8
+
+
+def test_giliran_bawaan_http_tanpa_mode_urutan() -> None:
+    # Uji HTTP tanpa field mode/urutan via TestClient
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Hanya names
+    r1 = client.post("/api/giliran", data={"names": "Ani\nBudi"})
+    assert r1.status_code == 200
+    b1 = r1.json()
+    assert b1["mode"] == "harian"
+    assert b1["urutan"] == "maju"
+    assert b1["per_slot"] == 2
+    assert b1["jumlah_giliran"] == 8
+
+    # 2. names + mode + per_slot + slots (tanpa urutan)
+    r2 = client.post(
+        "/api/giliran",
+        data={"names": "Ani", "mode": "harian", "per_slot": "1", "slots": "2"},
+    )
+    assert r2.status_code == 200
+    b2 = r2.json()
+    assert b2["mode"] == "harian"
+    assert b2["urutan"] == "maju"
+    assert b2["per_slot"] == 1
+    assert b2["jumlah_giliran"] == 2
+
+    # 3. names + urutan (tanpa mode, per_slot, slots)
+    r3 = client.post(
+        "/api/giliran",
+        data={"names": "Ani", "urutan": "maju"},
+    )
+    assert r3.status_code == 200
+    b3 = r3.json()
+    assert b3["mode"] == "harian"
+    assert b3["urutan"] == "maju"
+    assert b3["per_slot"] == 2
+    assert b3["jumlah_giliran"] == 8
+
+    # 4. Field dikirim kosong ("")
+    r4 = client.post(
+        "/api/giliran",
+        data={
+            "names": "Ani",
+            "mode": "",
+            "urutan": "",
+            "per_slot": "",
+            "slots": "",
+            "tanggal_mulai": "",
+            "lewati_akhir_pekan": "",
+        },
+    )
+    assert r4.status_code == 200
+    b4 = r4.json()
+    assert b4["mode"] == "harian"
+    assert b4["urutan"] == "maju"
+    assert b4["per_slot"] == 2
+    assert b4["jumlah_giliran"] == 8
+    assert b4["lewati_akhir_pekan"] is True
+
+
+def test_giliran_root_endpoint() -> None:
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "tools" in body
+    assert "giliran" in body["tools"]
 
 
 

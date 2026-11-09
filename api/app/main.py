@@ -354,6 +354,24 @@ from .percent_calc import (
     compute_percent,
     limits_payload as percent_calc_limits_payload_func,
 )
+from .giliran import (
+    INVALID_DATE as GL_INVALID_DATE,
+    INVALID_PER_SLOT as GL_INVALID_PER_SLOT,
+    INVALID_REQUEST as GL_INVALID_REQUEST,
+    INVALID_SEED as GL_INVALID_SEED,
+    INVALID_SLOTS as GL_INVALID_SLOTS,
+    NAME_TOO_LONG as GL_NAME_TOO_LONG,
+    NO_NAMES as GL_NO_NAMES,
+    PAYLOAD_TOO_LARGE as GL_PAYLOAD_TOO_LARGE,
+    TEXT_TOO_LONG as GL_TEXT_TOO_LONG,
+    TOO_MANY_ASSIGNMENTS as GL_TOO_MANY_ASSIGNMENTS,
+    TOO_MANY_NAMES as GL_TOO_MANY_NAMES,
+    UNSUPPORTED_MODE as GL_UNSUPPORTED_MODE,
+    UNSUPPORTED_ORDER as GL_UNSUPPORTED_ORDER,
+    GiliranError,
+    bagi_giliran,
+    limits_payload as giliran_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1132,6 +1150,17 @@ async def handle_percent_calc_error(request: Request, exc: PercentCalcError) -> 
     )
 
 
+@app.exception_handler(GiliranError)
+async def handle_giliran_error(request: Request, exc: GiliranError) -> JSONResponse:
+    """Error bagi giliran tugas yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("bagi giliran ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1450,6 +1479,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'value', 'category', 'from', dan 'to'."
     elif request.url.path.startswith("/api/percent-calc"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
+    elif request.url.path.startswith("/api/giliran"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'names'."
     elif request.url.path.startswith("/api/ipk"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
@@ -2222,6 +2253,27 @@ def _reject_oversized_percent_content_length(request: Request) -> None:
 
 def _percent_calc_limits_payload() -> dict:
     return percent_calc_limits_payload_func()
+
+
+def _reject_oversized_giliran_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas giliran."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise GiliranError(
+            GL_PAYLOAD_TOO_LARGE,
+            "Permintaan terlalu besar.",
+            413,
+        )
+
+
+def _giliran_limits_payload() -> dict:
+    return giliran_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -4373,6 +4425,98 @@ async def percent_calc_endpoint(
 
     headers = {
         "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
+@app.get("/api/giliran/limits")
+async def giliran_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Bagi Giliran Tugas."""
+    return JSONResponse(content=_giliran_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/giliran")
+async def giliran_endpoint(
+    request: Request,
+    names: str = Form(default=None),
+    mode: str = Form(default=None),
+    per_slot: str = Form(default=None),
+    slots: str = Form(default=None),
+    tanggal_mulai: str = Form(default=None),
+    urutan: str = Form(default=None),
+    seed: str = Form(default=None),
+    lewati_akhir_pekan: str = Form(default=None),
+):
+    """Susun jadwal giliran tugas di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_giliran_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise GiliranError(
+            GL_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise GiliranError(
+            GL_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise GiliranError(
+                GL_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if names is None and "names" in form:
+        names = form.get("names")
+    if mode is None and "mode" in form:
+        mode = form.get("mode")
+    if per_slot is None and "per_slot" in form:
+        per_slot = form.get("per_slot")
+    if slots is None and "slots" in form:
+        slots = form.get("slots")
+    if tanggal_mulai is None and "tanggal_mulai" in form:
+        tanggal_mulai = form.get("tanggal_mulai")
+    if urutan is None and "urutan" in form:
+        urutan = form.get("urutan")
+    if seed is None and "seed" in form:
+        seed = form.get("seed")
+    if lewati_akhir_pekan is None and "lewati_akhir_pekan" in form:
+        lewati_akhir_pekan = form.get("lewati_akhir_pekan")
+
+    result = bagi_giliran(
+        names=names,
+        mode=mode,
+        per_slot=per_slot,
+        slots=slots,
+        tanggal_mulai=tanggal_mulai,
+        urutan=urutan,
+        seed=seed,
+        lewati_akhir_pekan=lewati_akhir_pekan,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "bagi giliran selesai: mode=%s slots=%s durasi=%.0fms",
+        result["mode"],
+        result["jumlah_giliran"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
         "Pragma": "no-cache",
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
@@ -6771,6 +6915,7 @@ async def root() -> dict:
             "video-reverse",
             "gambar-pdf",
             "pdf-page-numbers",
+            "giliran",
         ],
     }
 
