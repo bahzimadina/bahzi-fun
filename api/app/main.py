@@ -382,6 +382,17 @@ from .kehamilan import (
     hitung as hitung_kehamilan,
     limits_payload as kehamilan_limits_payload_func,
 )
+from .lembur import (
+    INVALID_HOURS as LM_INVALID_HOURS,
+    INVALID_REQUEST as LM_INVALID_REQUEST,
+    INVALID_WAGE as LM_INVALID_WAGE,
+    INVALID_WORKWEEK as LM_INVALID_WORKWEEK,
+    TOO_MANY_HOURS as LM_TOO_MANY_HOURS,
+    UNSUPPORTED_DAY as LM_UNSUPPORTED_DAY,
+    LemburError,
+    hitung as hitung_lembur,
+    limits_payload as lembur_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1182,6 +1193,17 @@ async def handle_kehamilan_error(request: Request, exc: KehamilanError) -> JSONR
     )
 
 
+@app.exception_handler(LemburError)
+async def handle_lembur_error(request: Request, exc: LemburError) -> JSONResponse:
+    """Error kalkulator upah lembur yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung lembur ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1504,6 +1526,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'names'."
     elif request.url.path.startswith("/api/kehamilan"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'hpht' (YYYY-MM-DD) dan 'siklus'."
+    elif request.url.path.startswith("/api/lembur"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'upah_bulanan', 'jenis_hari', 'jam_lembur', dan 'hari_kerja_mingguan'."
     elif request.url.path.startswith("/api/ipk"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
@@ -2301,6 +2325,10 @@ def _giliran_limits_payload() -> dict:
 
 def _kehamilan_limits_payload() -> dict:
     return kehamilan_limits_payload_func()
+
+
+def _lembur_limits_payload() -> dict:
+    return lembur_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -4615,6 +4643,80 @@ async def kehamilan_endpoint(
     logger.info(
         "kalkulator kehamilan selesai: usia_minggu=%s durasi=%.0fms",
         result["usia_minggu"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
+@app.get("/api/lembur/limits")
+async def lembur_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Upah Lembur."""
+    return JSONResponse(content=_lembur_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/lembur")
+async def lembur_endpoint(
+    request: Request,
+    upah_bulanan: str = Form(default=""),
+    jenis_hari: str = Form(default=""),
+    jam_lembur: str = Form(default=""),
+    hari_kerja_mingguan: str = Form(default="5"),
+):
+    """Hitung perkiraan upah lembur di memori."""
+    started = time.perf_counter()
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise LemburError(
+            LM_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise LemburError(
+            LM_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise LemburError(
+                LM_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if (upah_bulanan is None or upah_bulanan == "") and "upah_bulanan" in form:
+        upah_bulanan = form.get("upah_bulanan")
+    if (jenis_hari is None or jenis_hari == "") and "jenis_hari" in form:
+        jenis_hari = form.get("jenis_hari")
+    if (jam_lembur is None or jam_lembur == "") and "jam_lembur" in form:
+        jam_lembur = form.get("jam_lembur")
+    if (hari_kerja_mingguan is None or hari_kerja_mingguan == "") and "hari_kerja_mingguan" in form:
+        hari_kerja_mingguan = form.get("hari_kerja_mingguan")
+
+    result = hitung_lembur(
+        upah_bulanan=upah_bulanan,
+        jenis_hari=jenis_hari,
+        jam_lembur=jam_lembur,
+        hari_kerja_mingguan=hari_kerja_mingguan,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung lembur selesai: jenis_hari=%s jam_lembur=%s durasi=%.0fms",
+        result["jenis_hari"],
+        result["jam_lembur"],
         duration_ms,
     )
 
@@ -7020,6 +7122,7 @@ async def root() -> dict:
             "pdf-page-numbers",
             "giliran",
             "kehamilan",
+            "lembur",
         ],
     }
 

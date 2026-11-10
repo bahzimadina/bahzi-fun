@@ -454,6 +454,18 @@ from app.kehamilan import (
     hitung as hitung_kehamilan,
     limits_payload as kehamilan_limits_payload,
 )
+from app.lembur import (
+    INVALID_HOURS as LM_TEST_INVALID_HOURS,
+    INVALID_REQUEST as LM_TEST_INVALID_REQUEST,
+    INVALID_WAGE as LM_TEST_INVALID_WAGE,
+    INVALID_WORKWEEK as LM_TEST_INVALID_WORKWEEK,
+    TOO_MANY_HOURS as LM_TEST_TOO_MANY_HOURS,
+    UNSUPPORTED_DAY as LM_TEST_UNSUPPORTED_DAY,
+    UPAH_SEJAM_PEMBAGI as LM_TEST_PEMBAGI,
+    LemburError,
+    hitung as hitung_lembur,
+    limits_payload as lembur_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -18714,6 +18726,216 @@ def test_kehamilan_root_endpoint() -> None:
     body = resp.json()
     assert "tools" in body
     assert "kehamilan" in body["tools"]
+
+
+# ============================================================================
+# PENGUJIAN: Hitung Upah Lembur (lembur)
+# ============================================================================
+
+
+def test_lembur_limits() -> None:
+    """Limits mengembalikan HTTP 200, no-store, dan isi kunci penting."""
+    limits = lembur_limits_payload()
+    assert limits["pembagi_upah_sejam"] == 173
+    assert limits["upah_min"] == 100_000
+    assert limits["upah_max"] == 1_000_000_000
+    assert limits["jam_kerja_max"] == 4
+    assert limits["jam_libur_max"] == 12
+    assert limits["langkah_jam"] == 0.5
+    assert limits["hari_kerja_mingguan"] == [5, 6]
+    assert limits["jenis_hari"] == ["kerja", "libur"]
+
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/lembur/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    body = resp.json()
+    assert body["pembagi_upah_sejam"] == 173
+    assert body["upah_min"] == 100_000
+    assert body["jam_kerja_max"] == 4
+    assert body["jam_libur_max"] == 12
+
+
+def test_lembur_tiga_contoh_terverifikasi() -> None:
+    """Tiga contoh terverifikasi (hari kerja 3 jam, libur 10 jam 5-hari, libur 9 jam 6-hari)."""
+    # 1. Hari kerja, 3 jam
+    c1 = hitung_lembur(upah_bulanan=5_000_000, jenis_hari="kerja", jam_lembur=3)
+    assert c1["upah_sejam"] == 28901.73
+    assert [x["upah"] for x in c1["rincian"]] == [43353, 57803, 57803]
+    assert c1["total_upah_lembur"] == 158959
+    assert c1["total_diterima"] == 5158959
+    assert c1["persen_tambahan"] == 3.18
+
+    # 2. Hari istirahat, 10 jam, 5 hari kerja
+    c2 = hitung_lembur(upah_bulanan=5_000_000, jenis_hari="libur", jam_lembur=10, hari_kerja_mingguan="5")
+    assert [x["upah"] for x in c2["rincian"]] == [57803] * 8 + [86705, 115607]
+    assert c2["total_upah_lembur"] == 664736
+    assert c2["total_diterima"] == 5664736
+    assert c2["persen_tambahan"] == 13.29
+
+    # 3. Hari istirahat, 9 jam, 6 hari kerja
+    c3 = hitung_lembur(upah_bulanan=5_000_000, jenis_hari="libur", jam_lembur=9, hari_kerja_mingguan="6")
+    assert [x["upah"] for x in c3["rincian"]] == [57803] * 7 + [86705, 115607]
+    assert c3["total_upah_lembur"] == 606933
+    assert c3["total_diterima"] == 5606933
+    assert c3["persen_tambahan"] == 12.14
+
+    client = _test_client()
+    if client is not None:
+        resp = client.post(
+            "/api/lembur",
+            data={
+                "upah_bulanan": "5000000",
+                "jenis_hari": "kerja",
+                "jam_lembur": "3",
+            },
+        )
+        assert resp.status_code == 200
+        assert "no-store" in resp.headers.get("cache-control", "").lower()
+        assert "x-processing-ms" in resp.headers
+        body = resp.json()
+        assert body["total_upah_lembur"] == 158959
+        assert body["total_diterima"] == 5158959
+
+
+def test_lembur_satu_jam_hari_kerja() -> None:
+    """Upah 1 jam hari kerja = Rp43.353 untuk upah 5.000.000."""
+    res = hitung_lembur(upah_bulanan=5_000_000, jenis_hari="kerja", jam_lembur=1)
+    assert res["total_upah_lembur"] == 43353
+    assert len(res["rincian"]) == 1
+    assert res["rincian"][0]["jam_ke"] == 1
+    assert res["rincian"][0]["pengali"] == 1.5
+    assert res["rincian"][0]["upah"] == 43353
+
+
+def test_lembur_jalur_galat() -> None:
+    """Pengujian semua jalur galat sesuai spesifikasi."""
+    # 1. Upah kosong -> INVALID_REQUEST
+    try:
+        hitung_lembur(upah_bulanan="", jenis_hari="kerja", jam_lembur=1)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_REQUEST
+        assert exc.status_code == 400
+
+    try:
+        hitung_lembur(upah_bulanan=None, jenis_hari="kerja", jam_lembur=1)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_REQUEST
+
+    # 2. Upah 'abc' -> INVALID_WAGE
+    try:
+        hitung_lembur(upah_bulanan="abc", jenis_hari="kerja", jam_lembur=1)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_WAGE
+
+    # 3. Upah 50.000 -> INVALID_WAGE (di bawah MIN_UPAH)
+    try:
+        hitung_lembur(upah_bulanan="50.000", jenis_hari="kerja", jam_lembur=1)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_WAGE
+
+    try:
+        hitung_lembur(upah_bulanan=50_000, jenis_hari="kerja", jam_lembur=1)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_WAGE
+
+    # 4. Jam '0' -> INVALID_HOURS
+    try:
+        hitung_lembur(upah_bulanan=5_000_000, jenis_hari="kerja", jam_lembur="0")
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_HOURS
+        assert "kelipatan 0,5" in exc.message
+
+    # 5. Jam '1.7' -> INVALID_HOURS
+    try:
+        hitung_lembur(upah_bulanan=5_000_000, jenis_hari="kerja", jam_lembur="1.7")
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_HOURS
+
+    # 6. Hari kerja 5 jam -> TOO_MANY_HOURS
+    try:
+        hitung_lembur(upah_bulanan=5_000_000, jenis_hari="kerja", jam_lembur=5)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_TOO_MANY_HOURS
+        assert "4 jam" in exc.message
+
+    # 7. Libur 13 jam -> TOO_MANY_HOURS
+    try:
+        hitung_lembur(upah_bulanan=5_000_000, jenis_hari="libur", jam_lembur=13)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_TOO_MANY_HOURS
+
+    # 8. Jenis 'sabtu' -> UNSUPPORTED_DAY
+    try:
+        hitung_lembur(upah_bulanan=5_000_000, jenis_hari="sabtu", jam_lembur=2)
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_UNSUPPORTED_DAY
+
+    # 9. Hari_kerja_mingguan '4' saat libur -> INVALID_WORKWEEK
+    try:
+        hitung_lembur(upah_bulanan=5_000_000, jenis_hari="libur", jam_lembur=2, hari_kerja_mingguan="4")
+        assert False, "Harus melempar LemburError"
+    except LemburError as exc:
+        assert exc.code == LM_TEST_INVALID_WORKWEEK
+
+    # Cek bahwa saat hari kerja, hari_kerja_mingguan '4' diabaikan dan tidak galat
+    res_kerja = hitung_lembur(upah_bulanan=5_000_000, jenis_hari="kerja", jam_lembur=2, hari_kerja_mingguan="4")
+    assert res_kerja["total_upah_lembur"] > 0
+
+    # Uji via HTTP client
+    client = _test_client()
+    if client is not None:
+        resp = client.post("/api/lembur", data={"upah_bulanan": "abc", "jenis_hari": "kerja", "jam_lembur": "1"})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["kode"] == LM_TEST_INVALID_WAGE or body["error"]["code"] == LM_TEST_INVALID_WAGE
+        assert "pesan" in body
+
+
+def test_lembur_sifat_dan_proporsi() -> None:
+    """Sifat: total_upah_lembur == sum(rincian.upah) dan persen_tambahan == total / upah * 100."""
+    kasus = [
+        (3_500_000, "kerja", 0.5, "5"),
+        (4_200_000, "kerja", 2.5, "5"),
+        (6_000_000, "libur", 1.5, "5"),
+        (7_500_000, "libur", 8.5, "6"),
+        (10_000_000, "libur", 12.0, "5"),
+    ]
+    for upah, jenis, jam, hkm in kasus:
+        res = hitung_lembur(upah_bulanan=upah, jenis_hari=jenis, jam_lembur=jam, hari_kerja_mingguan=hkm)
+        assert res["total_upah_lembur"] == sum(item["upah"] for item in res["rincian"])
+        assert res["total_diterima"] == res["upah_bulanan"] + res["total_upah_lembur"]
+        expected_persen = round((res["total_upah_lembur"] / res["upah_bulanan"]) * 100, 2)
+        assert res["persen_tambahan"] == expected_persen
+
+
+def test_lembur_regresi_endpoint_lama() -> None:
+    """Endpoint lama (kehamilan, zakat, health) tetap 200 dan root endpoint menyebut lembur."""
+    client = _test_client()
+    if client is None:
+        return
+
+    assert client.get("/health").status_code == 200
+    assert client.get("/api/kehamilan/limits").status_code == 200
+    assert client.get("/api/zakat/limits").status_code == 200
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "tools" in body
+    assert "lembur" in body["tools"]
 
 
 

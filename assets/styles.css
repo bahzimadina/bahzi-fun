@@ -13103,6 +13103,162 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Hitung upah lembur (lembur) ================= */
+.lembur__controls {
+  margin-top: 1rem;
+}
+
+.lembur__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: .85rem;
+}
+
+.lembur__hint {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.lembur__result {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.lembur__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .75rem;
+}
+
+.lembur__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem .75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  gap: .25rem;
+}
+
+.lembur__stat-label {
+  font-size: .78rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  font-weight: 600;
+}
+
+.lembur__stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--brand-text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.lembur__ringkasan {
+  margin: 0;
+  padding: .85rem 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .92rem;
+  color: var(--text);
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.lembur__rincian-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.lembur__rincian-title {
+  margin: 0;
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lembur__rincian-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.lembur__rincian-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .45rem .6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: .88rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.lembur__rincian-item-left {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.lembur__rincian-item-tag {
+  display: inline-block;
+  padding: .1rem .45rem;
+  border-radius: var(--radius-pill);
+  font-size: .75rem;
+  font-weight: 600;
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.lembur__catatan {
+  margin: 0;
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.lembur__result-actions {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: .5rem;
+}
+
+@media (max-width: 680px) {
+  .lembur__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .lembur__stats {
+    grid-template-columns: 1fr;
+  }
+  .lembur__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (pointer: coarse) {
   #konsumsi-panel input,
   #konsumsi-panel select,
@@ -13128,6 +13284,15 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #kehamilan-download,
   #kehamilan-clear,
   #kehamilan-close,
+  #lembur-upah,
+  #lembur-jenis,
+  #lembur-minggu,
+  #lembur-jam,
+  #lembur-submit,
+  #lembur-copy,
+  #lembur-download,
+  #lembur-clear,
+  #lembur-close,
   .kk__input,
   .kk__select,
   .kk__radio-label,
