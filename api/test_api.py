@@ -444,6 +444,16 @@ from app.giliran import (
     bagi_giliran,
     limits_payload as giliran_limits_payload,
 )
+from app.kehamilan import (
+    FUTURE_DATE as KH_TEST_FUTURE_DATE,
+    INVALID_CYCLE as KH_TEST_INVALID_CYCLE,
+    INVALID_DATE as KH_TEST_INVALID_DATE,
+    INVALID_REQUEST as KH_TEST_INVALID_REQUEST,
+    TOO_OLD as KH_TEST_TOO_OLD,
+    KehamilanError,
+    hitung as hitung_kehamilan,
+    limits_payload as kehamilan_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -18465,6 +18475,245 @@ def test_giliran_root_endpoint() -> None:
     body = resp.json()
     assert "tools" in body
     assert "giliran" in body["tools"]
+
+
+# ============================================================================
+# PENGUJIAN: Kalkulator Kehamilan (kehamilan)
+# ============================================================================
+
+
+def test_kehamilan_limits_200() -> None:
+    """Limits mengembalikan HTTP 200, header no-store, dan nilai bawaan siklus 28."""
+    limits = kehamilan_limits_payload()
+    assert limits["default_siklus"] == 28
+    assert limits["min_siklus"] == 21
+    assert limits["max_siklus"] == 40
+    assert limits["max_usia_minggu"] == 45
+    assert limits["zona_waktu"] == "Asia/Jakarta"
+    assert "catatan" in limits
+
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/kehamilan/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    body = resp.json()
+    assert body["default_siklus"] == 28
+
+
+def test_kehamilan_hitung_normal() -> None:
+    """Hitung normal hpht 2026-05-01, siklus 28, tanggal 2026-11-10."""
+    res = hitung_kehamilan(
+        hpht="2026-05-01",
+        siklus=28,
+        tanggal="2026-11-10",
+    )
+    assert res["hpht"] == "2026-05-01"
+    assert res["tanggal_acuan"] == "2026-11-10"
+    assert res["siklus"] == 28
+    assert res["usia_minggu"] == 27
+    assert res["usia_hari"] == 4
+    assert res["usia_teks"] == "27 minggu 4 hari"
+    assert res["total_hari"] == 193
+    assert res["trimester"] == 2
+    assert res["trimester_label"] == "Trimester kedua"
+    assert res["hpl"] == "2027-02-05"
+    assert res["hpl_teks"] == "Jumat, 5 Februari 2027"
+    assert res["sisa_hari"] == 87
+    assert res["sisa_teks"] == "87 hari lagi"
+    assert res["cukup_bulan_mulai"] == "2027-01-15"
+    assert res["cukup_bulan_selesai"] == "2027-02-19"
+    assert res["persen"] == 68.9
+    assert "bukan pengganti pemeriksaan dokter" in res["catatan"]
+
+
+def test_kehamilan_penjaga_geser_tanggal() -> None:
+    """Uji penjaga: HPHT 2026-05-02 dengan tanggal acuan 2026-11-11 harus menghasilkan usia yang sama (27 minggu 4 hari)."""
+    res = hitung_kehamilan(hpht="2026-05-02", siklus=28, tanggal="2026-11-11")
+    assert res["usia_minggu"] == 27
+    assert res["usia_hari"] == 4
+    assert res["usia_teks"] == "27 minggu 4 hari"
+    assert res["total_hari"] == 193
+
+
+def test_kehamilan_penjaga_too_old() -> None:
+    """Uji penjaga: HPHT 2020-01-01 dengan tanggal acuan 2026-11-10 harus ditolak TOO_OLD."""
+    try:
+        hitung_kehamilan(hpht="2020-01-01", siklus=28, tanggal="2026-11-10")
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_TOO_OLD
+        assert exc.status_code == 400
+        assert "45" in exc.message
+
+    client = _test_client()
+    if client is not None:
+        resp = client.post(
+            "/api/kehamilan",
+            data={
+                "hpht": "2020-01-01",
+                "siklus": "28",
+                "tanggal": "2026-11-10",
+            },
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error"]["code"] == KH_TEST_TOO_OLD
+
+
+def test_kehamilan_siklus_35() -> None:
+    """Siklus 35 menggeser HPL 7 hari lebih lambat dibanding siklus 28."""
+    normal = hitung_kehamilan(hpht="2026-05-01", siklus=28, tanggal="2026-11-10")
+    longer = hitung_kehamilan(hpht="2026-05-01", siklus=35, tanggal="2026-11-10")
+    assert normal["hpl"] == "2027-02-05"
+    assert longer["hpl"] == "2027-02-12"
+    assert (
+        date.fromisoformat(longer["hpl"])
+        - date.fromisoformat(normal["hpl"])
+    ).days == 7
+
+
+def test_kehamilan_trimester_boundaries() -> None:
+    """Dua kasus batas trimester: 13+6 vs 14+0 dan 27+6 vs 28+0."""
+    hpht = "2026-01-01"
+    # Kasus 1: 13 minggu 6 hari (97 hari) -> Trimester 1
+    t1 = hitung_kehamilan(hpht=hpht, siklus=28, tanggal="2026-04-08")
+    assert t1["usia_minggu"] == 13
+    assert t1["usia_hari"] == 6
+    assert t1["trimester"] == 1
+    assert t1["trimester_label"] == "Trimester pertama"
+
+    # Kasus 2: 14 minggu 0 hari (98 hari) -> Trimester 2
+    t2 = hitung_kehamilan(hpht=hpht, siklus=28, tanggal="2026-04-09")
+    assert t2["usia_minggu"] == 14
+    assert t2["usia_hari"] == 0
+    assert t2["trimester"] == 2
+    assert t2["trimester_label"] == "Trimester kedua"
+
+    # Kasus 3: 27 minggu 6 hari (195 hari) -> Trimester 2
+    t3 = hitung_kehamilan(hpht=hpht, siklus=28, tanggal="2026-07-15")
+    assert t3["usia_minggu"] == 27
+    assert t3["usia_hari"] == 6
+    assert t3["trimester"] == 2
+    assert t3["trimester_label"] == "Trimester kedua"
+
+    # Kasus 4: 28 minggu 0 hari (196 hari) -> Trimester 3
+    t4 = hitung_kehamilan(hpht=hpht, siklus=28, tanggal="2026-07-16")
+    assert t4["usia_minggu"] == 28
+    assert t4["usia_hari"] == 0
+    assert t4["trimester"] == 3
+    assert t4["trimester_label"] == "Trimester ketiga"
+
+
+def test_kehamilan_galat_hpht_kosong() -> None:
+    """HPHT kosong atau tidak dikirim menghasilkan INVALID_REQUEST."""
+    try:
+        hitung_kehamilan(hpht="", siklus=28)
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_REQUEST
+        assert exc.status_code == 400
+
+    try:
+        hitung_kehamilan(hpht=None, siklus=28)
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_REQUEST
+        assert exc.status_code == 400
+
+
+def test_kehamilan_galat_tanggal() -> None:
+    """Format tanggal salah atau tanggal non-eksisten kalender (2026-02-31) -> INVALID_DATE."""
+    try:
+        hitung_kehamilan(hpht="bukan-tanggal", siklus=28)
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_DATE
+        assert "YYYY-MM-DD" in exc.message
+
+    try:
+        hitung_kehamilan(hpht="2026-02-31", siklus=28)
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_DATE
+        assert "YYYY-MM-DD" in exc.message
+
+    try:
+        hitung_kehamilan(hpht="2026-05-01", siklus=28, tanggal="2026-13-01")
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_DATE
+
+
+def test_kehamilan_galat_future_date_dan_too_old() -> None:
+    """HPHT setelah tanggal acuan -> FUTURE_DATE, usia > 45 minggu -> TOO_OLD."""
+    try:
+        hitung_kehamilan(hpht="2026-11-11", siklus=28, tanggal="2026-11-10")
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_FUTURE_DATE
+        assert exc.status_code == 400
+
+    try:
+        hitung_kehamilan(hpht="2025-01-01", siklus=28, tanggal="2026-11-10")
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_TOO_OLD
+        assert exc.status_code == 400
+        assert "45" in exc.message
+
+
+def test_kehamilan_galat_siklus() -> None:
+    """Siklus 20 dan 41 menghasilkan galat INVALID_CYCLE."""
+    try:
+        hitung_kehamilan(hpht="2026-05-01", siklus=20, tanggal="2026-11-10")
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_CYCLE
+        assert exc.status_code == 400
+
+    try:
+        hitung_kehamilan(hpht="2026-05-01", siklus=41, tanggal="2026-11-10")
+        assert False, "Harus melempar KehamilanError"
+    except KehamilanError as exc:
+        assert exc.code == KH_TEST_INVALID_CYCLE
+        assert exc.status_code == 400
+
+
+def test_kehamilan_http_cache_control_no_store() -> None:
+    """Respons HTTP sukses /api/kehamilan menyertakan header cache-control no-store dan X-Processing-Ms."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.post(
+        "/api/kehamilan",
+        data={
+            "hpht": "2026-05-01",
+            "siklus": "28",
+            "tanggal": "2026-11-10",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp.headers
+    body = resp.json()
+    assert body["usia_minggu"] == 27
+    assert body["hpl"] == "2027-02-05"
+
+
+def test_kehamilan_root_endpoint() -> None:
+    """Root endpoint / menyebut kehamilan dalam daftar tools."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "tools" in body
+    assert "kehamilan" in body["tools"]
 
 
 

@@ -78,7 +78,8 @@
         { name: 'Time Zone Converter', desc: 'Lihat jam yang sama di beberapa kota, konversi antar zona waktu, dan cari jam rapat yang cocok.', status: 'available', action: 'timezone' },
         { name: 'Countdown Timer', desc: 'Hitung mundur ke tanggal atau waktu tertentu, berdetak tiap detik.', status: 'available', action: 'countdown' },
         { name: 'Pomodoro Timer', desc: 'Susun jadwal fokus dan istirahat, lalu jalankan penghitung waktunya.', status: 'available', action: 'pomodoro' },
-        { name: 'Bagi giliran tugas', desc: 'Susun jadwal giliran piket dari daftar nama, harian atau mingguan, lalu salin atau unduh jadwalnya.', status: 'available', action: 'giliran' }
+        { name: 'Bagi giliran tugas', desc: 'Susun jadwal giliran piket dari daftar nama, harian atau mingguan, lalu salin atau unduh jadwalnya.', status: 'available', action: 'giliran' },
+        { name: 'Kalkulator kehamilan', desc: 'Perkiraan hari lahir dan usia kehamilan dari tanggal haid terakhir, dengan panjang siklus yang bisa disesuaikan.', status: 'available', action: 'kehamilan' }
       ]
     },
     {

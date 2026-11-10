@@ -12949,6 +12949,160 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Kalkulator kehamilan (kehamilan) ================= */
+.kehamilan__controls {
+  margin-top: 1rem;
+}
+
+.kehamilan__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: .85rem;
+}
+
+.kehamilan__hint {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.kehamilan__result {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.kehamilan__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .75rem;
+}
+
+.kehamilan__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem .75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  gap: .25rem;
+}
+
+.kehamilan__stat-label {
+  font-size: .78rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  font-weight: 600;
+}
+
+.kehamilan__stat-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--brand-text);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.kehamilan__section {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .85rem 1rem;
+}
+
+.kehamilan__progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.kehamilan__progress-title {
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.kehamilan__sisa {
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--brand-text);
+  font-family: var(--font-mono);
+}
+
+.kehamilan__bar {
+  width: 100%;
+  height: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  position: relative;
+}
+
+.kehamilan__bar-fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: var(--radius-pill);
+  transition: width 0.3s ease;
+}
+
+.kehamilan__bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: .76rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.kehamilan__info {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: .85rem 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.kehamilan__rentang {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.kehamilan__catatan {
+  margin: 0;
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.kehamilan__result-actions {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: .5rem;
+}
+
+@media (max-width: 560px) {
+  .kehamilan__stats {
+    grid-template-columns: 1fr;
+  }
+  .kehamilan__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (pointer: coarse) {
   #konsumsi-panel input,
   #konsumsi-panel select,
@@ -12967,6 +13121,13 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #giliran-panel textarea,
   #giliran-panel button,
   #giliran-panel label,
+  #kehamilan-hpht,
+  #kehamilan-siklus,
+  #kehamilan-submit,
+  #kehamilan-copy,
+  #kehamilan-download,
+  #kehamilan-clear,
+  #kehamilan-close,
   .kk__input,
   .kk__select,
   .kk__radio-label,

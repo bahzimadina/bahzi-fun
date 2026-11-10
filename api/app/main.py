@@ -372,6 +372,16 @@ from .giliran import (
     bagi_giliran,
     limits_payload as giliran_limits_payload_func,
 )
+from .kehamilan import (
+    FUTURE_DATE as KH_FUTURE_DATE,
+    INVALID_CYCLE as KH_INVALID_CYCLE,
+    INVALID_DATE as KH_INVALID_DATE,
+    INVALID_REQUEST as KH_INVALID_REQUEST,
+    TOO_OLD as KH_TOO_OLD,
+    KehamilanError,
+    hitung as hitung_kehamilan,
+    limits_payload as kehamilan_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1161,6 +1171,17 @@ async def handle_giliran_error(request: Request, exc: GiliranError) -> JSONRespo
     )
 
 
+@app.exception_handler(KehamilanError)
+async def handle_kehamilan_error(request: Request, exc: KehamilanError) -> JSONResponse:
+    """Error kalkulator kehamilan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("kalkulator kehamilan ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1481,6 +1502,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'a', dan 'b'."
     elif request.url.path.startswith("/api/giliran"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'names'."
+    elif request.url.path.startswith("/api/kehamilan"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'hpht' (YYYY-MM-DD) dan 'siklus'."
     elif request.url.path.startswith("/api/ipk"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
@@ -2274,6 +2297,10 @@ def _reject_oversized_giliran_content_length(request: Request) -> None:
 
 def _giliran_limits_payload() -> dict:
     return giliran_limits_payload_func()
+
+
+def _kehamilan_limits_payload() -> dict:
+    return kehamilan_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -4512,6 +4539,82 @@ async def giliran_endpoint(
         "bagi giliran selesai: mode=%s slots=%s durasi=%.0fms",
         result["mode"],
         result["jumlah_giliran"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
+@app.get("/api/kehamilan/limits")
+async def kehamilan_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Kalkulator Kehamilan."""
+    return JSONResponse(content=_kehamilan_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/kehamilan")
+async def kehamilan_endpoint(
+    request: Request,
+    hpht: str = Form(default=""),
+    siklus: str = Form(default=""),
+    tanggal: str = Form(default=""),
+):
+    """Hitung perkiraan HPL dan usia kehamilan di memori."""
+    started = time.perf_counter()
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise KehamilanError(
+            KH_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise KehamilanError(
+            KH_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise KehamilanError(
+                KH_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if (hpht is None or hpht == "") and "hpht" in form:
+        hpht = form.get("hpht")
+    if (siklus is None or siklus == "") and "siklus" in form:
+        siklus = form.get("siklus")
+    if (tanggal is None or tanggal == "") and "tanggal" in form:
+        tanggal = form.get("tanggal")
+
+    if hpht is None or (isinstance(hpht, str) and not hpht.strip()):
+        raise KehamilanError(
+            KH_INVALID_REQUEST,
+            "Field 'hpht' wajib diisi. Masukkan tanggal hari pertama haid terakhir (HPHT).",
+            400,
+        )
+
+    result = hitung_kehamilan(
+        hpht=hpht,
+        siklus=siklus if (siklus is not None and str(siklus).strip() != "") else None,
+        tanggal=tanggal if (tanggal is not None and str(tanggal).strip() != "") else None,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "kalkulator kehamilan selesai: usia_minggu=%s durasi=%.0fms",
+        result["usia_minggu"],
         duration_ms,
     )
 
@@ -6916,6 +7019,7 @@ async def root() -> dict:
             "gambar-pdf",
             "pdf-page-numbers",
             "giliran",
+            "kehamilan",
         ],
     }
 
