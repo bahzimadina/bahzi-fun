@@ -393,6 +393,20 @@ from .lembur import (
     hitung as hitung_lembur,
     limits_payload as lembur_limits_payload_func,
 )
+from .tagihan_listrik import (
+    INVALID_ALAT as TL_INVALID_ALAT,
+    INVALID_GOLONGAN as TL_INVALID_GOLONGAN,
+    INVALID_JAM as TL_INVALID_JAM,
+    INVALID_JUMLAH as TL_INVALID_JUMLAH,
+    INVALID_TARIF as TL_INVALID_TARIF,
+    INVALID_TOKEN as TL_INVALID_TOKEN,
+    INVALID_WATT as TL_INVALID_WATT,
+    NO_ALAT as TL_NO_ALAT,
+    TOO_MANY_ALAT as TL_TOO_MANY_ALAT,
+    TagihanListrikError,
+    hitung as hitung_tagihan_listrik,
+    limits_payload as tagihan_listrik_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1204,6 +1218,17 @@ async def handle_lembur_error(request: Request, exc: LemburError) -> JSONRespons
     )
 
 
+@app.exception_handler(TagihanListrikError)
+async def handle_tagihan_listrik_error(request: Request, exc: TagihanListrikError) -> JSONResponse:
+    """Error kalkulator tagihan listrik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung tagihan listrik ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1528,6 +1553,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'hpht' (YYYY-MM-DD) dan 'siklus'."
     elif request.url.path.startswith("/api/lembur"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'upah_bulanan', 'jenis_hari', 'jam_lembur', dan 'hari_kerja_mingguan'."
+    elif request.url.path.startswith("/api/tagihan-listrik"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'alat', 'golongan', 'tarif', dan 'token'."
     elif request.url.path.startswith("/api/ipk"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
@@ -2329,6 +2356,10 @@ def _kehamilan_limits_payload() -> dict:
 
 def _lembur_limits_payload() -> dict:
     return lembur_limits_payload_func()
+
+
+def _tagihan_listrik_limits_payload() -> dict:
+    return tagihan_listrik_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -4717,6 +4748,80 @@ async def lembur_endpoint(
         "hitung lembur selesai: jenis_hari=%s jam_lembur=%s durasi=%.0fms",
         result["jenis_hari"],
         result["jam_lembur"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
+@app.get("/api/tagihan-listrik/limits")
+async def tagihan_listrik_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Tagihan Listrik."""
+    return JSONResponse(content=_tagihan_listrik_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/tagihan-listrik")
+async def tagihan_listrik_endpoint(
+    request: Request,
+    alat: str = Form(default=""),
+    golongan: str = Form(default=""),
+    tarif: str = Form(default=""),
+    token: str = Form(default=""),
+):
+    """Hitung perkiraan tagihan listrik rumah di memori."""
+    started = time.perf_counter()
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise TagihanListrikError(
+            TL_INVALID_ALAT,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise TagihanListrikError(
+            TL_INVALID_ALAT,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise TagihanListrikError(
+                TL_INVALID_ALAT,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if (alat is None or alat == "") and "alat" in form:
+        alat = form.get("alat")
+    if (golongan is None or golongan == "") and "golongan" in form:
+        golongan = form.get("golongan")
+    if (tarif is None or tarif == "") and "tarif" in form:
+        tarif = form.get("tarif")
+    if (token is None or token == "") and "token" in form:
+        token = form.get("token")
+
+    result = hitung_tagihan_listrik(
+        alat=alat,
+        golongan=golongan,
+        tarif=tarif,
+        token=token,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung tagihan listrik selesai: jumlah_alat=%s kwh_bulan=%s durasi=%.0fms",
+        result["jumlah_alat"],
+        result["kwh_bulan"],
         duration_ms,
     )
 
@@ -7123,6 +7228,7 @@ async def root() -> dict:
             "giliran",
             "kehamilan",
             "lembur",
+            "tagihan-listrik",
         ],
     }
 

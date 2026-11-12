@@ -466,6 +466,20 @@ from app.lembur import (
     hitung as hitung_lembur,
     limits_payload as lembur_limits_payload,
 )
+from app.tagihan_listrik import (
+    INVALID_ALAT as TL_TEST_INVALID_ALAT,
+    INVALID_GOLONGAN as TL_TEST_INVALID_GOLONGAN,
+    INVALID_JAM as TL_TEST_INVALID_JAM,
+    INVALID_JUMLAH as TL_TEST_INVALID_JUMLAH,
+    INVALID_TARIF as TL_TEST_INVALID_TARIF,
+    INVALID_TOKEN as TL_TEST_INVALID_TOKEN,
+    INVALID_WATT as TL_TEST_INVALID_WATT,
+    NO_ALAT as TL_TEST_NO_ALAT,
+    TOO_MANY_ALAT as TL_TEST_TOO_MANY_ALAT,
+    TagihanListrikError,
+    hitung as hitung_tagihan_listrik,
+    limits_payload as tagihan_listrik_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -18936,6 +18950,262 @@ def test_lembur_regresi_endpoint_lama() -> None:
     body = resp.json()
     assert "tools" in body
     assert "lembur" in body["tools"]
+
+
+# ============================================================================
+# PENGUJIAN: Hitung tagihan listrik rumah (tagihan-listrik)
+# ============================================================================
+
+
+def test_tagihan_listrik_limits() -> None:
+    """Limits mengembalikan HTTP 200, no-store, batas operasional, dan 5 golongan."""
+    limits = tagihan_listrik_limits_payload()
+    assert limits["max_alat"] == 30
+    assert limits["watt_min"] == 1
+    assert limits["watt_max"] == 100_000
+    assert limits["jam_max"] == 24
+    assert limits["jumlah_max"] == 50
+    assert limits["tarif_min"] == 100
+    assert limits["tarif_max"] == 5_000
+    assert limits["token_min"] == 1_000
+    assert limits["token_max"] == 10_000_000
+    assert limits["hari_per_bulan"] == 30
+    assert limits["nama_max"] == 40
+    assert len(limits["golongan"]) == 5
+    kode_golongan = [g["kode"] for g in limits["golongan"]]
+    assert kode_golongan == ["900-subsidi", "1300", "2200", "3500", "sendiri"]
+
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/tagihan-listrik/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    body = resp.json()
+    assert body["max_alat"] == 30
+    assert body["token_min"] == 1_000
+    assert len(body["golongan"]) == 5
+
+
+def test_tagihan_listrik_tiga_contoh_terverifikasi() -> None:
+    """Tiga contoh tetap dan satu alat terverifikasi sesuai spesifikasi."""
+    # Contoh A: Kipas angin 45W 10j, Kulkas 100W 24j, Setrika 350W 1j, tarif 1300, token 100.000
+    alat_a = [
+        {"nama": "Kipas angin", "watt": 45, "jam": 10, "jumlah": 1},
+        {"nama": "Kulkas", "watt": 100, "jam": 24, "jumlah": 1},
+        {"nama": "Setrika", "watt": 350, "jam": 1, "jumlah": 1},
+    ]
+    ca = hitung_tagihan_listrik(alat=alat_a, golongan="1300", token=100_000)
+    assert ca["kwh_hari"] == 3.2
+    assert ca["kwh_bulan"] == 96.0
+    assert ca["rupiah_hari"] == 4623
+    assert ca["rupiah_bulan"] == 138691
+    assert ca["rupiah_tahun"] == 1664292
+    assert ca["rincian"][0]["nama"] == "Kipas angin"
+    assert ca["rincian"][0]["kwh_bulan"] == 13.5
+    assert ca["rincian"][0]["rupiah_bulan"] == 19503
+    assert ca["rincian"][0]["persen"] == 14.1
+    assert ca["rincian"][1]["nama"] == "Kulkas"
+    assert ca["rincian"][1]["kwh_bulan"] == 72.0
+    assert ca["rincian"][1]["rupiah_bulan"] == 104018
+    assert ca["rincian"][1]["persen"] == 75.0
+    assert ca["rincian"][2]["nama"] == "Setrika"
+    assert ca["rincian"][2]["kwh_bulan"] == 10.5
+    assert ca["rincian"][2]["rupiah_bulan"] == 15169
+    assert ca["rincian"][2]["persen"] == 10.9
+    assert ca["terbesar"] == {"nama": "Kulkas", "rupiah_bulan": 104018, "persen": 75.0}
+    assert ca["token"] is not None
+    assert ca["token"]["hari"] == 21.6
+    assert ca["token"]["kwh"] == 69.22
+
+    # Contoh B: AC 400W 8j 1, Mesin cuci 350W 1j 1, Lampu LED 9W 12j 6 unit, golongan 1300
+    alat_b = [
+        {"nama": "AC 1/2 PK", "watt": 400, "jam": 8, "jumlah": 1},
+        {"nama": "Mesin cuci", "watt": 350, "jam": 1, "jumlah": 1},
+        {"nama": "Lampu LED", "watt": 9, "jam": 12, "jumlah": 6},
+    ]
+    cb = hitung_tagihan_listrik(alat=alat_b, golongan="1300")
+    assert cb["kwh_bulan"] == 125.94
+    assert cb["rupiah_bulan"] == 181946
+    assert cb["kwh_hari"] == 4.2
+    assert cb["rupiah_hari"] == 6065
+    assert cb["rincian"][0]["persen"] == 76.2
+
+    # Contoh C: Rice cooker 300W 2j 1, Pompa air 150W 1j 1, TV LED 60W 5j 1, golongan 3500 (tarif 1699.53)
+    alat_c = [
+        {"nama": "Rice cooker", "watt": 300, "jam": 2, "jumlah": 1},
+        {"nama": "Pompa air", "watt": 150, "jam": 1, "jumlah": 1},
+        {"nama": "TV LED", "watt": 60, "jam": 5, "jumlah": 1},
+    ]
+    cc = hitung_tagihan_listrik(alat=alat_c, golongan="3500")
+    assert cc["kwh_bulan"] == 31.5
+    assert cc["rupiah_bulan"] == 53535
+    assert cc["rupiah_hari"] == 1785
+
+    # Satu alat 1000 W 1 jam 1 unit, golongan 1300
+    cd = hitung_tagihan_listrik(alat=[{"watt": 1000, "jam": 1, "jumlah": 1}], golongan="1300")
+    assert cd["kwh_bulan"] == 30.0
+    assert cd["rupiah_bulan"] == 43341
+
+    # Uji via TestClient HTTP
+    client = _test_client()
+    if client is not None:
+        resp = client.post(
+            "/api/tagihan-listrik",
+            data={
+                "alat": json.dumps(alat_a),
+                "golongan": "1300",
+                "token": "100000",
+            },
+        )
+        assert resp.status_code == 200
+        assert "no-store" in resp.headers.get("cache-control", "").lower()
+        assert "x-processing-ms" in resp.headers
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["kwh_bulan"] == 96.0
+        assert body["rupiah_bulan"] == 138691
+        assert body["terbesar"]["nama"] == "Kulkas"
+        assert body["token"]["hari"] == 21.6
+
+
+def test_tagihan_listrik_jalur_galat() -> None:
+    """Pengujian semua jalur galat kalkulator tagihan listrik."""
+    # 1. INVALID_ALAT
+    try:
+        hitung_tagihan_listrik(alat="bukan-json-valid")
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_ALAT
+        assert exc.status_code == 400
+
+    try:
+        hitung_tagihan_listrik(alat=["bukan-dict"])
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_ALAT
+
+    # 2. NO_ALAT
+    try:
+        hitung_tagihan_listrik(alat=[])
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_NO_ALAT
+        assert "minimal satu" in exc.message
+
+    try:
+        hitung_tagihan_listrik(alat=None)
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_NO_ALAT
+
+    # 3. TOO_MANY_ALAT (31 alat)
+    try:
+        hitung_tagihan_listrik(alat=[{"watt": 50, "jam": 1}] * 31)
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_TOO_MANY_ALAT
+        assert "Maksimal 30" in exc.message
+
+    # 4. INVALID_WATT (0 W)
+    try:
+        hitung_tagihan_listrik(alat=[{"nama": "Lampu", "watt": 0, "jam": 5}])
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_WATT
+        assert 'Daya alat "Lampu"' in exc.message
+
+    # 5. INVALID_JAM (25 jam)
+    try:
+        hitung_tagihan_listrik(alat=[{"nama": "Kipas", "watt": 50, "jam": 25}])
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_JAM
+        assert 'Jam pemakaian "Kipas"' in exc.message
+
+    # 6. INVALID_JUMLAH (0 unit)
+    try:
+        hitung_tagihan_listrik(alat=[{"nama": "TV", "watt": 60, "jam": 4, "jumlah": 0}])
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_JUMLAH
+        assert 'Jumlah unit "TV"' in exc.message
+
+    # 7. INVALID_TARIF (golongan sendiri tanpa tarif)
+    try:
+        hitung_tagihan_listrik(alat=[{"watt": 100, "jam": 2}], golongan="sendiri")
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_TARIF
+        assert "Isi tarif per kWh dulu" in exc.message
+
+    # 8. INVALID_TOKEN (500)
+    try:
+        hitung_tagihan_listrik(alat=[{"watt": 100, "jam": 2}], token=500)
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_TOKEN
+        assert "Rp1.000" in exc.message
+
+    # 9. INVALID_GOLONGAN
+    try:
+        hitung_tagihan_listrik(alat=[{"watt": 100, "jam": 2}], golongan="tidak-ada")
+        assert False, "Harus melempar TagihanListrikError"
+    except TagihanListrikError as exc:
+        assert exc.code == TL_TEST_INVALID_GOLONGAN
+
+    # Uji via HTTP client
+    client = _test_client()
+    if client is not None:
+        # POST form galat (alat kosong)
+        resp = client.post("/api/tagihan-listrik", data={"alat": "[]"})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["kode"] == TL_TEST_NO_ALAT or body["error"]["code"] == TL_TEST_NO_ALAT
+        assert "pesan" in body
+
+        # POST dengan format JSON (harus ditolak 400)
+        resp_json = client.post(
+            "/api/tagihan-listrik",
+            json={"alat": []},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp_json.status_code == 400
+        body_json = resp_json.json()
+        assert "pesan" in body_json
+
+
+def test_tagihan_listrik_variasi_input() -> None:
+    """Nama kosong menjadi 'Alat 1', koma desimal diterima, jam 0 tidak meledak."""
+    # 1. Nama kosong -> "Alat 1"
+    res1 = hitung_tagihan_listrik(alat=[{"watt": 100, "jam": 2}], golongan="1300")
+    assert res1["rincian"][0]["nama"] == "Alat 1"
+
+    # 2. Koma desimal diterima
+    res2 = hitung_tagihan_listrik(alat=[{"nama": "Lampu", "watt": "45,5", "jam": "1,5", "jumlah": "1"}], golongan="1300")
+    assert res2["rincian"][0]["watt"] == 45.5
+    assert res2["rincian"][0]["jam"] == 1.5
+
+    # 3. Semua jam 0 tidak meledak
+    res3 = hitung_tagihan_listrik(alat=[{"nama": "Lampu", "watt": 100, "jam": 0}], golongan="1300", token=50000)
+    assert res3["kwh_bulan"] == 0.0
+    assert res3["rupiah_bulan"] == 0
+    assert res3["rincian"][0]["persen"] == 0.0
+    assert res3["terbesar"] is None
+    assert res3["token"]["hari"] == 0.0
+
+
+def test_tagihan_listrik_regresi_endpoint_lama() -> None:
+    """Endpoint root menyebutkan tagihan-listrik di daftar tools."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "tools" in body
+    assert "tagihan-listrik" in body["tools"]
 
 
 
