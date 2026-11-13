@@ -407,6 +407,25 @@ from .tagihan_listrik import (
     hitung as hitung_tagihan_listrik,
     limits_payload as tagihan_listrik_limits_payload_func,
 )
+from .patungan import (
+    INVALID_LAYANAN as PT_INVALID_LAYANAN,
+    INVALID_MODE as PT_INVALID_MODE,
+    INVALID_ORANG as PT_INVALID_ORANG,
+    INVALID_PAJAK as PT_INVALID_PAJAK,
+    INVALID_PEMBULATAN as PT_INVALID_PEMBULATAN,
+    INVALID_PESANAN as PT_INVALID_PESANAN,
+    INVALID_TAMBAHAN as PT_INVALID_TAMBAHAN,
+    INVALID_TOTAL as PT_INVALID_TOTAL,
+    NAMA_TOO_LONG as PT_NAMA_TOO_LONG,
+    NO_PESANAN as PT_NO_PESANAN,
+    NO_TOTAL as PT_NO_TOTAL,
+    TEXT_TOO_LONG as PT_TEXT_TOO_LONG,
+    TOO_MANY_PESANAN as PT_TOO_MANY_PESANAN,
+    UNSUPPORTED_MODE as PT_UNSUPPORTED_MODE,
+    PatunganError,
+    hitung_patungan,
+    limits_payload as patungan_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1229,6 +1248,17 @@ async def handle_tagihan_listrik_error(request: Request, exc: TagihanListrikErro
     )
 
 
+@app.exception_handler(PatunganError)
+async def handle_patungan_error(request: Request, exc: PatunganError) -> JSONResponse:
+    """Error kalkulator bagi tagihan patungan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung patungan ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1555,6 +1585,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'upah_bulanan', 'jenis_hari', 'jam_lembur', dan 'hari_kerja_mingguan'."
     elif request.url.path.startswith("/api/tagihan-listrik"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'alat', 'golongan', 'tarif', dan 'token'."
+    elif request.url.path.startswith("/api/patungan"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'total', 'orang', 'pesanan', 'pajak', 'layanan', 'tambahan', dan 'pembulatan'."
     elif request.url.path.startswith("/api/ipk"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
@@ -2360,6 +2392,10 @@ def _lembur_limits_payload() -> dict:
 
 def _tagihan_listrik_limits_payload() -> dict:
     return tagihan_listrik_limits_payload_func()
+
+
+def _patungan_limits_payload() -> dict:
+    return patungan_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -4833,6 +4869,96 @@ async def tagihan_listrik_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/patungan/limits")
+async def patungan_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Bagi Tagihan Patungan."""
+    return JSONResponse(content=_patungan_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/patungan")
+async def patungan_endpoint(
+    request: Request,
+    mode: str = Form(default=""),
+    total: str = Form(default=""),
+    orang: str = Form(default=""),
+    pesanan: str = Form(default=""),
+    pajak: str = Form(default=""),
+    layanan: str = Form(default=""),
+    tambahan: str = Form(default=""),
+    pembulatan: str = Form(default=""),
+):
+    """Hitung pembagian tagihan patungan di memori."""
+    started = time.perf_counter()
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise PatunganError(
+            PT_INVALID_MODE,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise PatunganError(
+            PT_INVALID_MODE,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise PatunganError(
+                PT_INVALID_MODE,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if (mode is None or mode == "") and "mode" in form:
+        mode = form.get("mode")
+    if (total is None or total == "") and "total" in form:
+        total = form.get("total")
+    if (orang is None or orang == "") and "orang" in form:
+        orang = form.get("orang")
+    if (pesanan is None or pesanan == "") and "pesanan" in form:
+        pesanan = form.get("pesanan")
+    if (pajak is None or pajak == "") and "pajak" in form:
+        pajak = form.get("pajak")
+    if (layanan is None or layanan == "") and "layanan" in form:
+        layanan = form.get("layanan")
+    if (tambahan is None or tambahan == "") and "tambahan" in form:
+        tambahan = form.get("tambahan")
+    if (pembulatan is None or pembulatan == "") and "pembulatan" in form:
+        pembulatan = form.get("pembulatan")
+
+    result = hitung_patungan(
+        mode=mode,
+        total=total,
+        orang=orang,
+        pesanan=pesanan,
+        pajak=pajak,
+        layanan=layanan,
+        tambahan=tambahan,
+        pembulatan=pembulatan,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung patungan selesai: mode=%s jumlah_orang=%s durasi=%.0fms",
+        result["mode"],
+        result["jumlah_orang"],
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/keramik/limits")
 async def keramik_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
@@ -7229,6 +7355,7 @@ async def root() -> dict:
             "kehamilan",
             "lembur",
             "tagihan-listrik",
+            "patungan",
         ],
     }
 

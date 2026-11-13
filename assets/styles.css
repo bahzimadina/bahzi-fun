@@ -13730,6 +13730,285 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Bagi tagihan patungan (patungan) ================= */
+.patungan__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.patungan__mode-section {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.patungan__mode-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.patungan__seg {
+  display: inline-flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  padding: 3px;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.patungan__seg button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: .5rem .9rem;
+  border-radius: calc(var(--radius-md, 8px) - 2px);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .2s ease;
+  line-height: 1.2;
+}
+
+.patungan__seg button:hover {
+  color: var(--text-main);
+}
+
+.patungan__seg button:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.patungan__seg button.patungan__seg-btn--active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font-weight: 600;
+}
+
+.patungan__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.patungan__grid--common {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  padding-top: .75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.patungan__field--full {
+  grid-column: 1 / -1;
+}
+
+.patungan__pesanan-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: .35rem;
+}
+
+.patungan__hitung-orang {
+  font-size: 12px;
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+#patungan-pesanan {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: .65rem .75rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+#patungan-pesanan:focus-visible,
+#patungan-pesanan:focus {
+  outline: none;
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 2px rgba(117, 83, 255, 0.25);
+}
+
+.patungan__hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: .3rem;
+  line-height: 1.35;
+}
+
+.patungan__status-container {
+  flex: 1 1 200px;
+}
+
+.patungan__result {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.patungan__hero {
+  text-align: center;
+  padding: 1rem 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25rem;
+}
+
+.patungan__hero-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.patungan__hero-value {
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.patungan__hero-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.patungan__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: .75rem;
+}
+
+.patungan__stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  padding: .75rem .9rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+
+.patungan__stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.patungan__stat-value {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.patungan__table-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.patungan__table-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.patungan__table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+}
+
+.patungan__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.patungan__table th,
+.patungan__table td {
+  padding: .55rem .75rem;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.patungan__table th {
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.patungan__table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.patungan__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.patungan__table .text-right {
+  text-align: right;
+}
+
+.patungan__note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+  font-style: italic;
+}
+
+.patungan__result-actions {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: .25rem;
+}
+
+@media (max-width: 640px) {
+  .patungan__seg {
+    width: 100%;
+    display: flex;
+  }
+  .patungan__seg button {
+    flex: 1 1 50%;
+    text-align: center;
+  }
+  .patungan__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (pointer: coarse) {
   .tagihan__input,
   #tagihan-golongan,
@@ -13741,7 +14020,20 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #tagihan-clear,
   #tagihan-close,
   #tagihan-copy,
-  #tagihan-download {
+  #tagihan-download,
+  .patungan__seg button,
+  #patungan-submit,
+  #patungan-clear,
+  #patungan-close,
+  #patungan-copy,
+  #patungan-download,
+  #patungan-pembulatan,
+  #patungan-total,
+  #patungan-orang,
+  #patungan-pajak,
+  #patungan-layanan,
+  #patungan-tambahan,
+  #patungan-pesanan {
     min-height: 44px;
     min-width: 44px;
   }

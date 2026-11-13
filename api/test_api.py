@@ -480,6 +480,25 @@ from app.tagihan_listrik import (
     hitung as hitung_tagihan_listrik,
     limits_payload as tagihan_listrik_limits_payload,
 )
+from app.patungan import (
+    INVALID_LAYANAN as PT_TEST_INVALID_LAYANAN,
+    INVALID_MODE as PT_TEST_INVALID_MODE,
+    INVALID_ORANG as PT_TEST_INVALID_ORANG,
+    INVALID_PAJAK as PT_TEST_INVALID_PAJAK,
+    INVALID_PEMBULATAN as PT_TEST_INVALID_PEMBULATAN,
+    INVALID_PESANAN as PT_TEST_INVALID_PESANAN,
+    INVALID_TAMBAHAN as PT_TEST_INVALID_TAMBAHAN,
+    INVALID_TOTAL as PT_TEST_INVALID_TOTAL,
+    NAMA_TOO_LONG as PT_TEST_NAMA_TOO_LONG,
+    NO_PESANAN as PT_TEST_NO_PESANAN,
+    NO_TOTAL as PT_TEST_NO_TOTAL,
+    TEXT_TOO_LONG as PT_TEST_TEXT_TOO_LONG,
+    TOO_MANY_PESANAN as PT_TEST_TOO_MANY_PESANAN,
+    UNSUPPORTED_MODE as PT_TEST_UNSUPPORTED_MODE,
+    PatunganError,
+    hitung_patungan,
+    limits_payload as patungan_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -19206,6 +19225,346 @@ def test_tagihan_listrik_regresi_endpoint_lama() -> None:
     body = resp.json()
     assert "tools" in body
     assert "tagihan-listrik" in body["tools"]
+    assert "patungan" in body["tools"]
+
+
+# ============================================================================
+# PENGUJIAN KALKULATOR BAGI TAGIHAN PATUNGAN (patungan)
+# ============================================================================
+def test_patungan_limits() -> None:
+    """Batas operasional dan konfigurasi kalkulator patungan."""
+    payload = patungan_limits_payload()
+    assert payload["max_orang"] == 100
+    assert payload["min_orang_rata"] == 2
+    assert payload["max_pesanan"] == 100
+    assert payload["nama_max"] == 40
+    assert payload["nominal_min"] == 0
+    assert payload["nominal_max"] == 1_000_000_000_000
+    assert payload["pajak_min"] == 0
+    assert payload["pajak_max"] == 100
+    assert payload["layanan_min"] == 0
+    assert payload["layanan_max"] == 100
+    assert "100" in payload["pembulatan_pilihan"]
+    assert "500" in payload["pembulatan_pilihan"]
+    assert "1000" in payload["pembulatan_pilihan"]
+    assert payload["default"]["mode"] == "rata"
+    assert payload["default"]["pembulatan"] == "tidak"
+
+    client = _test_client()
+    if client is not None:
+        resp = client.get("/api/patungan/limits")
+        assert resp.status_code == 200
+        assert "no-store" in resp.headers.get("cache-control", "").lower()
+        data = resp.json()
+        assert data["max_orang"] == 100
+        assert data["max_pesanan"] == 100
+
+
+def test_patungan_mode_rata_dasar() -> None:
+    """Mode rata dasar: total 300.000, 4 orang -> per_orang 75.000, total_ditagih 300.000, kelebihan 0."""
+    res = hitung_patungan(mode="rata", total="300.000", orang=4)
+    assert res["mode"] == "rata"
+    assert res["jumlah_orang"] == 4
+    assert res["subtotal"] == 300000.0
+    assert res["pajak_persen"] == 0.0
+    assert res["pajak_rp"] == 0.0
+    assert res["layanan_persen"] == 0.0
+    assert res["layanan_rp"] == 0.0
+    assert res["tambahan"] == 0.0
+    assert res["pembulatan"] == "tidak"
+    assert res["total_akhir"] == 300000.0
+    assert res["per_orang"] == 75000.0
+    assert res["orang"] is None
+    assert res["total_ditagih"] == 300000.0
+    assert res["kelebihan"] == 0.0
+    assert "perkiraan" in res["catatan"].lower()
+
+
+def test_patungan_mode_rata_pajak_layanan_tambahan_pembulatan() -> None:
+    """Mode rata + pajak 10 + layanan 5 + tambahan 20.000 + pembulatan 500.
+
+    Perhitungan manual:
+    - subtotal = 300.000
+    - pajak (10%) = 300.000 * 10 / 100 = 30.000
+    - layanan (5%) = 300.000 * 5 / 100 = 15.000
+    - tambahan = 20.000
+    - total_akhir = 300.000 + 30.000 + 15.000 + 20.000 = 365.000
+    - bagian_tepat = 365.000 / 4 = 91.250
+    - pembulatan 500 ke atas:
+      91.250 / 500 = 182.5 -> ceil(182.5) = 183 -> 183 * 500 = 91.500
+    - per_orang = 91.500
+    - total_ditagih = 91.500 * 4 = 366.000
+    - kelebihan = 366.000 - 365.000 = 1.000
+    """
+    res = hitung_patungan(
+        mode="rata",
+        total=300000,
+        orang=4,
+        pajak=10,
+        layanan=5,
+        tambahan=20000,
+        pembulatan="500",
+    )
+    assert res["subtotal"] == 300000.0
+    assert res["pajak_persen"] == 10.0
+    assert res["pajak_rp"] == 30000.0
+    assert res["layanan_persen"] == 5.0
+    assert res["layanan_rp"] == 15000.0
+    assert res["tambahan"] == 20000.0
+    assert res["pembulatan"] == "500"
+    assert res["total_akhir"] == 365000.0
+    assert res["per_orang"] == 91500.0
+    assert res["total_ditagih"] == 366000.0
+    assert res["kelebihan"] == 1000.0
+
+
+def test_patungan_mode_pesanan_proporsional_dan_nama() -> None:
+    """Mode pesanan: 3 orang (45.000 / 30.000 / 25.000) subtotal 100.000, pajak 10, layanan 5.
+
+    Pajak & layanan proporsional per orang.
+    Uji nama otomatis ("Orang 3") & nama eksplisit ("Andi", "Budi").
+    """
+    pesanan_teks = "Andi, 45.000\nBudi: 30000\n25.000"
+    res = hitung_patungan(
+        mode="pesanan",
+        pesanan=pesanan_teks,
+        pajak=10,
+        layanan=5,
+        tambahan=0,
+        pembulatan="tidak",
+    )
+    assert res["mode"] == "pesanan"
+    assert res["jumlah_orang"] == 3
+    assert res["subtotal"] == 100000.0
+    assert res["pajak_rp"] == 10000.0  # 4500 + 3000 + 2500
+    assert res["layanan_rp"] == 5000.0  # 2250 + 1500 + 1250
+    assert res["total_akhir"] == 115000.0
+    assert res["per_orang"] is None
+    assert res["total_ditagih"] == 115000.0
+    assert res["kelebihan"] == 0.0
+
+    orang_list = res["orang"]
+    assert len(orang_list) == 3
+
+    # Orang 1: Andi
+    assert orang_list[0]["nama"] == "Andi"
+    assert orang_list[0]["pesanan"] == 45000.0
+    assert orang_list[0]["pajak_rp"] == 4500.0
+    assert orang_list[0]["layanan_rp"] == 2250.0
+    assert orang_list[0]["tambahan_rp"] == 0.0
+    assert orang_list[0]["total"] == 51750.0
+
+    # Orang 2: Budi
+    assert orang_list[1]["nama"] == "Budi"
+    assert orang_list[1]["pesanan"] == 30000.0
+    assert orang_list[1]["pajak_rp"] == 3000.0
+    assert orang_list[1]["layanan_rp"] == 1500.0
+    assert orang_list[1]["total"] == 34500.0
+
+    # Orang 3: Nama otomatis "Orang 3"
+    assert orang_list[2]["nama"] == "Orang 3"
+    assert orang_list[2]["pesanan"] == 25000.0
+    assert orang_list[2]["pajak_rp"] == 2500.0
+    assert orang_list[2]["layanan_rp"] == 1250.0
+    assert orang_list[2]["total"] == 28750.0
+
+    # Jumlah total orang = total tagihan
+    assert sum(o["total"] for o in orang_list) == res["total_ditagih"]
+
+
+def test_patungan_pembulatan_1000() -> None:
+    """Pembulatan 1000: total per orang naik ke kelipatan 1000, kelebihan = total_ditagih - total_akhir."""
+    pesanan_teks = "Andi, 45000\nBudi, 30000\nCici, 25000"
+    res = hitung_patungan(
+        mode="pesanan",
+        pesanan=pesanan_teks,
+        pajak=10,
+        layanan=5,
+        tambahan=0,
+        pembulatan="1000",
+    )
+    # Andi raw 51.750 -> 52.000
+    # Budi raw 34.500 -> 35.000
+    # Cici raw 28.750 -> 29.000
+    assert res["orang"][0]["total"] == 52000.0
+    assert res["orang"][1]["total"] == 35000.0
+    assert res["orang"][2]["total"] == 29000.0
+    assert res["total_ditagih"] == 116000.0
+    assert res["total_akhir"] == 115000.0
+    assert res["kelebihan"] == res["total_ditagih"] - res["total_akhir"]
+    assert res["kelebihan"] == 1000.0
+
+
+def test_patungan_jalur_galat() -> None:
+    """Pengujian semua jalur galat kalkulator patungan sesuai spesifikasi."""
+    # 1. Mode tidak dikenal
+    try:
+        hitung_patungan(mode="kocok")
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_UNSUPPORTED_MODE
+        assert exc.status_code == 400
+
+    # 1b. Mode kosong
+    try:
+        hitung_patungan(mode="")
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_MODE
+
+    # 2. Total kosong (mode rata)
+    try:
+        hitung_patungan(mode="rata", total="", orang=4)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_NO_TOTAL
+
+    # 3. Total bukan angka
+    try:
+        hitung_patungan(mode="rata", total="tiga ratus ribu", orang=4)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_TOTAL
+
+    # 4. Orang 1 (< MIN_ORANG_RATA = 2)
+    try:
+        hitung_patungan(mode="rata", total=100000, orang=1)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_ORANG
+
+    # 5. Orang 101 (> MAX_ORANG = 100)
+    try:
+        hitung_patungan(mode="rata", total=100000, orang=101)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_ORANG
+
+    # 6. Pesanan kosong (mode pesanan)
+    try:
+        hitung_patungan(mode="pesanan", pesanan="")
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_NO_PESANAN
+
+    # 7. 101 baris pesanan
+    baris_101 = "\n".join([f"Orang {i}, 10000" for i in range(1, 102)])
+    try:
+        hitung_patungan(mode="pesanan", pesanan=baris_101)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_TOO_MANY_PESANAN
+
+    # 8. Baris tanpa nominal
+    try:
+        hitung_patungan(mode="pesanan", pesanan="Andi, 45000\nBudi\nCici, 20000")
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_PESANAN
+        assert "Baris 2" in exc.message
+
+    # 9. Nama 41 karakter (> NAMA_MAX = 40)
+    nama_panjang = "A" * 41
+    try:
+        hitung_patungan(mode="pesanan", pesanan=f"{nama_panjang}, 50000")
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_NAMA_TOO_LONG
+        assert "Baris 1" in exc.message
+
+    # 10. Pajak 101 (> 100)
+    try:
+        hitung_patungan(mode="rata", total=100000, orang=4, pajak=101)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_PAJAK
+
+    # 11. Layanan negatif (< 0)
+    try:
+        hitung_patungan(mode="rata", total=100000, orang=4, layanan=-5)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_LAYANAN
+
+    # 12. Tambahan negatif (< 0)
+    try:
+        hitung_patungan(mode="rata", total=100000, orang=4, tambahan=-1000)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_TAMBAHAN
+
+    # 13. Pembulatan 250 (tidak didukung)
+    try:
+        hitung_patungan(mode="rata", total=100000, orang=4, pembulatan="250")
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_INVALID_PEMBULATAN
+
+    # 14. Teks pesanan melebihi batas 20.000 karakter
+    teks_raksasa = "A, 10000\n" * 2500  # > 20.000 karakter
+    try:
+        hitung_patungan(mode="pesanan", pesanan=teks_raksasa)
+        assert False, "Harus melempar PatunganError"
+    except PatunganError as exc:
+        assert exc.code == PT_TEST_TEXT_TOO_LONG
+        assert exc.status_code == 413
+
+
+def test_patungan_http_client_dan_body_json() -> None:
+    """Uji endpoint HTTP /api/patungan: sukses multipart, tolak body JSON, header lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Sukses mode rata
+    resp = client.post(
+        "/api/patungan",
+        data={
+            "mode": "rata",
+            "total": "300.000",
+            "orang": "4",
+            "pajak": "10",
+            "layanan": "5",
+            "tambahan": "20.000",
+            "pembulatan": "500",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    assert "no-cache" in resp.headers.get("pragma", "").lower()
+    assert "x-processing-ms" in resp.headers
+    body = resp.json()
+    assert body["mode"] == "rata"
+    assert body["per_orang"] == 91500.0
+    assert body["total_ditagih"] == 366000.0
+
+    # 2. Sukses mode pesanan
+    resp_pesanan = client.post(
+        "/api/patungan",
+        data={
+            "mode": "pesanan",
+            "pesanan": "Andi, 45000\nBudi, 30000\n25000",
+            "pajak": "10",
+            "layanan": "5",
+        },
+    )
+    assert resp_pesanan.status_code == 200
+    body_p = resp_pesanan.json()
+    assert body_p["mode"] == "pesanan"
+    assert len(body_p["orang"]) == 3
+    assert body_p["orang"][0]["nama"] == "Andi"
+    assert body_p["orang"][2]["nama"] == "Orang 3"
+
+    # 3. Menolak body JSON
+    resp_json = client.post(
+        "/api/patungan",
+        json={"mode": "rata", "total": 100000, "orang": 2},
+    )
+    assert resp_json.status_code == 400
+    data_json = resp_json.json()
+    assert "error" in data_json
+    assert data_json["error"]["code"] == PT_TEST_INVALID_MODE
+    assert "bukan JSON" in data_json["error"]["message"]
 
 
 

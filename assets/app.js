@@ -105,7 +105,8 @@
         { name: 'Hitung harga jual', desc: 'Hitung harga jual dari modal, biaya tambahan, potongan marketplace, dan target laba.', status: 'available', action: 'harga-jual' },
         { name: 'Hitung biaya perjalanan', desc: 'Perkirakan biaya BBM, tol, dan parkir untuk sebuah perjalanan, lalu lihat patungan per orang.', status: 'available', action: 'biaya-perjalanan' },
         { name: 'Hitung upah lembur', desc: 'Hitung perkiraan upah lembur dari gaji sebulan, untuk hari kerja maupun hari libur.', status: 'available', action: 'lembur' },
-        { name: 'Hitung tagihan listrik rumah', desc: 'Perkirakan kWh dan rupiah tagihan listrik dari daftar peralatan rumah, lengkap dengan alat paling boros.', status: 'available', action: 'tagihan-listrik' }
+        { name: 'Hitung tagihan listrik rumah', desc: 'Perkirakan kWh dan rupiah tagihan listrik dari daftar peralatan rumah, lengkap dengan alat paling boros.', status: 'available', action: 'tagihan-listrik' },
+        { name: 'Bagi tagihan patungan', desc: 'Bagi tagihan makan bareng, arisan, atau patungan kado: rata atau sesuai pesanan, lengkap dengan pajak, layanan, dan pembulatan.', status: 'available', action: 'patungan' }
       ]
     },
     {
