@@ -499,6 +499,18 @@ from app.patungan import (
     hitung_patungan,
     limits_payload as patungan_limits_payload,
 )
+from app.resep import (
+    BARIS_TERLALU_PANJANG as RSP_TEST_BARIS_TERLALU_PANJANG,
+    BARIS_TIDAK_VALID as RSP_TEST_BARIS_TIDAK_VALID,
+    INVALID_PORSI as RSP_TEST_INVALID_PORSI,
+    INVALID_REQUEST as RSP_TEST_INVALID_REQUEST,
+    NO_BAHAN as RSP_TEST_NO_BAHAN,
+    TEKS_TERLALU_PANJANG as RSP_TEST_TEKS_TERLALU_PANJANG,
+    TERLALU_BANYAK_BARIS as RSP_TEST_TERLALU_BANYAK_BARIS,
+    ResepError,
+    hitung_resep,
+    limits_payload as resep_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -19226,6 +19238,7 @@ def test_tagihan_listrik_regresi_endpoint_lama() -> None:
     assert "tools" in body
     assert "tagihan-listrik" in body["tools"]
     assert "patungan" in body["tools"]
+    assert "resep" in body["tools"]
 
 
 # ============================================================================
@@ -19564,6 +19577,216 @@ def test_patungan_http_client_dan_body_json() -> None:
     data_json = resp_json.json()
     assert "error" in data_json
     assert data_json["error"]["code"] == PT_TEST_INVALID_MODE
+    assert "bukan JSON" in data_json["error"]["message"]
+
+
+# ============================================================================
+# PENGUJIAN SESUAIKAN RESEP MASAKAN (resep)
+# ============================================================================
+def test_resep_limits() -> None:
+    """Batas operasional dan konfigurasi kalkulator penyesuaian resep."""
+    payload = resep_limits_payload()
+    assert payload["min_porsi"] == 1
+    assert payload["max_porsi"] == 1000
+    assert payload["max_baris"] == 200
+    assert payload["max_karakter_baris"] == 200
+    assert payload["max_karakter"] == 20000
+    assert "gram" in payload["satuan_dikenal"]
+    assert "sdm" in payload["satuan_dikenal"]
+    assert "sdt" in payload["satuan_dikenal"]
+
+    client = _test_client()
+    if client is not None:
+        resp = client.get("/api/resep/limits")
+        assert resp.status_code == 200
+        assert "no-store" in resp.headers.get("cache-control", "").lower()
+        data = resp.json()
+        assert data["max_porsi"] == 1000
+        assert data["max_baris"] == 200
+        assert "satuan_dikenal" in data
+
+
+def test_resep_skala_dasar() -> None:
+    """Skala 4 -> 10 dengan '500 gram ayam' menghasilkan 1250 gram, padanan kg, dan faktor 2,5."""
+    res = hitung_resep(4, 10, "500 gram ayam")
+    assert res["porsi_asal"] == 4
+    assert res["porsi_target"] == 10
+    assert res["faktor"] == 2.5
+    assert res["bulatkan"] is True
+    assert len(res["bahan"]) == 1
+    item = res["bahan"][0]
+    assert item["baris"] == 1
+    assert item["teks_asal"] == "500 gram ayam"
+    assert item["nama"] == "ayam"
+    assert item["satuan"] == "gram"
+    assert item["jumlah_asal"] == 500.0
+    assert item["jumlah_baru"] == 1250.0
+    assert item["nilai_persis"] == 1250.0
+    assert item["teks_baru"] == "1250 gram ayam"
+    assert item["padanan"] == "≈1,25 kg"
+    assert res["ringkas"]["jumlah_bahan"] == 1
+    assert res["ringkas"]["jumlah_tidak_dihitung"] == 0
+    assert len(res["catatan"]) >= 1
+
+
+def test_resep_pembulatan() -> None:
+    """Uji pembulatan takaran: '3 butir telur' 4 -> 6 porsi = 4,5 butir; '1/2 sdt garam' terbaca 0,5."""
+    # 3 butir telur, skala 4 -> 6 (faktor 1.5): 3 * 1.5 = 4.5 butir
+    res = hitung_resep(4, 6, "3 butir telur")
+    assert res["faktor"] == 1.5
+    assert len(res["bahan"]) == 1
+    item_telur = res["bahan"][0]
+    assert item_telur["jumlah_baru"] == 4.5
+    assert item_telur["teks_baru"] == "4,5 butir telur"
+
+    # 1/2 sdt garam, skala 4 -> 4 (faktor 1.0): terbaca 0.5
+    res2 = hitung_resep(4, 4, "1/2 sdt garam")
+    assert len(res2["bahan"]) == 1
+    item_garam = res2["bahan"][0]
+    assert item_garam["jumlah_asal"] == 0.5
+    assert item_garam["jumlah_baru"] == 0.5
+    assert item_garam["teks_baru"] == "0,5 sdt garam"
+
+
+def test_resep_bulatkan_false() -> None:
+    """Uji bulatkan=false mengembalikan nilai persis tanpa pembulatan dapur."""
+    # 3 butir telur, 4 -> 5 porsi (faktor 1.25): nilai_persis = 3.75
+    res = hitung_resep(4, 5, "3 butir telur", bulatkan=False)
+    assert res["bulatkan"] is False
+    assert len(res["bahan"]) == 1
+    item = res["bahan"][0]
+    assert item["nilai_persis"] == 3.75
+    assert item["jumlah_baru"] == 3.75
+    assert item["teks_baru"] == "3,75 butir telur"
+
+
+def test_resep_tidak_dihitung() -> None:
+    """Baris 'garam secukupnya' masuk tidak_dihitung dan tidak menggagalkan permintaan."""
+    teks = "500 gram ayam\ngaram secukupnya\nair secukupnya"
+    res = hitung_resep(4, 10, teks)
+    assert len(res["bahan"]) == 1
+    assert len(res["tidak_dihitung"]) == 2
+    assert res["tidak_dihitung"][0]["baris"] == 2
+    assert res["tidak_dihitung"][0]["teks_asal"] == "garam secukupnya"
+    assert res["tidak_dihitung"][1]["baris"] == 3
+    assert res["tidak_dihitung"][1]["teks_asal"] == "air secukupnya"
+    assert res["ringkas"]["jumlah_bahan"] == 1
+    assert res["ringkas"]["jumlah_tidak_dihitung"] == 2
+
+
+def test_resep_galat() -> None:
+    """Uji penanganan berbagai kondisi galat kalkulator resep."""
+    # 1. NO_BAHAN (kosong)
+    try:
+        hitung_resep(4, 10, "")
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_NO_BAHAN
+        assert exc.status_code == 400
+
+    try:
+        hitung_resep(4, 10, "   \n  \n")
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_NO_BAHAN
+
+    # 2. INVALID_PORSI: 0, "abc", 1001, negatif
+    for p in (0, "abc", 1001, -1):
+        try:
+            hitung_resep(p, 10, "500 gram ayam")
+            assert False, f"Harus melempar ResepError untuk porsi_asal={p}"
+        except ResepError as exc:
+            assert exc.code == RSP_TEST_INVALID_PORSI
+            assert exc.status_code == 400
+
+        try:
+            hitung_resep(4, p, "500 gram ayam")
+            assert False, f"Harus melempar ResepError untuk porsi_target={p}"
+        except ResepError as exc:
+            assert exc.code == RSP_TEST_INVALID_PORSI
+            assert exc.status_code == 400
+
+    # 3. BARIS_TIDAK_VALID: "2 sdm" (setelah jumlah dan satuan belum ada nama bahan)
+    try:
+        hitung_resep(4, 10, "2 sdm")
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_BARIS_TIDAK_VALID
+        assert exc.status_code == 400
+        assert "Baris 1" in exc.message
+        assert "setelah jumlah (dan satuan) belum ada nama" in exc.message
+
+    # BARIS_TIDAK_VALID: 0 atau negatif
+    try:
+        hitung_resep(4, 10, "0 gram ayam")
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_BARIS_TIDAK_VALID
+        assert "0 atau negatif" in exc.message
+
+    try:
+        hitung_resep(4, 10, "-1 sdt garam")
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_BARIS_TIDAK_VALID
+        assert "0 atau negatif" in exc.message
+
+    # 4. TERLALU_BANYAK_BARIS (> 200 baris, status 413)
+    baris_201 = "\n".join([f"{i} gram gula" for i in range(1, 202)])
+    try:
+        hitung_resep(4, 10, baris_201)
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_TERLALU_BANYAK_BARIS
+        assert exc.status_code == 413
+
+    # 5. BARIS_TERLALU_PANJANG (> 200 karakter, status 400)
+    baris_panjang = "500 gram " + "x" * 200
+    try:
+        hitung_resep(4, 10, baris_panjang)
+        assert False, "Harus melempar ResepError"
+    except ResepError as exc:
+        assert exc.code == RSP_TEST_BARIS_TERLALU_PANJANG
+        assert exc.status_code == 400
+        assert "Baris 1" in exc.message
+
+
+def test_resep_http_client_dan_body_json() -> None:
+    """Uji endpoint HTTP POST /api/resep: sukses multipart, tolak body JSON, header no-store."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. Sukses multipart
+    resp = client.post(
+        "/api/resep",
+        data={
+            "porsi_asal": "4",
+            "porsi_target": "10",
+            "bahan": "500 gram ayam\ngaram secukupnya",
+            "bulatkan": "true",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp.headers
+    body = resp.json()
+    assert body["porsi_asal"] == 4
+    assert body["porsi_target"] == 10
+    assert body["faktor"] == 2.5
+    assert len(body["bahan"]) == 1
+    assert body["bahan"][0]["jumlah_baru"] == 1250.0
+    assert len(body["tidak_dihitung"]) == 1
+
+    # 2. Menolak body JSON
+    resp_json = client.post(
+        "/api/resep",
+        json={"porsi_asal": 4, "porsi_target": 10, "bahan": "500 gram ayam"},
+    )
+    assert resp_json.status_code == 400
+    data_json = resp_json.json()
+    assert "error" in data_json
+    assert data_json["error"]["code"] == RSP_TEST_INVALID_REQUEST
     assert "bukan JSON" in data_json["error"]["message"]
 
 

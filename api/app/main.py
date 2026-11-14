@@ -426,6 +426,18 @@ from .patungan import (
     hitung_patungan,
     limits_payload as patungan_limits_payload_func,
 )
+from .resep import (
+    BARIS_TERLALU_PANJANG as RSP_BARIS_TERLALU_PANJANG,
+    BARIS_TIDAK_VALID as RSP_BARIS_TIDAK_VALID,
+    INVALID_PORSI as RSP_INVALID_PORSI,
+    INVALID_REQUEST as RSP_INVALID_REQUEST,
+    NO_BAHAN as RSP_NO_BAHAN,
+    TEKS_TERLALU_PANJANG as RSP_TEKS_TERLALU_PANJANG,
+    TERLALU_BANYAK_BARIS as RSP_TERLALU_BANYAK_BARIS,
+    ResepError,
+    hitung_resep,
+    limits_payload as resep_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1259,6 +1271,17 @@ async def handle_patungan_error(request: Request, exc: PatunganError) -> JSONRes
     )
 
 
+@app.exception_handler(ResepError)
+async def handle_resep_error(request: Request, exc: ResepError) -> JSONResponse:
+    """Error kalkulator resep masakan yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung resep ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1587,6 +1610,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'alat', 'golongan', 'tarif', dan 'token'."
     elif request.url.path.startswith("/api/patungan"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode', 'total', 'orang', 'pesanan', 'pajak', 'layanan', 'tambahan', dan 'pembulatan'."
+    elif request.url.path.startswith("/api/resep"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'porsi_asal', 'porsi_target', 'bahan', dan 'bulatkan'."
     elif request.url.path.startswith("/api/ipk"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'courses'."
     elif request.url.path.startswith("/api/zakat"):
@@ -2396,6 +2421,27 @@ def _tagihan_listrik_limits_payload() -> dict:
 
 def _patungan_limits_payload() -> dict:
     return patungan_limits_payload_func()
+
+
+def _reject_oversized_resep_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator resep."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > 64 * 1024:
+        raise ResepError(
+            RSP_TEKS_TERLALU_PANJANG,
+            "Ukuran permintaan melebihi batas 64 KB.",
+            413,
+        )
+
+
+def _resep_limits_payload() -> dict:
+    return resep_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -4959,6 +5005,89 @@ async def patungan_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/resep/limits")
+async def resep_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Sesuaikan Resep Masakan."""
+    return JSONResponse(content=_resep_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/resep")
+async def resep_endpoint(
+    request: Request,
+    porsi_asal: str = Form(default=""),
+    porsi_target: str = Form(default=""),
+    bahan: str = Form(default=""),
+    bulatkan: str = Form(default="true"),
+):
+    """Hitung ulang takaran bahan resep masakan di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_resep_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise ResepError(
+            RSP_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise ResepError(
+            RSP_INVALID_REQUEST,
+            "Permintaan tidak valid. Gagal membaca formulir multipart/form-data.",
+            400,
+        )
+
+    for key, val in form.items():
+        if isinstance(val, UploadFile):
+            raise ResepError(
+                RSP_INVALID_REQUEST,
+                "Field formulir tidak boleh berupa berkas unggahan.",
+                400,
+            )
+
+    if (porsi_asal is None or porsi_asal == "") and "porsi_asal" in form:
+        porsi_asal = form.get("porsi_asal")
+    if (porsi_target is None or porsi_target == "") and "porsi_target" in form:
+        porsi_target = form.get("porsi_target")
+    if (bahan is None or bahan == "") and "bahan" in form:
+        bahan = form.get("bahan")
+    if (bulatkan is None or bulatkan == "") and "bulatkan" in form:
+        bulatkan = form.get("bulatkan")
+
+    # Validasi field wajib
+    if "porsi_asal" not in form and (porsi_asal is None or porsi_asal == ""):
+        raise ResepError(RSP_INVALID_REQUEST, "Field 'porsi_asal' wajib diisi.", 400)
+    if "porsi_target" not in form and (porsi_target is None or porsi_target == ""):
+        raise ResepError(RSP_INVALID_REQUEST, "Field 'porsi_target' wajib diisi.", 400)
+    if "bahan" not in form and (bahan is None or bahan == ""):
+        raise ResepError(RSP_INVALID_REQUEST, "Field 'bahan' wajib diisi.", 400)
+
+    result = hitung_resep(
+        porsi_asal=porsi_asal,
+        porsi_target=porsi_target,
+        bahan=bahan,
+        bulatkan=bulatkan,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung resep selesai: jumlah_baris=%d durasi=%.0fms",
+        len(result["bahan"]) + len(result["tidak_dihitung"]),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/keramik/limits")
 async def keramik_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
@@ -7356,6 +7485,7 @@ async def root() -> dict:
             "lembur",
             "tagihan-listrik",
             "patungan",
+            "resep",
         ],
     }
 

@@ -106,7 +106,8 @@
         { name: 'Hitung biaya perjalanan', desc: 'Perkirakan biaya BBM, tol, dan parkir untuk sebuah perjalanan, lalu lihat patungan per orang.', status: 'available', action: 'biaya-perjalanan' },
         { name: 'Hitung upah lembur', desc: 'Hitung perkiraan upah lembur dari gaji sebulan, untuk hari kerja maupun hari libur.', status: 'available', action: 'lembur' },
         { name: 'Hitung tagihan listrik rumah', desc: 'Perkirakan kWh dan rupiah tagihan listrik dari daftar peralatan rumah, lengkap dengan alat paling boros.', status: 'available', action: 'tagihan-listrik' },
-        { name: 'Bagi tagihan patungan', desc: 'Bagi tagihan makan bareng, arisan, atau patungan kado: rata atau sesuai pesanan, lengkap dengan pajak, layanan, dan pembulatan.', status: 'available', action: 'patungan' }
+        { name: 'Bagi tagihan patungan', desc: 'Bagi tagihan makan bareng, arisan, atau patungan kado: rata atau sesuai pesanan, lengkap dengan pajak, layanan, dan pembulatan.', status: 'available', action: 'patungan' },
+        { name: 'Sesuaikan resep masakan', desc: 'Hitung ulang jumlah bahan saat resep dibuat untuk porsi berbeda, dengan takaran yang dibulatkan wajar.', status: 'available', action: 'resep' }
       ]
     },
     {

@@ -13995,6 +13995,209 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   margin-top: .25rem;
 }
 
+/* =========================================================================
+   Panel alat: Sesuaikan resep masakan (resep)
+   ========================================================================= */
+.resep__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.resep__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.resep__bahan-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .35rem;
+}
+
+.resep__bahan-head label {
+  margin-bottom: 0;
+}
+
+.resep__contoh-btn {
+  font-size: .8rem;
+  padding: .25rem .6rem;
+}
+
+.resep__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-top: .25rem;
+  display: block;
+}
+
+.resep__toggle-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .75rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+}
+
+.resep__checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .6rem;
+  cursor: pointer;
+  font-size: .92rem;
+  font-weight: 500;
+  color: var(--text-main);
+  user-select: none;
+}
+
+.resep__checkbox-label input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--md-sys-color-primary, #fd44b0);
+  cursor: pointer;
+}
+
+.resep__status-container {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+.resep__result {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.resep__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: .75rem;
+}
+
+.resep__stat {
+  padding: .75rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.resep__stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+
+.resep__stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.resep__section {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.resep__section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.resep__items {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.resep__row {
+  padding: .75rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+
+.resep__row-main {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+
+.resep__row-origin {
+  color: var(--text-muted);
+  font-size: .9rem;
+  text-decoration: line-through;
+  opacity: .85;
+}
+
+.resep__row-arrow {
+  color: var(--md-sys-color-primary, #fd44b0);
+  font-weight: 600;
+  font-size: .9rem;
+}
+
+.resep__row-new {
+  color: var(--text-main);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.resep__row-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.resep__list-unscaled {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-main);
+  font-size: .9rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+
+.resep__unscaled-item {
+  line-height: 1.45;
+}
+
+.resep__note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+  font-style: italic;
+}
+
+.resep__result-actions {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: .25rem;
+}
+
 @media (max-width: 640px) {
   .patungan__seg {
     width: 100%;
@@ -14005,6 +14208,9 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
     text-align: center;
   }
   .patungan__grid {
+    grid-template-columns: 1fr;
+  }
+  .resep__grid {
     grid-template-columns: 1fr;
   }
 }
@@ -14033,7 +14239,17 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   #patungan-pajak,
   #patungan-layanan,
   #patungan-tambahan,
-  #patungan-pesanan {
+  #patungan-pesanan,
+  #resep-close,
+  #resep-porsi-asal,
+  #resep-porsi-target,
+  #resep-isi-contoh,
+  #resep-bulatkan,
+  .resep__checkbox-label,
+  #resep-submit,
+  #resep-clear,
+  #resep-copy,
+  #resep-download {
     min-height: 44px;
     min-width: 44px;
   }
