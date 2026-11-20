@@ -438,6 +438,15 @@ from .resep import (
     hitung_resep,
     limits_payload as resep_limits_payload_func,
 )
+from .ac import (
+    BODY_BUKAN_JSON as AC_BODY_BUKAN_JSON,
+    DI_LUAR_RENTANG as AC_DI_LUAR_RENTANG,
+    INPUT_TIDAK_VALID as AC_INPUT_TIDAK_VALID,
+    MATAHARI_TIDAK_DIKENAL as AC_MATAHARI_TIDAK_DIKENAL,
+    AcError,
+    hitung as hitung_ac,
+    limits_payload as ac_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1282,6 +1291,17 @@ async def handle_resep_error(request: Request, exc: ResepError) -> JSONResponse:
     )
 
 
+@app.exception_handler(AcError)
+async def handle_ac_error(request: Request, exc: AcError) -> JSONResponse:
+    """Error kalkulator kapasitas AC yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung kapasitas ac ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(KeramikError)
 async def handle_keramik_error(request: Request, exc: KeramikError) -> JSONResponse:
     """Error kalkulator keramik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
@@ -1570,6 +1590,24 @@ async def handle_listrik_error(request: Request, exc: ListrikError) -> JSONRespo
 async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Request malformed (mis. body bukan multipart) -> 400 dengan format sama."""
     logger.warning("permintaan tidak valid: path=%s", request.url.path)
+    if request.url.path.startswith("/api/ac"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "kode": AC_BODY_BUKAN_JSON,
+                "pesan": "Permintaan tidak valid. Kirim objek JSON.",
+                "error": {
+                    "code": AC_BODY_BUKAN_JSON,
+                    "message": "Permintaan tidak valid. Kirim objek JSON.",
+                },
+                "detail": {
+                    "code": AC_BODY_BUKAN_JSON,
+                    "message": "Permintaan tidak valid. Kirim objek JSON.",
+                },
+            },
+            headers={"Cache-Control": "no-store"},
+        )
     if request.url.path.startswith("/api/video/trim"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file', 'mulai', 'akhir', dan 'mode'."
     elif request.url.path.startswith("/api/listrik"):
@@ -2442,6 +2480,10 @@ def _reject_oversized_resep_content_length(request: Request) -> None:
 
 def _resep_limits_payload() -> dict:
     return resep_limits_payload_func()
+
+
+def _ac_limits_payload() -> dict:
+    return ac_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -5088,6 +5130,67 @@ async def resep_endpoint(
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/ac/limits")
+async def ac_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Kapasitas AC Ruangan."""
+    return JSONResponse(content=_ac_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/ac")
+async def ac_endpoint(request: Request) -> JSONResponse:
+    """Hitung kapasitas AC ruangan di memori."""
+    started = time.perf_counter()
+
+    body_bytes = await request.body()
+    if not body_bytes or not body_bytes.strip():
+        raise AcError(
+            AC_BODY_BUKAN_JSON,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        raise AcError(
+            AC_BODY_BUKAN_JSON,
+            "Permintaan tidak valid. Kirim objek JSON, bukan formulir.",
+            400,
+        )
+
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        raise AcError(
+            AC_BODY_BUKAN_JSON,
+            "Format JSON tidak valid atau bukan objek JSON.",
+            400,
+        )
+
+    if not isinstance(payload, dict):
+        raise AcError(
+            AC_BODY_BUKAN_JSON,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    result = hitung_ac(data=payload)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "hitung kapasitas ac selesai: btu=%s pk=%s durasi=%.0fms",
+        result.get("btu"),
+        result.get("pk"),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content=result, headers=headers)
+
+
 @app.get("/api/keramik/limits")
 async def keramik_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
@@ -7486,6 +7589,7 @@ async def root() -> dict:
             "tagihan-listrik",
             "patungan",
             "resep",
+            "ac",
         ],
     }
 

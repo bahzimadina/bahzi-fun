@@ -14255,3 +14255,224 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Hitung kapasitas AC ruangan (ac) ================= */
+.ac__controls {
+  margin-bottom: 1.5rem;
+}
+
+.ac__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.ac__input,
+.ac__select {
+  width: 100%;
+  min-height: 44px;
+  padding: .625rem .75rem;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, .12));
+  background: var(--md-sys-color-surface-container-lowest, #ffffff);
+  color: var(--md-sys-color-on-surface, #1a1b1f);
+  font-family: inherit;
+  font-size: .9375rem;
+  box-sizing: border-box;
+}
+
+.ac__input:focus,
+.ac__select:focus {
+  outline: 2px solid var(--brand, #005ac1);
+  outline-offset: 2px;
+  border-color: var(--brand, #005ac1);
+}
+
+.ac__hint {
+  display: block;
+  font-size: .75rem;
+  color: var(--text-muted, #44474f);
+  margin-top: .35rem;
+  line-height: 1.35;
+}
+
+#ac-submit,
+#ac-clear,
+#ac-close,
+#ac-copy {
+  min-height: 44px;
+}
+
+.ac__result {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, .12));
+}
+
+.ac__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1rem;
+  border-radius: var(--radius-md, 10px);
+  background: var(--md-sys-color-surface-container-high, #ebe7ee);
+  border: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, .12));
+  margin-bottom: 1.5rem;
+}
+
+.ac__hero-label {
+  font-size: .8125rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted, #44474f);
+  margin-bottom: .25rem;
+}
+
+.ac__hero-value {
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  font-weight: 700;
+  color: var(--brand, #005ac1);
+  line-height: 1.2;
+}
+
+.ac__hero-pk {
+  display: inline-block;
+  margin-top: .5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface, #1a1b1f);
+  padding: .25rem .75rem;
+  border-radius: 999px;
+  background: var(--md-sys-color-secondary-container, #dbe2f9);
+}
+
+.ac__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: .75rem;
+  margin-bottom: 1.5rem;
+}
+
+.ac__stat {
+  padding: .75rem 1rem;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--md-sys-color-surface-container-high, #ebe7ee);
+  border: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, .12));
+}
+
+.ac__stat-label {
+  display: block;
+  font-size: .75rem;
+  color: var(--text-muted, #44474f);
+  margin-bottom: .25rem;
+}
+
+.ac__stat-value {
+  display: block;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface, #1a1b1f);
+}
+
+.ac__catatan-pk {
+  margin: 0 0 1.25rem;
+  padding: .75rem 1rem;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(186, 26, 26, .08);
+  border: 1px solid rgba(186, 26, 26, .28);
+  color: var(--md-sys-color-error-text, #ba1a1a);
+  font-size: .875rem;
+  line-height: 1.45;
+}
+
+.ac__table-wrap {
+  margin-bottom: 1.5rem;
+}
+
+.ac__table-title {
+  font-size: .9375rem;
+  font-weight: 600;
+  margin: 0 0 .75rem;
+  color: var(--md-sys-color-on-surface, #1a1b1f);
+}
+
+.ac__table-container {
+  overflow-x: auto;
+  border: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, .12));
+  border-radius: var(--radius-sm, 6px);
+}
+
+.ac__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .875rem;
+  text-align: left;
+}
+
+.ac__table th,
+.ac__table td {
+  padding: .625rem .75rem;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, .12));
+}
+
+.ac__table th {
+  background: var(--md-sys-color-surface-container-high, #ebe7ee);
+  color: var(--text-muted, #44474f);
+  font-weight: 600;
+  font-size: .8125rem;
+}
+
+.ac__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ac__tr--recommended td {
+  background: rgba(0, 90, 193, .08);
+  font-weight: 600;
+}
+
+.ac__badge-rec {
+  color: var(--brand, #005ac1);
+  font-size: .75rem;
+  font-weight: 500;
+}
+
+.ac__badge {
+  display: inline-block;
+  padding: .2rem .5rem;
+  border-radius: 4px;
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ac__badge--cukup {
+  background: rgba(20, 108, 67, 0.12);
+  color: var(--md-sys-color-success-text, #146c43);
+}
+
+.ac__badge--kurang {
+  background: rgba(186, 26, 26, 0.12);
+  color: var(--md-sys-color-error-text, #ba1a1a);
+}
+
+.ac__pesan {
+  margin: 0 0 1.25rem;
+  font-size: .8125rem;
+  line-height: 1.5;
+  color: var(--text-muted, #44474f);
+}
+
+.ac__result-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .ac__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+

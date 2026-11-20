@@ -107,7 +107,8 @@
         { name: 'Hitung upah lembur', desc: 'Hitung perkiraan upah lembur dari gaji sebulan, untuk hari kerja maupun hari libur.', status: 'available', action: 'lembur' },
         { name: 'Hitung tagihan listrik rumah', desc: 'Perkirakan kWh dan rupiah tagihan listrik dari daftar peralatan rumah, lengkap dengan alat paling boros.', status: 'available', action: 'tagihan-listrik' },
         { name: 'Bagi tagihan patungan', desc: 'Bagi tagihan makan bareng, arisan, atau patungan kado: rata atau sesuai pesanan, lengkap dengan pajak, layanan, dan pembulatan.', status: 'available', action: 'patungan' },
-        { name: 'Sesuaikan resep masakan', desc: 'Hitung ulang jumlah bahan saat resep dibuat untuk porsi berbeda, dengan takaran yang dibulatkan wajar.', status: 'available', action: 'resep' }
+        { name: 'Sesuaikan resep masakan', desc: 'Hitung ulang jumlah bahan saat resep dibuat untuk porsi berbeda, dengan takaran yang dibulatkan wajar.', status: 'available', action: 'resep' },
+        { name: 'Hitung kapasitas AC ruangan', desc: 'Perkirakan kebutuhan BTU dan ukuran PK AC dari ukuran ruangan, jumlah orang, dan panas matahari.', status: 'available', action: 'ac' }
       ]
     },
     {

@@ -511,6 +511,15 @@ from app.resep import (
     hitung_resep,
     limits_payload as resep_limits_payload,
 )
+from app.ac import (
+    BODY_BUKAN_JSON as AC_TEST_BODY_BUKAN_JSON,
+    DI_LUAR_RENTANG as AC_TEST_DI_LUAR_RENTANG,
+    INPUT_TIDAK_VALID as AC_TEST_INPUT_TIDAK_VALID,
+    MATAHARI_TIDAK_DIKENAL as AC_TEST_MATAHARI_TIDAK_DIKENAL,
+    AcError,
+    hitung as hitung_ac,
+    limits_payload as ac_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -19788,6 +19797,326 @@ def test_resep_http_client_dan_body_json() -> None:
     assert "error" in data_json
     assert data_json["error"]["code"] == RSP_TEST_INVALID_REQUEST
     assert "bukan JSON" in data_json["error"]["message"]
+
+
+def test_ac_limits() -> None:
+    """Uji payload limits kalkulator AC."""
+    payload = ac_limits_payload()
+    assert payload["panjang"] == {"min": 1, "max": 30}
+    assert payload["lebar"] == {"min": 1, "max": 30}
+    assert payload["tinggi"] == {"min": 2, "max": 5, "default": 2.8}
+    assert payload["orang"] == {"min": 1, "max": 50, "default": 2}
+    assert payload["perangkat"] == {"min": 0, "max": 20, "default": 0}
+    assert payload["matahari"] == ["teduh", "sedang", "terkena matahari langsung"]
+    assert payload["patokan_btu_per_m2"] == 500
+    assert len(payload["pilihan_pk"]) == 7
+    assert payload["pilihan_pk"][0] == {"pk": "1/2 PK", "kapasitas_btu": 5000}
+    assert payload["pilihan_pk"][-1] == {"pk": "2 1/2 PK", "kapasitas_btu": 24000}
+
+
+def test_ac_logika_murni() -> None:
+    """Uji logika murni hitung kapasitas AC ruangan: ukuran dasar, plafon, orang, perangkat, matahari, pembulatan, dan batas atas."""
+    # 1. Ruangan 4x5 m, plafon 2.8 m, 2 orang, 0 perangkat, teduh
+    # Luas = 20, volume = 56, btu_dasar = 10.000, btu = 10.000.
+    # Berdasarkan pilihan kapasitas (1/2: 5.000, 3/4: 7.000, 1: 9.000, 1 1/4: 11.000, 1 1/2: 12.000, ...),
+    # kapasitas terkecil yang >= 10.000 BTU adalah 1 1/4 PK (11.000 BTU).
+    r1 = hitung_ac(panjang=4, lebar=5, tinggi=2.8, orang=2, perangkat=0, matahari="teduh")
+    assert r1["luas_m2"] == 20.0
+    assert r1["volume_m3"] == 56.0
+    assert r1["btu"] == 10000
+    assert r1["pk"] == "1 1/4 PK"
+    assert r1["pk_label"] == "1 1/4 PK"
+    assert r1["catatan_pk"] is None
+    assert r1["rincian"]["btu_dasar"] == 10000
+    assert r1["rincian"]["tambahan_orang"] == 0
+    assert r1["rincian"]["tambahan_perangkat"] == 0
+    assert r1["rincian"]["faktor_matahari"] == 1.0
+
+    # Cek pilihan cukup / kurang
+    pilihan_map = {item["pk"]: item["cukup"] for item in r1["pilihan"]}
+    assert pilihan_map["1/2 PK"] is False
+    assert pilihan_map["3/4 PK"] is False
+    assert pilihan_map["1 PK"] is False
+    assert pilihan_map["1 1/4 PK"] is True
+    assert pilihan_map["1 1/2 PK"] is True
+    assert pilihan_map["2 PK"] is True
+    assert pilihan_map["2 1/2 PK"] is True
+
+    # 2. Ruangan 4.6x5 m (luas 23 m2, btu_dasar 11.500) -> btu 11.500 -> pk "1 1/2 PK" (12.000 BTU)
+    r_1_5 = hitung_ac(panjang=4.6, lebar=5, tinggi=2.8, orang=2, perangkat=0, matahari="teduh")
+    assert r_1_5["luas_m2"] == 23.0
+    assert r_1_5["btu"] == 11500
+    assert r_1_5["pk"] == "1 1/2 PK"
+
+    # 3. Pengaruh tinggi plafon:
+    # 4x5 m, plafon 3.5 m -> 20 * 500 * (3.5 / 2.8) = 12.500 BTU
+    r_tinggi = hitung_ac(panjang=4, lebar=5, tinggi=3.5, orang=2, perangkat=0, matahari="teduh")
+    assert r_tinggi["btu"] == 12500
+    assert r_tinggi["pk"] == "2 PK"
+
+    # 4. Pengaruh orang:
+    # 4x5 m, 6 orang -> tambahan = max(0, 6 - 2) * 400 = 1600 BTU
+    # btu_mentah = 10000 + 1600 = 11600 -> bulatkan ke atas kelipatan 500 = 12000 -> 1 1/2 PK
+    r_orang = hitung_ac(panjang=4, lebar=5, tinggi=2.8, orang=6, perangkat=0, matahari="teduh")
+    assert r_orang["rincian"]["tambahan_orang"] == 1600
+    assert r_orang["btu"] == 12000
+    assert r_orang["pk"] == "1 1/2 PK"
+
+    # 5. Pengaruh perangkat:
+    # 4x5 m, 3 perangkat -> tambahan = 3 * 400 = 1200 BTU
+    # btu_mentah = 10000 + 1200 = 11200 -> bulatkan ke atas kelipatan 500 = 11500
+    r_perangkat = hitung_ac(panjang=4, lebar=5, tinggi=2.8, orang=2, perangkat=3, matahari="teduh")
+    assert r_perangkat["rincian"]["tambahan_perangkat"] == 1200
+    assert r_perangkat["btu"] == 11500
+    assert r_perangkat["pk"] == "1 1/2 PK"
+
+    # 6. Pengaruh kondisi matahari:
+    # "sedang" (+5%) -> 10000 * 1.05 = 10500 BTU
+    r_sedang = hitung_ac(panjang=4, lebar=5, tinggi=2.8, orang=2, perangkat=0, matahari="sedang")
+    assert r_sedang["rincian"]["faktor_matahari"] == 1.05
+    assert r_sedang["btu"] == 10500
+
+    # "terkena matahari langsung" (+10%) -> 10000 * 1.10 = 11000 BTU
+    r_terik = hitung_ac(panjang=4, lebar=5, tinggi=2.8, orang=2, perangkat=0, matahari="terkena matahari langsung")
+    assert r_terik["rincian"]["faktor_matahari"] == 1.10
+    assert r_terik["btu"] == 11000
+
+    # "kena matahari langsung" (+10%)
+    r_terik2 = hitung_ac(panjang=4, lebar=5, tinggi=2.8, orang=2, perangkat=0, matahari="kena matahari langsung")
+    assert r_terik2["rincian"]["faktor_matahari"] == 1.10
+    assert r_terik2["btu"] == 11000
+
+    # 7. Pembulatan ke atas kelipatan 500:
+    # 3x3 m = 9 m2, plafon 2.8 m, 3 orang (tambahan 400) -> 9*500 + 400 = 4900 -> dibulatkan ke 5000
+    r_bulat = hitung_ac(panjang=3, lebar=3, tinggi=2.8, orang=3, perangkat=0, matahari="teduh")
+    assert r_bulat["btu"] == 5000
+    assert r_bulat["pk"] == "1/2 PK"
+
+    # 8. Batas atas (> 24.000 BTU):
+    # Ruangan 10x10 m, btu_dasar = 50.000 -> pk is None, pk_label, catatan_pk
+    r_atas = hitung_ac(panjang=10, lebar=10, tinggi=2.8, orang=2, perangkat=0, matahari="teduh")
+    assert r_atas["btu"] == 50000
+    assert r_atas["pk"] is None
+    assert "lebih dari 2 1/2 PK" in r_atas["pk_label"]
+    assert r_atas["catatan_pk"] is not None
+    assert "lebih dari 2 1/2 PK" in r_atas["catatan_pk"]
+    assert all(item["cukup"] is False for item in r_atas["pilihan"])
+
+
+def test_ac_jalur_galat() -> None:
+    """Uji penanganan galat dan validasi kalkulator AC."""
+    # 1. Field wajib tidak ada
+    try:
+        hitung_ac(panjang=None, lebar=5)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+        assert exc.status_code == 400
+
+    try:
+        hitung_ac(panjang=4, lebar="")
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+
+    # 2. Input bukan angka
+    try:
+        hitung_ac(panjang="empat", lebar=5)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+
+    try:
+        hitung_ac(panjang=4, lebar=True)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+
+    try:
+        hitung_ac(panjang=4, lebar=5, tinggi="tinggi_sekali")
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+
+    try:
+        hitung_ac(panjang=4, lebar=5, orang=2.5)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+
+    try:
+        hitung_ac(panjang=4, lebar=5, perangkat="banyak")
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_INPUT_TIDAK_VALID
+
+    # 3. Di luar rentang
+    # panjang (1..30)
+    try:
+        hitung_ac(panjang=0.5, lebar=5)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+        assert "1" in exc.message and "30" in exc.message
+
+    try:
+        hitung_ac(panjang=35, lebar=5)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+        assert "30" in exc.message
+
+    # lebar (1..30)
+    try:
+        hitung_ac(panjang=4, lebar=0)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+        assert "1" in exc.message and "30" in exc.message
+
+    try:
+        hitung_ac(panjang=4, lebar=31)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+
+    # tinggi (2..5)
+    try:
+        hitung_ac(panjang=4, lebar=5, tinggi=1.8)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+        assert "2" in exc.message and "5" in exc.message
+
+    try:
+        hitung_ac(panjang=4, lebar=5, tinggi=6)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+
+    # orang (1..50)
+    try:
+        hitung_ac(panjang=4, lebar=5, orang=0)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+        assert "1" in exc.message and "50" in exc.message
+
+    try:
+        hitung_ac(panjang=4, lebar=5, orang=55)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+
+    # perangkat (0..20)
+    try:
+        hitung_ac(panjang=4, lebar=5, perangkat=-1)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+        assert "0" in exc.message and "20" in exc.message
+
+    try:
+        hitung_ac(panjang=4, lebar=5, perangkat=25)
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_DI_LUAR_RENTANG
+
+    # 4. Kondisi matahari tidak dikenal
+    try:
+        hitung_ac(panjang=4, lebar=5, matahari="sangat_terik_sekali")
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_MATAHARI_TIDAK_DIKENAL
+        assert "matahari tidak dikenal" in exc.message.lower()
+
+    # 5. Body bukan dict
+    try:
+        hitung_ac(data="bukan_objek_json")  # type: ignore[arg-type]
+        assert False, "Harus melempar AcError"
+    except AcError as exc:
+        assert exc.code == AC_TEST_BODY_BUKAN_JSON
+
+
+def test_ac_http_endpoints() -> None:
+    """Uji TestClient FastAPI untuk GET /api/ac/limits dan POST /api/ac."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. GET /api/ac/limits
+    resp_limits = client.get("/api/ac/limits")
+    assert resp_limits.status_code == 200
+    assert "no-store" in resp_limits.headers.get("cache-control", "").lower()
+    limits_data = resp_limits.json()
+    assert limits_data["panjang"] == {"min": 1, "max": 30}
+    assert limits_data["patokan_btu_per_m2"] == 500
+    assert len(limits_data["pilihan_pk"]) == 7
+
+    # 2. POST /api/ac - sukses
+    resp = client.post(
+        "/api/ac",
+        json={
+            "panjang": 4,
+            "lebar": 5,
+            "tinggi": 2.8,
+            "orang": 2,
+            "perangkat": 0,
+            "matahari": "teduh",
+        },
+    )
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp.headers
+    body = resp.json()
+    assert body["luas_m2"] == 20.0
+    assert body["volume_m3"] == 56.0
+    assert body["btu"] == 10000
+    assert body["pk"] == "1 1/4 PK"
+    assert len(body["pilihan"]) == 7
+
+    # 3. POST /api/ac - body bukan JSON (raw string / kosong)
+    resp_bad_json = client.post(
+        "/api/ac",
+        content="bukan json",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp_bad_json.status_code == 400
+    err_body = resp_bad_json.json()
+    assert err_body["kode"] == AC_TEST_BODY_BUKAN_JSON or err_body["error"]["code"] == AC_TEST_BODY_BUKAN_JSON
+
+    # 4. POST /api/ac - ditolak jika kirim form multipart
+    resp_form = client.post(
+        "/api/ac",
+        data={"panjang": "4", "lebar": "5"},
+    )
+    assert resp_form.status_code == 400
+    form_err = resp_form.json()
+    assert form_err.get("kode") == AC_TEST_BODY_BUKAN_JSON or form_err.get("error", {}).get("code") == AC_TEST_BODY_BUKAN_JSON
+
+    # 5. POST /api/ac - validasi galat (input tidak valid)
+    resp_invalid = client.post(
+        "/api/ac",
+        json={"panjang": "bukan_angka", "lebar": 5},
+    )
+    assert resp_invalid.status_code == 400
+    assert resp_invalid.json()["kode"] == AC_TEST_INPUT_TIDAK_VALID
+
+    # 6. POST /api/ac - validasi galat (di luar rentang)
+    resp_range = client.post(
+        "/api/ac",
+        json={"panjang": 50, "lebar": 5},
+    )
+    assert resp_range.status_code == 400
+    assert resp_range.json()["kode"] == AC_TEST_DI_LUAR_RENTANG
+
+    # 7. POST /api/ac - validasi galat (matahari tidak dikenal)
+    resp_matahari = client.post(
+        "/api/ac",
+        json={"panjang": 4, "lebar": 5, "matahari": "panas_ekstrem"},
+    )
+    assert resp_matahari.status_code == 400
+    assert resp_matahari.json()["kode"] == AC_TEST_MATAHARI_TIDAK_DIKENAL
 
 
 
