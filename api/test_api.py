@@ -520,6 +520,15 @@ from app.ac import (
     hitung as hitung_ac,
     limits_payload as ac_limits_payload,
 )
+from app.kiblat import (
+    INVALID_KOORDINAT as KIB_TEST_INVALID_KOORDINAT,
+    INVALID_REQUEST as KIB_TEST_INVALID_REQUEST,
+    KOTA_TIDAK_DIKENAL as KIB_TEST_KOTA_TIDAK_DIKENAL,
+    PAYLOAD_TOO_LARGE as KIB_TEST_PAYLOAD_TOO_LARGE,
+    KiblatError,
+    hitung_kiblat,
+    limits_payload as kiblat_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -20117,6 +20126,284 @@ def test_ac_http_endpoints() -> None:
     )
     assert resp_matahari.status_code == 400
     assert resp_matahari.json()["kode"] == AC_TEST_MATAHARI_TIDAK_DIKENAL
+
+
+def _hitung_mandiri_kiblat(lat: float, lon: float) -> tuple[float, float]:
+    """Hitung bearing awal dan jarak haversine secara mandiri untuk pembanding uji."""
+    lat_k = 21.4225
+    lon_k = 39.8262
+    r_bumi = 6371.0088
+
+    lat_r = math.radians(lat)
+    lon_r = math.radians(lon)
+    lat_k_r = math.radians(lat_k)
+    d_lon = math.radians(lon_k - lon)
+
+    y = math.sin(d_lon) * math.cos(lat_k_r)
+    x = math.cos(lat_r) * math.sin(lat_k_r) - math.sin(lat_r) * math.cos(lat_k_r) * math.cos(d_lon)
+    bearing = (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+    d_lat = math.radians(lat_k - lat)
+    a = math.sin(d_lat / 2.0) ** 2 + math.cos(lat_r) * math.cos(lat_k_r) * (math.sin(d_lon / 2.0) ** 2)
+    a = min(1.0, max(0.0, a))
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    jarak = r_bumi * c
+    return bearing, jarak
+
+
+def test_kiblat_limits() -> None:
+    """Uji payload konfigurasi dan limits arah kiblat."""
+    payload = kiblat_limits_payload()
+    assert len(payload["kota"]) == 44
+    assert payload["rentang"]["lintang"] == {"min": -90.0, "max": 90.0}
+    assert payload["rentang"]["bujur"] == {"min": -180.0, "max": 180.0}
+    assert payload["kabah"]["lintang"] == 21.4225
+    assert payload["kabah"]["bujur"] == 39.8262
+    assert "catatan" in payload
+
+    # Kota berurutan abjad
+    names = [k["nama"] for k in payload["kota"]]
+    assert names == sorted(names)
+    assert "Bandung" in names
+    assert "Jakarta" in names
+
+
+def test_kiblat_logika_murni_kota_dan_mandiri() -> None:
+    """Uji hitung arah kiblat dan jarak ke Ka'bah untuk 5 kota patokan dengan rumus mandiri."""
+    patokan = [
+        ("Bandung", -6.9175, 107.6191, 295.2, 8031, "barat barat laut"),
+        ("Jakarta", -6.2088, 106.8456, 295.2, 7920, "barat barat laut"),
+        ("Surabaya", -7.2575, 112.7521, 294.0, 8562, "barat barat laut"),
+        ("Makassar", -5.1477, 119.4327, 292.5, 9148, "barat barat laut"),
+        ("Medan", 3.5952, 98.6722, 292.8, 6646, "barat barat laut"),
+    ]
+
+    for nama, lat, lon, arah_harapan, jarak_harapan, arah_teks in patokan:
+        # Hitung mandiri
+        arah_mandiri, jarak_mandiri = _hitung_mandiri_kiblat(lat, lon)
+        assert abs(arah_mandiri - arah_harapan) <= 0.2
+        assert abs(jarak_mandiri - jarak_harapan) <= 5.0
+
+        # Hitung lewat fungsi kiblat berdasarkan nama kota
+        res_kota = hitung_kiblat({"kota": nama})
+        assert abs(res_kota["arah_derajat"] - arah_harapan) <= 0.2
+        assert abs(res_kota["jarak_km"] - jarak_harapan) <= 5
+        assert res_kota["arah_mata_angin"] == arah_teks
+        assert res_kota["lokasi"] == nama
+        assert "utara sejati" in res_kota["catatan_utara"]
+
+        # Hitung lewat fungsi kiblat berdasarkan koordinat
+        res_coords = hitung_kiblat({"lintang": lat, "bujur": lon})
+        assert abs(res_coords["arah_derajat"] - arah_harapan) <= 0.2
+        assert abs(res_coords["jarak_km"] - jarak_harapan) <= 5
+        assert res_coords["lokasi"] == "koordinat sendiri"
+
+
+def test_kiblat_logika_murni_koordinat_dan_batas() -> None:
+    """Uji nilai batas koordinat (-90, 90, -180, 180), string dengan koma, dan lokasi tepat Ka'bah."""
+    # 1. Kutub Utara (90, 0)
+    arah_mandiri_utara, jarak_mandiri_utara = _hitung_mandiri_kiblat(90.0, 0.0)
+    res_kutub_utara = hitung_kiblat({"lintang": 90.0, "bujur": 0.0})
+    assert abs(res_kutub_utara["arah_derajat"] - round(arah_mandiri_utara, 1)) <= 0.2
+    assert abs(res_kutub_utara["jarak_km"] - int(round(jarak_mandiri_utara))) <= 5
+
+    # 2. Kutub Selatan (-90, 0)
+    arah_mandiri_selatan, jarak_mandiri_selatan = _hitung_mandiri_kiblat(-90.0, 0.0)
+    res_kutub_selatan = hitung_kiblat({"lintang": -90.0, "bujur": 0.0})
+    assert abs(res_kutub_selatan["arah_derajat"] - round(arah_mandiri_selatan, 1)) <= 0.2
+    assert abs(res_kutub_selatan["jarak_km"] - int(round(jarak_mandiri_selatan))) <= 5
+
+    # 3. Bujur batas 180 dan -180
+    res_bujur_180 = hitung_kiblat({"lintang": 0.0, "bujur": 180.0})
+    res_bujur_min180 = hitung_kiblat({"lintang": 0.0, "bujur": -180.0})
+    assert isinstance(res_bujur_180["arah_derajat"], float)
+    assert res_bujur_180["jarak_km"] == res_bujur_min180["jarak_km"]
+
+    # 4. Koordinat berupa teks dengan koma desimal
+    res_koma = hitung_kiblat({"lintang": "-6,9175", "bujur": " 107,6191 "})
+    assert res_koma["arah_derajat"] == 295.2
+    assert res_koma["jarak_km"] == 8031
+
+    # 5. Koordinat Ka'bah sendiri
+    res_kabah = hitung_kiblat({"lintang": 21.4225, "bujur": 39.8262})
+    assert res_kabah["jarak_km"] == 0
+
+
+def test_kiblat_jalur_galat() -> None:
+    """Uji validasi dan penanganan galat pada kalkulator kiblat."""
+    # 1. Body bukan dict
+    try:
+        hitung_kiblat("bukan json")
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_REQUEST
+
+    # 2. Body kosong / tanpa kota dan koordinat
+    try:
+        hitung_kiblat({})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_REQUEST
+
+    # 3. Kota kosong tanpa koordinat
+    try:
+        hitung_kiblat({"kota": "   "})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_REQUEST
+
+    # 4. Koordinat hanya satu (lintang saja)
+    try:
+        hitung_kiblat({"lintang": -6.9175})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 5. Kota tidak dikenal
+    try:
+        hitung_kiblat({"kota": "KotaAtlantis"})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_KOTA_TIDAK_DIKENAL
+
+    # 6. Lintang bukan angka
+    try:
+        hitung_kiblat({"lintang": "bukan_angka", "bujur": 107.6191})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 7. Bujur bukan angka
+    try:
+        hitung_kiblat({"lintang": -6.9175, "bujur": "bukan_angka"})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 8. Lintang berupa boolean
+    try:
+        hitung_kiblat({"lintang": True, "bujur": 107.6191})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 9. Lintang di luar rentang (>90)
+    try:
+        hitung_kiblat({"lintang": 90.5, "bujur": 107.6191})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 10. Lintang di luar rentang (<-90)
+    try:
+        hitung_kiblat({"lintang": -90.5, "bujur": 107.6191})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 11. Bujur di luar rentang (>180)
+    try:
+        hitung_kiblat({"lintang": -6.9175, "bujur": 180.5})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+    # 12. Bujur di luar rentang (<-180)
+    try:
+        hitung_kiblat({"lintang": -6.9175, "bujur": -180.5})
+        assert False, "Harus melempar KiblatError"
+    except KiblatError as exc:
+        assert exc.code == KIB_TEST_INVALID_KOORDINAT
+
+
+def test_kiblat_http_endpoints() -> None:
+    """Uji TestClient FastAPI untuk GET /api/kiblat/limits dan POST /api/kiblat."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. GET /api/kiblat/limits
+    resp_limits = client.get("/api/kiblat/limits")
+    assert resp_limits.status_code == 200
+    assert "no-store" in resp_limits.headers.get("cache-control", "").lower()
+    limits_body = resp_limits.json()
+    assert limits_body["ok"] is True
+    data_lim = limits_body["data"]
+    assert len(data_lim["kota"]) == 44
+    assert data_lim["rentang"]["lintang"] == {"min": -90.0, "max": 90.0}
+    assert data_lim["rentang"]["bujur"] == {"min": -180.0, "max": 180.0}
+
+    # 2. POST /api/kiblat - sukses kota Bandung
+    resp_bdg = client.post("/api/kiblat", json={"kota": "Bandung"})
+    assert resp_bdg.status_code == 200
+    assert "no-store" in resp_bdg.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp_bdg.headers
+    bdg_json = resp_bdg.json()
+    assert bdg_json["ok"] is True
+    assert bdg_json["data"]["arah_derajat"] == 295.2
+    assert bdg_json["data"]["jarak_km"] == 8031
+    assert bdg_json["data"]["arah_mata_angin"] == "barat barat laut"
+    assert bdg_json["data"]["lokasi"] == "Bandung"
+
+    # 3. POST /api/kiblat - sukses koordinat sendiri
+    resp_coords = client.post("/api/kiblat", json={"lintang": -6.9175, "bujur": 107.6191})
+    assert resp_coords.status_code == 200
+    coords_json = resp_coords.json()
+    assert coords_json["ok"] is True
+    assert coords_json["data"]["arah_derajat"] == 295.2
+    assert coords_json["data"]["jarak_km"] == 8031
+    assert coords_json["data"]["lokasi"] == "koordinat sendiri"
+
+    # 4. POST /api/kiblat - body bukan JSON
+    resp_not_json = client.post("/api/kiblat", content="bukan json", headers={"Content-Type": "text/plain"})
+    assert resp_not_json.status_code == 400
+    assert resp_not_json.json()["kode"] == KIB_TEST_INVALID_REQUEST
+
+    # 5. POST /api/kiblat - ditolak jika multipart/form-data
+    resp_form = client.post("/api/kiblat", data={"kota": "Bandung"})
+    assert resp_form.status_code == 400
+    assert resp_form.json()["kode"] == KIB_TEST_INVALID_REQUEST
+
+    # 6. POST /api/kiblat - body kosong
+    resp_empty = client.post("/api/kiblat", content="", headers={"Content-Type": "application/json"})
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["kode"] == KIB_TEST_INVALID_REQUEST
+
+    # 7. POST /api/kiblat - payload terlalu besar (>64 KB)
+    big_json = json.dumps({"kota": "Bandung", "padding": "x" * 70000})
+    resp_big = client.post("/api/kiblat", content=big_json, headers={"Content-Type": "application/json"})
+    assert resp_big.status_code == 413
+    assert resp_big.json()["kode"] == KIB_TEST_PAYLOAD_TOO_LARGE
+
+    # 8. POST /api/kiblat - tanpa kota dan tanpa koordinat
+    resp_no_data = client.post("/api/kiblat", json={})
+    assert resp_no_data.status_code == 400
+    assert resp_no_data.json()["kode"] == KIB_TEST_INVALID_REQUEST
+
+    # 9. POST /api/kiblat - kota tidak dikenal
+    resp_kota_invalid = client.post("/api/kiblat", json={"kota": "KotaKhayalan"})
+    assert resp_kota_invalid.status_code == 400
+    assert resp_kota_invalid.json()["kode"] == KIB_TEST_KOTA_TIDAK_DIKENAL
+
+    # 10. POST /api/kiblat - lintang bukan angka
+    resp_lintang_nan = client.post("/api/kiblat", json={"lintang": "abc", "bujur": 107.6191})
+    assert resp_lintang_nan.status_code == 400
+    assert resp_lintang_nan.json()["kode"] == KIB_TEST_INVALID_KOORDINAT
+
+    # 11. POST /api/kiblat - lintang di luar rentang
+    resp_lintang_out = client.post("/api/kiblat", json={"lintang": 100, "bujur": 107.6191})
+    assert resp_lintang_out.status_code == 400
+    assert resp_lintang_out.json()["kode"] == KIB_TEST_INVALID_KOORDINAT
+
+    # 12. POST /api/kiblat - bujur di luar rentang
+    resp_bujur_out = client.post("/api/kiblat", json={"lintang": -6.9175, "bujur": 200})
+    assert resp_bujur_out.status_code == 400
+    assert resp_bujur_out.json()["kode"] == KIB_TEST_INVALID_KOORDINAT
+
+    # 13. Pastikan 'kiblat' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "kiblat" in root_resp.json()["tools"]
 
 
 

@@ -447,6 +447,16 @@ from .ac import (
     hitung as hitung_ac,
     limits_payload as ac_limits_payload_func,
 )
+from .kiblat import (
+    INVALID_KOORDINAT as KIB_INVALID_KOORDINAT,
+    INVALID_REQUEST as KIB_INVALID_REQUEST,
+    KOTA_TIDAK_DIKENAL as KIB_KOTA_TIDAK_DIKENAL,
+    MAX_BODY_BYTES as KIB_MAX_BODY_BYTES,
+    PAYLOAD_TOO_LARGE as KIB_PAYLOAD_TOO_LARGE,
+    KiblatError,
+    hitung_kiblat,
+    limits_payload as kiblat_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1295,6 +1305,17 @@ async def handle_resep_error(request: Request, exc: ResepError) -> JSONResponse:
 async def handle_ac_error(request: Request, exc: AcError) -> JSONResponse:
     """Error kalkulator kapasitas AC yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
     logger.warning("hitung kapasitas ac ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.exception_handler(KiblatError)
+async def handle_kiblat_error(request: Request, exc: KiblatError) -> JSONResponse:
+    """Error kalkulator kiblat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung kiblat ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),
@@ -2484,6 +2505,27 @@ def _resep_limits_payload() -> dict:
 
 def _ac_limits_payload() -> dict:
     return ac_limits_payload_func()
+
+
+def _reject_oversized_kiblat_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas kalkulator kiblat."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > KIB_MAX_BODY_BYTES:
+        raise KiblatError(
+            KIB_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+
+def _kiblat_limits_payload() -> dict:
+    return kiblat_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -5191,6 +5233,76 @@ async def ac_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(content=result, headers=headers)
 
 
+@app.get("/api/kiblat/limits")
+async def kiblat_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Arah Kiblat dan Jarak ke Makkah."""
+    return JSONResponse(content={"ok": True, "data": _kiblat_limits_payload()}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/kiblat")
+async def kiblat_endpoint(request: Request) -> JSONResponse:
+    """Hitung arah kiblat dan jarak ke Makkah di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_kiblat_content_length(request)
+
+    body_bytes = await request.body()
+    if len(body_bytes) > KIB_MAX_BODY_BYTES:
+        raise KiblatError(
+            KIB_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+    if not body_bytes or not body_bytes.strip():
+        raise KiblatError(
+            KIB_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        raise KiblatError(
+            KIB_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim objek JSON, bukan formulir.",
+            400,
+        )
+
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        raise KiblatError(
+            KIB_INVALID_REQUEST,
+            "Format JSON tidak valid atau bukan objek JSON.",
+            400,
+        )
+
+    if not isinstance(payload, dict):
+        raise KiblatError(
+            KIB_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    result = hitung_kiblat(payload)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN catat koordinat pengguna ke log.
+    logger.info(
+        "hitung kiblat selesai: lokasi=%s durasi=%.0fms",
+        "kota" if "kota" in payload else "koordinat",
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content={"ok": True, "data": result}, headers=headers)
+
+
 @app.get("/api/keramik/limits")
 async def keramik_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
@@ -7590,6 +7702,7 @@ async def root() -> dict:
             "patungan",
             "resep",
             "ac",
+            "kiblat",
         ],
     }
 
