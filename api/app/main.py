@@ -457,6 +457,21 @@ from .kiblat import (
     hitung_kiblat,
     limits_payload as kiblat_limits_payload_func,
 )
+from .utang import (
+    DANA_KURANG as UTANG_DANA_KURANG,
+    DANA_TIDAK_VALID as UTANG_DANA_TIDAK_VALID,
+    INVALID_REQUEST as UTANG_INVALID_REQUEST,
+    MAX_BODY_BYTES as UTANG_MAX_BODY_BYTES,
+    MINIMUM_TIDAK_VALID as UTANG_MINIMUM_TIDAK_VALID,
+    PAYLOAD_TOO_LARGE as UTANG_PAYLOAD_TOO_LARGE,
+    SISA_TIDAK_VALID as UTANG_SISA_TIDAK_VALID,
+    STRATEGI_TIDAK_VALID as UTANG_STRATEGI_TIDAK_VALID,
+    TERLALU_LAMA as UTANG_TERLALU_LAMA,
+    UTANG_JUMLAH as UTANG_UTANG_JUMLAH,
+    UtangError,
+    hitung_rencana as hitung_utang,
+    limits_payload as utang_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1316,6 +1331,17 @@ async def handle_ac_error(request: Request, exc: AcError) -> JSONResponse:
 async def handle_kiblat_error(request: Request, exc: KiblatError) -> JSONResponse:
     """Error kalkulator kiblat yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
     logger.warning("hitung kiblat ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.exception_handler(UtangError)
+async def handle_utang_error(request: Request, exc: UtangError) -> JSONResponse:
+    """Error kalkulator rencana bebas utang yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("rencana bebas utang ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),
@@ -2526,6 +2552,27 @@ def _reject_oversized_kiblat_content_length(request: Request) -> None:
 
 def _kiblat_limits_payload() -> dict:
     return kiblat_limits_payload_func()
+
+
+def _reject_oversized_utang_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas rencana bebas utang."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > UTANG_MAX_BODY_BYTES:
+        raise UtangError(
+            UTANG_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 32 KB.",
+            413,
+        )
+
+
+def _utang_limits_payload() -> dict:
+    return utang_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -5303,6 +5350,77 @@ async def kiblat_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(content={"ok": True, "data": result}, headers=headers)
 
 
+@app.get("/api/utang/limits")
+async def utang_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Rencana Bebas Utang."""
+    return JSONResponse(content={"ok": True, "data": _utang_limits_payload()}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/utang")
+async def utang_endpoint(request: Request) -> JSONResponse:
+    """Hitung simulasi rencana bebas utang di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_utang_content_length(request)
+
+    body_bytes = await request.body()
+    if len(body_bytes) > UTANG_MAX_BODY_BYTES:
+        raise UtangError(
+            UTANG_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 32 KB.",
+            413,
+        )
+
+    if not body_bytes or not body_bytes.strip():
+        raise UtangError(
+            UTANG_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        raise UtangError(
+            UTANG_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim objek JSON, bukan formulir.",
+            400,
+        )
+
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        raise UtangError(
+            UTANG_INVALID_REQUEST,
+            "Format JSON tidak valid atau bukan objek JSON.",
+            400,
+        )
+
+    if not isinstance(payload, dict):
+        raise UtangError(
+            UTANG_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    result = hitung_utang(payload)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN catat nama utang atau nominal uang pengguna ke log.
+    logger.info(
+        "rencana bebas utang selesai: jumlah_utang=%d strategi=%s durasi=%.0fms",
+        len(result.get("per_utang", [])),
+        result.get("ringkasan", {}).get("strategi", ""),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content={"ok": True, "data": result}, headers=headers)
+
+
 @app.get("/api/keramik/limits")
 async def keramik_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
@@ -7703,6 +7821,7 @@ async def root() -> dict:
             "resep",
             "ac",
             "kiblat",
+            "utang",
         ],
     }
 

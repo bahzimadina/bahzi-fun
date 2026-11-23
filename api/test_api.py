@@ -529,6 +529,21 @@ from app.kiblat import (
     hitung_kiblat,
     limits_payload as kiblat_limits_payload,
 )
+from app.utang import (
+    BUNGA_TIDAK_VALID as UTANG_TEST_BUNGA_TIDAK_VALID,
+    DANA_KURANG as UTANG_TEST_DANA_KURANG,
+    DANA_TIDAK_VALID as UTANG_TEST_DANA_TIDAK_VALID,
+    INVALID_REQUEST as UTANG_TEST_INVALID_REQUEST,
+    MINIMUM_TIDAK_VALID as UTANG_TEST_MINIMUM_TIDAK_VALID,
+    PAYLOAD_TOO_LARGE as UTANG_TEST_PAYLOAD_TOO_LARGE,
+    SISA_TIDAK_VALID as UTANG_TEST_SISA_TIDAK_VALID,
+    STRATEGI_TIDAK_VALID as UTANG_TEST_STRATEGI_TIDAK_VALID,
+    TERLALU_LAMA as UTANG_TEST_TERLALU_LAMA,
+    UTANG_JUMLAH as UTANG_TEST_UTANG_JUMLAH,
+    UtangError,
+    hitung_rencana as hitung_utang,
+    limits_payload as utang_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -20404,6 +20419,346 @@ def test_kiblat_http_endpoints() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "kiblat" in root_resp.json()["tools"]
+
+
+def test_utang_limits() -> None:
+    """Uji batas dan konfigurasi alat Rencana Bebas Utang."""
+    # 1. Panggilan langsung logika murni
+    limits = utang_limits_payload()
+    assert isinstance(limits, dict)
+    assert limits["maks_utang"] == 8
+    assert "batas" in limits
+    assert limits["batas"]["sisa"]["min"] == 1000
+    assert limits["batas"]["sisa"]["max"] == 1000000000000
+    assert limits["batas"]["bunga"]["min"] == 0
+    assert limits["batas"]["bunga"]["max"] == 100
+    assert limits["batas"]["minimum"]["min"] == 1000
+    assert limits["batas"]["dana_bulanan"]["min"] == 1000
+    assert limits["batas"]["maks_bulan"] == 600
+    assert limits["batas"]["nama_max_length"] == 40
+    assert len(limits["strategi"]) == 2
+    assert limits["strategi"][0]["nilai"] == "bunga"
+    assert limits["strategi"][1]["nilai"] == "saldo"
+    assert "contoh" in limits
+    assert len(limits["contoh"]["utang"]) == 3
+
+    # 2. HTTP endpoint GET /api/utang/limits
+    client = _test_client()
+    if client is not None:
+        resp = client.get("/api/utang/limits")
+        assert resp.status_code == 200
+        assert "no-store" in resp.headers.get("cache-control", "").lower()
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["data"]["maks_utang"] == 8
+
+
+def test_utang_logika_murni_sukses_dan_strategi() -> None:
+    """Uji skenario sukses: 2 utang strategi bunga, perbandingan saldo, efek bola salju, dan peringatan."""
+    # 1. Kasus sukses 2 utang strategi bunga (avalanche)
+    # Utang 1: Kartu kredit sisa 5.000.000, bunga 24% p.a. (2% / bln), min 500.000
+    # Utang 2: Pinjaman teman sisa 3.000.000, bunga 12% p.a. (1% / bln), min 300.000
+    # Dana bulanan: 2.500.000
+    payload_bunga = {
+        "dana_bulanan": 2500000,
+        "strategi": "bunga",
+        "utang": [
+            {"nama": "Kartu kredit", "sisa": 5000000, "bunga": 24, "minimum": 500000},
+            {"nama": "Pinjaman teman", "sisa": 3000000, "bunga": 12, "minimum": 300000},
+        ],
+    }
+    res_b = hitung_utang(payload_bunga)
+    ringkasan_b = res_b["ringkasan"]
+    assert ringkasan_b["bulan"] == 4
+    assert ringkasan_b["tahun"] == 0
+    assert ringkasan_b["sisa_bulan"] == 4
+    assert ringkasan_b["total_utang"] == 8000000
+    assert ringkasan_b["total_bunga"] == 262583
+    assert ringkasan_b["total_dibayar"] == 8262583
+    assert ringkasan_b["strategi"] == "bunga"
+    assert ringkasan_b["strategi_label"] == "Bunga tertinggi dulu"
+
+    # Periksa urutan pelunasan: Kartu kredit (bunga 24%) lunas lebih dulu daripada Pinjaman teman (12%)
+    per_utang_b = res_b["per_utang"]
+    assert len(per_utang_b) == 2
+    assert per_utang_b[0]["nama"] == "Kartu kredit"
+    assert per_utang_b[0]["lunas_bulan"] == 3
+    assert per_utang_b[1]["nama"] == "Pinjaman teman"
+    assert per_utang_b[1]["lunas_bulan"] == 4
+
+    # Periksa perbandingan pembanding strategi saldo
+    comp_b = res_b["perbandingan"]
+    assert comp_b is not None
+    assert comp_b["strategi"] == "saldo"
+    assert comp_b["strategi_label"] == "Saldo terkecil dulu"
+    assert comp_b["bulan"] == 4
+    assert comp_b["total_bunga"] == 312885
+    assert comp_b["selisih_bunga"] == 312885 - 262583
+    assert comp_b["lebih_hemat"] == "bunga"
+
+    # 2. Kasus sama dengan strategi saldo (snowball): saldo terkecil dulu lunas
+    payload_saldo = {
+        "dana_bulanan": 2500000,
+        "strategi": "saldo",
+        "utang": [
+            {"nama": "Kartu kredit", "sisa": 5000000, "bunga": 24, "minimum": 500000},
+            {"nama": "Pinjaman teman", "sisa": 3000000, "bunga": 12, "minimum": 300000},
+        ],
+    }
+    res_s = hitung_utang(payload_saldo)
+    per_utang_s = res_s["per_utang"]
+    # Strategi saldo memberi urutan berbeda: Pinjaman teman (saldo 3jt) lunas dulu sebelum Kartu kredit (5jt)
+    assert per_utang_s[0]["nama"] == "Pinjaman teman"
+    assert per_utang_s[1]["nama"] == "Kartu kredit"
+    assert res_s["ringkasan"]["total_bunga"] == 312885
+    comp_s = res_s["perbandingan"]
+    assert comp_s is not None
+    assert comp_s["strategi"] == "bunga"
+    assert comp_s["lebih_hemat"] == "bunga"
+
+    # 3. Uji efek bola salju: cicilan utang yang sudah lunas mempercepat utang berikutnya
+    # Utang A: 1.000.000, min 1.000.000, bunga 0% (lunas di bulan 1)
+    # Utang B: 3.000.000, min 500.000, bunga 0%
+    # Dana bulanan: 1.500.000
+    # Bulan 1: A bayar 1.000.000 (lunas), B bayar 500.000 (sisa 2.500.000)
+    # Bulan 2: A sudah lunas, dana 1.500.000 semua mengalir ke B (sisa B jadi 1.000.000)
+    # Bulan 3: dana 1.000.000 melunasi B! Selesai dalam 3 bulan (bukan 6 bulan jika tanpa bola salju)
+    payload_snowball = {
+        "dana_bulanan": 1500000,
+        "strategi": "bunga",
+        "utang": [
+            {"nama": "Utang A", "sisa": 1000000, "bunga": 0, "minimum": 1000000},
+            {"nama": "Utang B", "sisa": 3000000, "bunga": 0, "minimum": 500000},
+        ],
+    }
+    res_snow = hitung_utang(payload_snowball)
+    assert res_snow["ringkasan"]["bulan"] == 3
+    assert res_snow["per_utang"][0]["nama"] == "Utang A"
+    assert res_snow["per_utang"][0]["lunas_bulan"] == 1
+    assert res_snow["per_utang"][1]["nama"] == "Utang B"
+    assert res_snow["per_utang"][1]["lunas_bulan"] == 3
+
+    # 4. Uji peringatan:
+    # (a) Cicilan minimum < bunga bulanan awal (12jt * 24% / 12 = 240.000; minimum 100.000 < 240.000)
+    # (b) Dana bulanan == total minimum
+    payload_warn = {
+        "dana_bulanan": 100000,
+        "strategi": "bunga",
+        "utang": [
+            {"nama": "Paylater Defisit", "sisa": 12000000, "bunga": 24, "minimum": 100000},
+        ],
+    }
+    # Karena bunga 240.000 > minimum 100.000 dan dana_bulanan 100.000, utang akan membengkak -> TERLALU_LAMA
+    try:
+        hitung_utang(payload_warn)
+        assert False, "Harus melempar UtangError TERLALU_LAMA"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_TERLALU_LAMA
+
+    # Uji peringatan muncul ketika dana bulanan mencukupi pelunasan tapi minimum < bunga bulan pertama
+    payload_warn_sukses = {
+        "dana_bulanan": 2000000,
+        "strategi": "bunga",
+        "utang": [
+            {"nama": "Paylater X", "sisa": 12000000, "bunga": 24, "minimum": 100000},
+        ],
+    }
+    res_w = hitung_utang(payload_warn_sukses)
+    warns = res_w["peringatan"]
+    assert any('Cicilan minimum "Paylater X" belum menutup bunga bulanannya' in w for w in warns)
+    assert any("tanpa biaya admin, denda, atau bunga dari transaksi baru" in w for w in warns)
+
+    # Uji peringatan saat dana bulanan persis sama dengan total cicilan minimum
+    payload_sama_min = {
+        "dana_bulanan": 1500000,
+        "strategi": "bunga",
+        "utang": [
+            {"nama": "Utang A", "sisa": 2000000, "bunga": 0, "minimum": 1500000},
+        ],
+    }
+    res_sm = hitung_utang(payload_sama_min)
+    assert any("tidak ada dana percepatan" in w for w in res_sm["peringatan"])
+
+
+def test_utang_jalur_galat() -> None:
+    """Uji penolakan input tidak valid pada logika murni kalkulator utang."""
+    # 1. Dana bulanan kurang dari total cicilan minimum -> 400 DANA_KURANG
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "utang": [
+                {"nama": "A", "sisa": 5000000, "bunga": 10, "minimum": 400000},
+                {"nama": "B", "sisa": 3000000, "bunga": 10, "minimum": 300000},
+            ],
+        })
+        assert False, "Harus melempar DANA_KURANG"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_DANA_KURANG
+        assert "Rp 500.000" in exc.message
+        assert "Rp 700.000" in exc.message
+
+    # 2. Jumlah utang 9 item (> 8) -> 400 UTANG_JUMLAH
+    sembilan_utang = [{"sisa": 100000, "bunga": 10, "minimum": 10000} for _ in range(9)]
+    try:
+        hitung_utang({"dana_bulanan": 1000000, "utang": sembilan_utang})
+        assert False, "Harus melempar UTANG_JUMLAH"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_UTANG_JUMLAH
+
+    # 3. Jumlah utang 0 item -> 400 UTANG_JUMLAH
+    try:
+        hitung_utang({"dana_bulanan": 1000000, "utang": []})
+        assert False, "Harus melempar UTANG_JUMLAH"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_UTANG_JUMLAH
+
+    # 4. Sisa utang 0 (< 1000) -> 400 SISA_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "utang": [{"nama": "A", "sisa": 0, "bunga": 10, "minimum": 10000}],
+        })
+        assert False, "Harus melempar SISA_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_SISA_TIDAK_VALID
+
+    # 5. Sisa utang > 1 triliun -> 400 SISA_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "utang": [{"nama": "A", "sisa": 2000000000000, "bunga": 10, "minimum": 10000}],
+        })
+        assert False, "Harus melempar SISA_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_SISA_TIDAK_VALID
+
+    # 6. Suku bunga 101 (> 100) -> 400 BUNGA_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "utang": [{"nama": "A", "sisa": 1000000, "bunga": 101, "minimum": 10000}],
+        })
+        assert False, "Harus melempar BUNGA_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_BUNGA_TIDAK_VALID
+
+    # 7. Suku bunga negatif -> 400 BUNGA_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "utang": [{"nama": "A", "sisa": 1000000, "bunga": -5, "minimum": 10000}],
+        })
+        assert False, "Harus melempar BUNGA_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_BUNGA_TIDAK_VALID
+
+    # 8. Minimum 0 (< 1000) -> 400 MINIMUM_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "utang": [{"nama": "A", "sisa": 1000000, "bunga": 10, "minimum": 0}],
+        })
+        assert False, "Harus melempar MINIMUM_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_MINIMUM_TIDAK_VALID
+
+    # 9. Dana bulanan 0 (< 1000) -> 400 DANA_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 0,
+            "utang": [{"nama": "A", "sisa": 1000000, "bunga": 10, "minimum": 50000}],
+        })
+        assert False, "Harus melempar DANA_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_DANA_TIDAK_VALID
+
+    # 10. Strategi tidak dikenal -> 400 STRATEGI_TIDAK_VALID
+    try:
+        hitung_utang({
+            "dana_bulanan": 500000,
+            "strategi": "acak",
+            "utang": [{"nama": "A", "sisa": 1000000, "bunga": 10, "minimum": 50000}],
+        })
+        assert False, "Harus melempar STRATEGI_TIDAK_VALID"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_STRATEGI_TIDAK_VALID
+
+    # 11. Body bukan dict -> 400 INVALID_REQUEST
+    try:
+        hitung_utang("bukan json")  # type: ignore[arg-type]
+        assert False, "Harus melempar INVALID_REQUEST"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_INVALID_REQUEST
+
+    # 12. Rincian utang bukan dict -> 400 INVALID_REQUEST
+    try:
+        hitung_utang({"dana_bulanan": 500000, "utang": ["bukan dict"]})  # type: ignore[list-item]
+        assert False, "Harus melempar INVALID_REQUEST"
+    except UtangError as exc:
+        assert exc.code == UTANG_TEST_INVALID_REQUEST
+
+
+def test_utang_http_endpoints() -> None:
+    """Uji TestClient FastAPI untuk GET /api/utang/limits, POST /api/utang, dan status HTTP."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. GET /api/utang/limits
+    resp_limits = client.get("/api/utang/limits")
+    assert resp_limits.status_code == 200
+    assert "no-store" in resp_limits.headers.get("cache-control", "").lower()
+    limits_body = resp_limits.json()
+    assert limits_body["ok"] is True
+    assert limits_body["data"]["maks_utang"] == 8
+
+    # 2. POST /api/utang - kasus sukses
+    valid_payload = {
+        "dana_bulanan": 2500000,
+        "strategi": "bunga",
+        "utang": [
+            {"nama": "Kartu kredit", "sisa": 12000000, "bunga": 24, "minimum": 600000},
+            {"nama": "Paylater", "sisa": 3500000, "bunga": 36, "minimum": 350000},
+        ],
+    }
+    resp_post = client.post("/api/utang", json=valid_payload)
+    assert resp_post.status_code == 200
+    assert "no-store" in resp_post.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp_post.headers
+    post_json = resp_post.json()
+    assert post_json["ok"] is True
+    assert post_json["data"]["ringkasan"]["bulan"] > 0
+    assert len(post_json["data"]["per_utang"]) == 2
+
+    # 3. POST /api/utang - bukan JSON (text/plain)
+    resp_not_json = client.post("/api/utang", content="bukan json", headers={"Content-Type": "text/plain"})
+    assert resp_not_json.status_code == 400
+    assert resp_not_json.json()["kode"] == UTANG_TEST_INVALID_REQUEST
+
+    # 4. POST /api/utang - ditolak jika multipart/form-data
+    resp_form = client.post("/api/utang", data={"dana_bulanan": "2500000"})
+    assert resp_form.status_code == 400
+    assert resp_form.json()["kode"] == UTANG_TEST_INVALID_REQUEST
+
+    # 5. POST /api/utang - body kosong
+    resp_empty = client.post("/api/utang", content="", headers={"Content-Type": "application/json"})
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["kode"] == UTANG_TEST_INVALID_REQUEST
+
+    # 6. POST /api/utang - payload terlalu besar (>32 KB)
+    big_payload = json.dumps({"dana_bulanan": 2500000, "padding": "x" * 35000})
+    resp_big = client.post("/api/utang", content=big_payload, headers={"Content-Type": "application/json"})
+    assert resp_big.status_code == 413
+    assert resp_big.json()["kode"] == UTANG_TEST_PAYLOAD_TOO_LARGE
+
+    # 7. GET /api/utang -> 405 Method Not Allowed
+    resp_get = client.get("/api/utang")
+    assert resp_get.status_code == 405
+
+    # 8. Pastikan 'utang' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "utang" in root_resp.json()["tools"]
 
 
 
