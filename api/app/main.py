@@ -104,6 +104,14 @@ from .pas_foto import (
     pas_foto,
     pas_foto_limits_payload,
 )
+from .watermark import (
+    CHUNK_SIZE as WATERMARK_CHUNK_SIZE,
+    MAX_BYTES as WATERMARK_MAX_BYTES,
+    WatermarkError,
+    WatermarkResult,
+    apply_watermark,
+    watermark_limits_payload,
+)
 from .gambar_pdf import (
     CHUNK_SIZE as GAMBAR_PDF_CHUNK_SIZE,
     MAX_FILE_BYTES as GAMBAR_PDF_MAX_FILE_BYTES,
@@ -1145,6 +1153,17 @@ async def handle_pas_foto_error(request: Request, exc: PasFotoError) -> JSONResp
     )
 
 
+@app.exception_handler(WatermarkError)
+async def handle_watermark_error(request: Request, exc: WatermarkError) -> JSONResponse:
+    """Error tanda air yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
+    logger.warning("watermark ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.exception_handler(WordCountError)
 async def handle_word_count_error(request: Request, exc: WordCountError) -> JSONResponse:
     """Error hitung kata yang sudah terklasifikasi → JSON rapi + status HTTP tepat."""
@@ -1731,6 +1750,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
     elif request.url.path.startswith("/api/pas-foto"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas gambar."
+    elif request.url.path.startswith("/api/watermark"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' dan 'text'."
     elif request.url.path.startswith("/api/pdf/to-image"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file' berisi berkas PDF."
     elif request.url.path.startswith("/api/pdf/edit"):
@@ -2037,6 +2058,49 @@ async def _read_capped_pas_foto_image(upload: UploadFile, remaining_budget: int)
             raise PasFotoError(
                 PAS_FOTO_TOO_LARGE,
                 f"Ukuran berkas melebihi batas {PAS_FOTO_MAX_BYTES // (1024 * 1024)} MB. Perkecil gambar terlebih dahulu.",
+                413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _reject_oversized_watermark_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas tanda air."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > WATERMARK_MAX_BYTES + CONTENT_LENGTH_SLACK:
+        raise WatermarkError(
+            "terlalu_besar",
+            f"Ukuran berkas melebihi batas {WATERMARK_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+
+async def _read_capped_watermark_image(upload: UploadFile, remaining_budget: int) -> bytes:
+    """Baca unggahan gambar sepotong-sepotong untuk tanda air, tolak bila lewat batas."""
+    if remaining_budget <= 0:
+        raise WatermarkError(
+            "terlalu_besar",
+            f"Ukuran berkas melebihi batas {WATERMARK_MAX_BYTES // (1024 * 1024)} MB. Perkecil foto terlebih dahulu.",
+            413,
+        )
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(WATERMARK_CHUNK_SIZE)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > remaining_budget:
+            raise WatermarkError(
+                "terlalu_besar",
+                f"Ukuran berkas melebihi batas {WATERMARK_MAX_BYTES // (1024 * 1024)} MB. Perkecil foto terlebih dahulu.",
                 413,
             )
         chunks.append(chunk)
@@ -3976,6 +4040,89 @@ async def pas_foto_endpoint(
         "X-Processing-Ms": f"{duration_ms:.0f}",
     }
     return Response(content=result.data, media_type="image/jpeg", headers=headers)
+
+
+@app.get("/api/watermark/limits")
+async def get_watermark_limits() -> JSONResponse:
+    """Batas yang berlaku untuk Tanda Air Foto."""
+    return JSONResponse(content=watermark_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/watermark")
+async def watermark_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+    text: str | None = Form(default=None),
+    mode: str | None = Form(default="single"),
+    position: str | None = Form(default="br"),
+    size: str | None = Form(default="7"),
+    opacity: str | None = Form(default="45"),
+    color: str | None = Form(default="light"),
+    angle: str | None = Form(default=None),
+    format: str | None = Form(default="jpeg"),
+) -> Response:
+    """Beri tanda air (watermark) pada foto di memori.
+
+    Respons: binary gambar hasil, Content-Type: image/jpeg atau image/png,
+    Content-Disposition: attachment; filename="tanda-air.jpg" / "tanda-air.png".
+    """
+    started = time.perf_counter()
+
+    _reject_oversized_watermark_content_length(request)
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        raise WatermarkError(
+            "parameter_tidak_valid",
+            "Permintaan tidak valid. Kirim formulir multipart/form-data, bukan JSON.",
+            400,
+        )
+
+    if file is None:
+        raise WatermarkError(
+            "berkas_kosong",
+            "Permintaan tidak valid. Field 'file' wajib disertakan.",
+            400,
+        )
+
+    payload = await _read_capped_watermark_image(file, WATERMARK_MAX_BYTES)
+
+    result = await run_in_threadpool(
+        apply_watermark,
+        payload=payload,
+        text=text,
+        mode=mode,
+        position=position,
+        size=size,
+        opacity=opacity,
+        color=color,
+        angle=angle,
+        format=format,
+    )
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    logger.info(
+        "watermark selesai: format=%s px=%dx%d bytes=%d durasi=%.0fms",
+        result.format,
+        result.width,
+        result.height,
+        result.output_bytes,
+        duration_ms,
+    )
+
+    media_type = "image/jpeg" if result.format == "jpeg" else "image/png"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result.filename}"',
+        "Content-Type": media_type,
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Output-Width": str(result.width),
+        "X-Output-Height": str(result.height),
+        "X-Output-Bytes": str(result.output_bytes),
+        "X-Output-Px": f"{result.width}x{result.height}",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return Response(content=result.data, media_type=media_type, headers=headers)
 
 
 @app.get("/api/word-count/limits")
@@ -7822,6 +7969,7 @@ async def root() -> dict:
             "ac",
             "kiblat",
             "utang",
+            "watermark",
         ],
     }
 

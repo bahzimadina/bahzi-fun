@@ -35,7 +35,7 @@ API_DIR = Path(__file__).resolve().parent
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
-from PIL import Image, ImageDraw  # noqa: E402
+from PIL import Image, ImageChops, ImageDraw  # noqa: E402
 import pymupdf  # noqa: E402
 from pypdf import PdfReader, PdfWriter  # noqa: E402
 
@@ -20759,6 +20759,420 @@ def test_utang_http_endpoints() -> None:
     root_resp = client.get("/")
     assert root_resp.status_code == 200
     assert "utang" in root_resp.json()["tools"]
+
+
+# ============================================================================
+# Uji Beri Tanda Air pada Foto (Modul watermark.py & Endpoint HTTP)
+# ============================================================================
+from app.watermark import (
+    ERR_BERKAS_KOSONG,
+    ERR_BUKAN_GAMBAR,
+    ERR_DIMENSI_TERLALU_BESAR,
+    ERR_FORMAT_TIDAK_DIDUKUNG,
+    ERR_PARAMETER_TIDAK_VALID,
+    ERR_TEKS_KOSONG,
+    ERR_TEKS_TERLALU_PANJANG,
+    ERR_TERLALU_BESAR,
+    MAX_BYTES as WATERMARK_TEST_MAX_BYTES,
+    WatermarkError,
+    apply_watermark,
+    watermark_limits_payload as watermark_limits_payload_func,
+)
+
+
+def test_watermark_limits_payload_logika() -> None:
+    """Uji payload informasi batas operasional tanda air."""
+    payload = watermark_limits_payload_func()
+    assert payload["max_bytes"] == 15728640
+    assert payload["max_side"] == 8000
+    assert payload["max_pixels"] == 40000000
+    assert payload["text_max"] == 60
+    assert "jpeg" in payload["formats"]
+    assert "png" in payload["formats"]
+    assert "webp" in payload["formats"]
+    assert "single" in payload["modes"]
+    assert "tile" in payload["modes"]
+    assert "br" in payload["positions"]
+    assert payload["size"]["min"] == 2 and payload["size"]["max"] == 30
+    assert payload["opacity"]["min"] == 5 and payload["opacity"]["max"] == 100
+    assert payload["angle"]["min"] == -90 and payload["angle"]["max"] == 90
+
+
+def test_watermark_http_limits() -> None:
+    """Uji endpoint GET /api/watermark/limits: status 200, no-store, dan isi kunci lengkap."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/api/watermark/limits")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    data = resp.json()
+    assert data["max_bytes"] == 15728640
+    assert data["max_side"] == 8000
+    assert data["max_pixels"] == 40000000
+    assert data["text_max"] == 60
+    assert data["formats"] == ["jpeg", "png", "webp"]
+    assert data["modes"] == ["single", "tile"]
+    assert "br" in data["positions"]
+    assert data["size"]["min"] == 2
+    assert data["size"]["max"] == 30
+    assert data["opacity"]["min"] == 5
+    assert data["opacity"]["max"] == 100
+    assert data["angle"]["min"] == -90
+    assert data["angle"]["max"] == 90
+
+
+def test_watermark_http_sukses_jpeg() -> None:
+    """Uji sukses POST /api/watermark mode JPEG: balasan image/jpeg, bisa dibuka Pillow, ukuran sama."""
+    client = _test_client()
+    if client is None:
+        return
+
+    orig_w, orig_h = 320, 240
+    jpeg_data = make_image("JPEG", size=(orig_w, orig_h), color="blue")
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={
+            "text": "Hak Cipta 2026",
+            "mode": "single",
+            "position": "br",
+            "size": "8",
+            "opacity": "50",
+            "color": "light",
+            "angle": "0",
+            "format": "jpeg",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+    assert 'filename="tanda-air.jpg"' in resp.headers["content-disposition"]
+    assert resp.headers["x-output-width"] == str(orig_w)
+    assert resp.headers["x-output-height"] == str(orig_h)
+
+    out_img = Image.open(io.BytesIO(resp.content))
+    assert out_img.format == "JPEG"
+    assert out_img.size == (orig_w, orig_h)
+
+
+def test_watermark_http_sukses_png() -> None:
+    """Uji sukses POST /api/watermark format PNG: balasan image/png, bisa dibuka Pillow, ukuran sama."""
+    client = _test_client()
+    if client is None:
+        return
+
+    orig_w, orig_h = 400, 300
+    png_data = make_image("PNG", size=(orig_w, orig_h), color="green")
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("gambar.png", png_data, "image/png")},
+        data={
+            "text": "Koleksi Pribadi",
+            "mode": "single",
+            "position": "tl",
+            "color": "dark",
+            "format": "png",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert 'filename="tanda-air.png"' in resp.headers["content-disposition"]
+    assert resp.headers["x-output-width"] == str(orig_w)
+    assert resp.headers["x-output-height"] == str(orig_h)
+
+    out_img = Image.open(io.BytesIO(resp.content))
+    assert out_img.format == "PNG"
+    assert out_img.size == (orig_w, orig_h)
+
+
+def test_watermark_http_mode_tile() -> None:
+    """Uji mode tile (miring berulang): berhasil menghasilkan gambar dengan ukuran sama."""
+    client = _test_client()
+    if client is None:
+        return
+
+    orig_w, orig_h = 450, 350
+    jpeg_data = make_image("JPEG", size=(orig_w, orig_h), color="red")
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={
+            "text": "DRAFT RAHASIA",
+            "mode": "tile",
+            "angle": "30",
+            "opacity": "40",
+            "color": "light",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+
+    out_img = Image.open(io.BytesIO(resp.content))
+    assert out_img.size == (orig_w, orig_h)
+
+
+def test_watermark_http_teks_kosong() -> None:
+    """Teks tanda air kosong atau hanya spasi harus ditolak dengan 422 teks_kosong."""
+    client = _test_client()
+    if client is None:
+        return
+
+    jpeg_data = make_image("JPEG", size=(200, 200))
+
+    # Teks kosong
+    resp1 = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": ""},
+    )
+    assert resp1.status_code == 422
+    assert resp1.json()["error"]["code"] == ERR_TEKS_KOSONG
+
+    # Teks spasi saja
+    resp2 = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "   "},
+    )
+    assert resp2.status_code == 422
+    assert resp2.json()["error"]["code"] == ERR_TEKS_KOSONG
+
+
+def test_watermark_http_teks_terlalu_panjang() -> None:
+    """Teks melebihi 60 karakter harus ditolak dengan 422 teks_terlalu_panjang."""
+    client = _test_client()
+    if client is None:
+        return
+
+    jpeg_data = make_image("JPEG", size=(200, 200))
+    long_text = "T" * 61
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": long_text},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == ERR_TEKS_TERLALU_PANJANG
+
+
+def test_watermark_http_berkas_kosong() -> None:
+    """Berkas 0 byte harus ditolak dengan 400 berkas_kosong."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("kosong.jpg", b"", "image/jpeg")},
+        data={"text": "Tanda Air"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ERR_BERKAS_KOSONG
+
+
+def test_watermark_http_bukan_gambar() -> None:
+    """Berkas bukan gambar harus ditolak dengan 400 bukan_gambar."""
+    client = _test_client()
+    if client is None:
+        return
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("bukan.txt", b"ini berkas teks biasa bukan gambar", "text/plain")},
+        data={"text": "Tanda Air"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ERR_BUKAN_GAMBAR
+
+
+def test_watermark_http_opacity_tidak_valid() -> None:
+    """Opasitas di luar 5..100 (misal 0 atau 150) harus ditolak dengan 422 parameter_tidak_valid."""
+    client = _test_client()
+    if client is None:
+        return
+
+    jpeg_data = make_image("JPEG", size=(200, 200))
+
+    # Opacity 0 -> 422
+    resp0 = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "opacity": "0"},
+    )
+    assert resp0.status_code == 422
+    assert resp0.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+    # Opacity 150 -> 422
+    resp150 = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "opacity": "150"},
+    )
+    assert resp150.status_code == 422
+    assert resp150.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+
+def test_watermark_http_position_tidak_dikenal() -> None:
+    """Posisi di luar daftar pilihan harus ditolak dengan 422 parameter_tidak_valid."""
+    client = _test_client()
+    if client is None:
+        return
+
+    jpeg_data = make_image("JPEG", size=(200, 200))
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "position": "sudut_kiri"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+
+def test_watermark_http_angle_tidak_valid() -> None:
+    """Sudut rotasi di luar -90..90 derajat (misal 120 atau -100) harus ditolak dengan 422 parameter_tidak_valid."""
+    client = _test_client()
+    if client is None:
+        return
+
+    jpeg_data = make_image("JPEG", size=(200, 200))
+
+    resp120 = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "angle": "120"},
+    )
+    assert resp120.status_code == 422
+    assert resp120.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+    resp_min = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "angle": "-100"},
+    )
+    assert resp_min.status_code == 422
+    assert resp_min.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+
+def test_watermark_http_size_dan_mode_tidak_valid() -> None:
+    """Uji validasi parameter size dan mode."""
+    client = _test_client()
+    if client is None:
+        return
+
+    jpeg_data = make_image("JPEG", size=(200, 200))
+
+    # Size < 2 -> 422
+    resp_s_low = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "size": "1"},
+    )
+    assert resp_s_low.status_code == 422
+    assert resp_s_low.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+    # Size > 30 -> 422
+    resp_s_high = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "size": "35"},
+    )
+    assert resp_s_high.status_code == 422
+    assert resp_s_high.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+    # Mode tidak valid -> 422
+    resp_mode = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={"text": "Tes", "mode": "spiral"},
+    )
+    assert resp_mode.status_code == 422
+    assert resp_mode.json()["error"]["code"] == ERR_PARAMETER_TIDAK_VALID
+
+
+def test_watermark_teks_panjang_single_tidak_terpotong() -> None:
+    """Teks 60 karakter + size=30 + mode=single + position=br pada 800x600 -> 200, bbox tidak terpotong (sisa >= 4 px dari tiap tepi)."""
+    client = _test_client()
+    if client is None:
+        return
+
+    orig_w, orig_h = 800, 600
+    jpeg_data = make_image("JPEG", size=(orig_w, orig_h), color="blue")
+    long_text = "Contoh watermark teks panjang 60 karakter untuk uji batas 12"
+    assert len(long_text) == 60
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={
+            "text": long_text,
+            "mode": "single",
+            "position": "br",
+            "size": "30",
+            "opacity": "70",
+            "format": "jpeg",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+
+    out_img = Image.open(io.BytesIO(resp.content))
+    assert out_img.size == (orig_w, orig_h)
+
+    orig_img = Image.open(io.BytesIO(jpeg_data))
+    diff = ImageChops.difference(orig_img, out_img)
+    diff_box = diff.getbbox()
+    assert diff_box is not None, "Harus ada perubahan tanda air pada gambar"
+
+    min_x, min_y, max_x, max_y = diff_box
+    # Kotak piksel yang berubah harus berada di dalam gambar dengan sisa >= 4 px dari tiap tepi
+    assert min_x >= 4, f"Sisi kiri terpotong / terlalu dekat: min_x={min_x} < 4"
+    assert min_y >= 4, f"Sisi atas terpotong / terlalu dekat: min_y={min_y} < 4"
+    assert orig_w - max_x >= 4, f"Sisi kanan terpotong / terlalu dekat: sisa={orig_w - max_x} < 4"
+    assert orig_h - max_y >= 4, f"Sisi bawah terpotong / terlalu dekat: sisa={orig_h - max_y} < 4"
+
+
+def test_watermark_mode_tile_gambar_kecil_teks_panjang() -> None:
+    """Mode tile dengan gambar kecil 320x240 dan teks panjang -> 200, hasil bisa dibuka, ukuran sama."""
+    client = _test_client()
+    if client is None:
+        return
+
+    orig_w, orig_h = 320, 240
+    jpeg_data = make_image("JPEG", size=(orig_w, orig_h), color="green")
+    long_text = "Contoh tanda air teks panjang mode tile bahzi 60 karakter 12"
+    assert len(long_text) == 60
+
+    resp = client.post(
+        "/api/watermark",
+        files={"file": ("foto.jpg", jpeg_data, "image/jpeg")},
+        data={
+            "text": long_text,
+            "mode": "tile",
+            "size": "20",
+            "opacity": "50",
+            "angle": "30",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+
+    out_img = Image.open(io.BytesIO(resp.content))
+    assert out_img.size == (orig_w, orig_h)
+
+
+def test_watermark_root_tools_terdaftar() -> None:
+    """Pastikan 'watermark' terdaftar pada root endpoint tools."""
+    client = _test_client()
+    if client is None:
+        return
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "watermark" in resp.json()["tools"]
 
 
 

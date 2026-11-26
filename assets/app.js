@@ -35,7 +35,8 @@
         { name: 'Pas foto', desc: 'Ubah foto jadi pas foto 2x3, 3x4, atau 4x6 cm siap cetak, lengkap dengan batas ukuran berkas.', status: 'available', action: 'pas-foto' },
         { name: 'Video Trimmer', desc: 'Ambil bagian tertentu dari sebuah klip video, lalu unduh hasilnya.', status: 'available', href: '/potong-video/' },
         { name: 'Ambil audio dari video', desc: 'Simpan suara dari sebuah video menjadi berkas MP3, M4A, atau WAV.', status: 'available', href: '/ekstrak-audio/' },
-        { name: 'Balik video', desc: 'Putar video mundur sampai ke detik pertama, dengan pilihan kecepatan dan tanpa suara.', status: 'available', href: '/balik-video/' }
+        { name: 'Balik video', desc: 'Putar video mundur sampai ke detik pertama, dengan pilihan kecepatan dan tanpa suara.', status: 'available', href: '/balik-video/' },
+        { name: 'Beri tanda air pada foto', desc: 'Tempel teks tanda air di satu sudut atau miring berulang menutupi foto, atur ukuran, kepekatan, dan posisinya.', status: 'available', action: 'watermark' }
       ]
     },
     {
