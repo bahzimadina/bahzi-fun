@@ -544,6 +544,21 @@ from app.utang import (
     hitung_rencana as hitung_utang,
     limits_payload as utang_limits_payload,
 )
+from app.volumetrik import (
+    BERAT_TIDAK_VALID as VOL_TEST_BERAT_TIDAK_VALID,
+    DIMENSI_TIDAK_VALID as VOL_TEST_DIMENSI_TIDAK_VALID,
+    INVALID_REQUEST as VOL_TEST_INVALID_REQUEST,
+    KOLI_KOSONG as VOL_TEST_KOLI_KOSONG,
+    MAX_BODY_BYTES as VOL_TEST_MAX_BODY_BYTES,
+    PAYLOAD_TOO_LARGE as VOL_TEST_PAYLOAD_TOO_LARGE,
+    PEMBAGI_TIDAK_DIKENAL as VOL_TEST_PEMBAGI_TIDAK_DIKENAL,
+    PEMBULATAN_TIDAK_DIKENAL as VOL_TEST_PEMBULATAN_TIDAK_DIKENAL,
+    TARIF_TIDAK_VALID as VOL_TEST_TARIF_TIDAK_VALID,
+    TERLALU_BANYAK_KOLI as VOL_TEST_TERLALU_BANYAK_KOLI,
+    VolumetrikError,
+    hitung_volumetrik,
+    limits_payload as volumetrik_limits_payload,
+)
 from app.keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -21580,6 +21595,323 @@ def test_video_compress_fallback_ekstensi_dan_mime() -> None:
         kv_mod.probe_video = orig_probe
         kv_mod.subprocess.run = orig_run
 
+
+
+# ============================================================================
+# Uji Hitung Berat Volumetrik Paket (Modul volumetrik.py & Endpoint HTTP)
+# ============================================================================
+
+def test_volumetrik_limits() -> None:
+    """Uji fungsi limits_payload volumetrik."""
+    data = volumetrik_limits_payload()
+    assert data["maks_koli"] == 10
+    assert data["dimensi_cm"]["min"] == 1
+    assert data["dimensi_cm"]["max"] == 300
+    assert data["berat_kg"]["min"] == 0.01
+    assert data["berat_kg"]["max"] == 1000
+    assert data["pembagi"] == [6000, 5000, 4000]
+    assert data["pembulatan"] == [0.1, 0.5, 1]
+    assert data["tarif_per_kg"]["min"] == 0
+    assert data["tarif_per_kg"]["max"] == 1000000
+    assert "catatan_singkat" in data
+
+
+def test_volumetrik_kasus_1_koli_volumetrik() -> None:
+    """Uji kasus 1 koli 40x30x25 cm, 2.4 kg, pembagi 6000, pembulatan 0.5.
+    
+    Hitung manual:
+    - volume = 40 * 30 * 25 = 30.000 cm3
+    - volumetrik = 30.000 / 6000 = 5,0 kg
+    - aktual = 2,4 kg
+    - dasar = volumetrik (karena 5,0 > 2,4)
+    - berat terpakai = 5,0 kg
+    - pembulatan (kelipatan 0,5) = 5,0 kg
+    - selisih = 5,0 - 2,4 = 2,6 kg
+    - selisih % = 2,6 / 2,4 * 100 = 108,3%
+    - tarif 18.000 -> ongkir = 5,0 * 18.000 = Rp 90.000
+    """
+    res = hitung_volumetrik({
+        "pembagi": 6000,
+        "pembulatan": 0.5,
+        "tarif_per_kg": 18000,
+        "koli": [
+            {"nama": "Kardus 1", "panjang": 40, "lebar": 30, "tinggi": 25, "berat": 2.4}
+        ],
+    })
+    koli = res["koli"][0]
+    assert koli["volume_cm3"] == 30000
+    assert koli["berat_volumetrik"] == 5.0
+    assert koli["berat_aktual"] == 2.4
+    assert koli["berat_dasar"] == "volumetrik"
+    assert koli["berat_terpakai"] == 5.0
+    assert koli["berat_dibulatkan"] == 5.0
+    assert koli["selisih_kg"] == 2.6
+    assert koli["selisih_persen"] == 108.3
+
+    assert res["total_berat"] == 5.0
+    assert res["total_volume_cm3"] == 30000
+    assert res["total_ongkir"] == 90000
+
+    # Pastikan saran memuat saran kardus lebih ringan dan catatan perkiraan
+    saran_teks = " ".join(res["saran"])
+    assert "lebih ringan dari ukurannya" in saran_teks
+    assert "perkiraan" in saran_teks
+
+
+def test_volumetrik_kasus_berat_aktual_lebih_besar() -> None:
+    """Uji kasus berat timbangan aktual lebih besar dari volumetrik (dasar 'aktual').
+    
+    Hitung manual:
+    - ukuran = 20x20x20 cm -> volume = 8.000 cm3
+    - volumetrik = 8.000 / 6000 = 1,333 kg
+    - aktual = 4,0 kg
+    - dasar = aktual
+    - berat terpakai = 4,0 kg -> dibulatkan (0,5) = 4,0 kg
+    - selisih = 0 kg (0,0%)
+    - tarif = 10.000 -> total ongkir = 4,0 * 10.000 = Rp 40.000
+    """
+    res = hitung_volumetrik({
+        "pembagi": 6000,
+        "pembulatan": 0.5,
+        "tarif_per_kg": 10000,
+        "koli": [
+            {"nama": "Buku Berat", "panjang": 20, "lebar": 20, "tinggi": 20, "berat": 4.0}
+        ],
+    })
+    koli = res["koli"][0]
+    assert koli["berat_dasar"] == "aktual"
+    assert koli["berat_volumetrik"] == 1.333
+    assert koli["berat_aktual"] == 4.0
+    assert koli["berat_terpakai"] == 4.0
+    assert koli["berat_dibulatkan"] == 4.0
+    assert koli["selisih_kg"] == 0.0
+    assert koli["selisih_persen"] == 0.0
+    assert res["total_ongkir"] == 40000
+
+    # Karena dasar aktual, saran kardus lebih ringan tidak boleh muncul
+    saran_teks = " ".join(res["saran"])
+    assert "lebih ringan dari ukurannya" not in saran_teks
+
+
+def test_volumetrik_pembulatan_ke_atas() -> None:
+    """Uji pembulatan ke atas: 3,2 kg -> 3,5 kg (kelipatan 0,5); 4 kg (kelipatan 1); 3,3 kg (kelipatan 0,1)."""
+    # Kelipatan 0,5: 3,2 -> 3,5
+    res_05 = hitung_volumetrik({
+        "pembagi": 6000,
+        "pembulatan": 0.5,
+        "koli": [{"nama": "A", "panjang": 30, "lebar": 20, "tinggi": 20, "berat": 3.2}],
+    })
+    assert res_05["koli"][0]["berat_dibulatkan"] == 3.5
+    assert res_05["total_berat"] == 3.5
+    assert res_05["total_ongkir"] is None
+    assert "Isi tarif per kg untuk melihat perkiraan ongkir." in res_05["saran"]
+
+    # Kelipatan 1: 3,2 -> 4
+    res_1 = hitung_volumetrik({
+        "pembagi": 6000,
+        "pembulatan": 1,
+        "koli": [{"nama": "B", "panjang": 30, "lebar": 20, "tinggi": 20, "berat": 3.2}],
+    })
+    assert res_1["koli"][0]["berat_dibulatkan"] == 4
+
+    # Kelipatan 0,1: 3,21 -> 3,3
+    res_01 = hitung_volumetrik({
+        "pembagi": 6000,
+        "pembulatan": 0.1,
+        "koli": [{"nama": "C", "panjang": 30, "lebar": 20, "tinggi": 20, "berat": 3.21}],
+    })
+    assert res_01["koli"][0]["berat_dibulatkan"] == 3.3
+
+
+def test_volumetrik_3_koli_total_ongkir() -> None:
+    """Uji 3 koli dengan perhitungan manual total volume, berat, dan ongkir:
+    
+    Koli 1: 40x30x25 cm, berat 2,4 kg -> vol 30.000 cm3, vol_kg 5,0, aktual 2,4 -> dipakai 5,0 kg
+    Koli 2: 30x20x20 cm, berat 3,2 kg -> vol 12.000 cm3, vol_kg 2,0, aktual 3,2 -> dibulatkan (0,5) = 3,5 kg
+    Koli 3: 50x40x30 cm, berat 8,0 kg -> vol 60.000 cm3, vol_kg 10,0, aktual 8,0 -> dipakai 10,0 kg
+    
+    Total berat = 5,0 + 3,5 + 10,0 = 18,5 kg
+    Total volume = 30.000 + 12.000 + 60.000 = 102.000 cm3
+    Tarif per kg = 20.000
+    Total ongkir = 18,5 * 20.000 = Rp 370.000
+    """
+    res = hitung_volumetrik({
+        "pembagi": 6000,
+        "pembulatan": 0.5,
+        "tarif_per_kg": 20000,
+        "koli": [
+            {"nama": "Kardus A", "panjang": 40, "lebar": 30, "tinggi": 25, "berat": 2.4},
+            {"nama": "Kardus B", "panjang": 30, "lebar": 20, "tinggi": 20, "berat": 3.2},
+            {"nama": "Kardus C", "panjang": 50, "lebar": 40, "tinggi": 30, "berat": 8.0},
+        ],
+    })
+    assert len(res["koli"]) == 3
+    assert res["total_volume_cm3"] == 102000
+    assert res["total_berat"] == 18.5
+    assert res["total_ongkir"] == 370000
+
+
+def test_volumetrik_validasi_koli() -> None:
+    """Uji validasi koli kosong (KOLI_KOSONG) dan terlalu banyak koli (TERLALU_BANYAK_KOLI)."""
+    # 1. Koli kosong -> 400 KOLI_KOSONG
+    try:
+        hitung_volumetrik({"koli": []})
+        assert False, "Harus melempar KOLI_KOSONG"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_KOLI_KOSONG
+
+    # 2. Lebih dari 10 koli -> 400 TERLALU_BANYAK_KOLI
+    banyak_koli = [
+        {"panjang": 10, "lebar": 10, "tinggi": 10, "berat": 1.0} for _ in range(11)
+    ]
+    try:
+        hitung_volumetrik({"koli": banyak_koli})
+        assert False, "Harus melempar TERLALU_BANYAK_KOLI"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_TERLALU_BANYAK_KOLI
+
+
+def test_volumetrik_validasi_dimensi_dan_berat() -> None:
+    """Uji validasi batas dimensi (0 dan 301 cm) serta batas berat timbangan."""
+    # 1. Dimensi 0 cm -> 400 DIMENSI_TIDAK_VALID
+    try:
+        hitung_volumetrik({
+            "koli": [{"nama": "Nol", "panjang": 0, "lebar": 20, "tinggi": 20, "berat": 1.0}]
+        })
+        assert False, "Harus melempar DIMENSI_TIDAK_VALID"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_DIMENSI_TIDAK_VALID
+        assert "Nol" in exc.message
+
+    # 2. Dimensi 301 cm -> 400 DIMENSI_TIDAK_VALID
+    try:
+        hitung_volumetrik({
+            "koli": [{"nama": "Panjang", "panjang": 301, "lebar": 20, "tinggi": 20, "berat": 1.0}]
+        })
+        assert False, "Harus melempar DIMENSI_TIDAK_VALID"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_DIMENSI_TIDAK_VALID
+        assert "Panjang" in exc.message
+
+    # 3. Berat 0 kg -> 400 BERAT_TIDAK_VALID
+    try:
+        hitung_volumetrik({
+            "koli": [{"nama": "Ringan", "panjang": 20, "lebar": 20, "tinggi": 20, "berat": 0}]
+        })
+        assert False, "Harus melempar BERAT_TIDAK_VALID"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_BERAT_TIDAK_VALID
+
+    # 4. Berat 1001 kg -> 400 BERAT_TIDAK_VALID
+    try:
+        hitung_volumetrik({
+            "koli": [{"nama": "Raksasa", "panjang": 20, "lebar": 20, "tinggi": 20, "berat": 1001}]
+        })
+        assert False, "Harus melempar BERAT_TIDAK_VALID"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_BERAT_TIDAK_VALID
+
+
+def test_volumetrik_validasi_pembagi_dan_pembulatan_dan_tarif() -> None:
+    """Uji validasi pembagi, pembulatan, tarif, dan body bukan JSON."""
+    koli_valid = [{"panjang": 20, "lebar": 20, "tinggi": 20, "berat": 1.0}]
+
+    # 1. Pembagi ngawur (7000) -> 400 PEMBAGI_TIDAK_DIKENAL
+    try:
+        hitung_volumetrik({"pembagi": 7000, "koli": koli_valid})
+        assert False, "Harus melempar PEMBAGI_TIDAK_DIKENAL"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_PEMBAGI_TIDAK_DIKENAL
+
+    # 2. Pembulatan ngawur (2) -> 400 PEMBULATAN_TIDAK_DIKENAL
+    try:
+        hitung_volumetrik({"pembulatan": 2, "koli": koli_valid})
+        assert False, "Harus melempar PEMBULATAN_TIDAK_DIKENAL"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_PEMBULATAN_TIDAK_DIKENAL
+
+    # 3. Tarif negatif (-5000) -> 400 TARIF_TIDAK_VALID
+    try:
+        hitung_volumetrik({"tarif_per_kg": -5000, "koli": koli_valid})
+        assert False, "Harus melempar TARIF_TIDAK_VALID"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_TARIF_TIDAK_VALID
+
+    # 4. Body bukan dict -> 400 INVALID_REQUEST
+    try:
+        hitung_volumetrik("bukan json")  # type: ignore[arg-type]
+        assert False, "Harus melempar INVALID_REQUEST"
+    except VolumetrikError as exc:
+        assert exc.code == VOL_TEST_INVALID_REQUEST
+
+
+def test_volumetrik_http_endpoints() -> None:
+    """Uji TestClient FastAPI untuk GET /api/volumetrik/limits, POST /api/volumetrik, dan status HTTP."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # 1. GET /api/volumetrik/limits
+    resp_limits = client.get("/api/volumetrik/limits")
+    assert resp_limits.status_code == 200
+    assert "no-store" in resp_limits.headers.get("cache-control", "").lower()
+    limits_body = resp_limits.json()
+    assert limits_body["ok"] is True
+    assert limits_body["data"]["maks_koli"] == 10
+
+    # 2. POST /api/volumetrik - sukses
+    valid_payload = {
+        "pembagi": 6000,
+        "pembulatan": 0.5,
+        "tarif_per_kg": 18000,
+        "koli": [
+            {"nama": "Kardus 1", "panjang": 40, "lebar": 30, "tinggi": 25, "berat": 2.4}
+        ],
+    }
+    resp_post = client.post("/api/volumetrik", json=valid_payload)
+    assert resp_post.status_code == 200
+    assert "no-store" in resp_post.headers.get("cache-control", "").lower()
+    assert "x-processing-ms" in resp_post.headers
+    post_json = resp_post.json()
+    assert post_json["ok"] is True
+    assert post_json["data"]["total_berat"] == 5.0
+    assert post_json["data"]["total_ongkir"] == 90000
+
+    # 3. POST /api/volumetrik - bukan JSON (text/plain)
+    resp_not_json = client.post(
+        "/api/volumetrik", content="bukan json", headers={"Content-Type": "text/plain"}
+    )
+    assert resp_not_json.status_code == 400
+    assert resp_not_json.json()["kode"] == VOL_TEST_INVALID_REQUEST
+
+    # 4. POST /api/volumetrik - ditolak jika multipart/form-data
+    resp_form = client.post("/api/volumetrik", data={"pembagi": "6000"})
+    assert resp_form.status_code == 400
+    assert resp_form.json()["kode"] == VOL_TEST_INVALID_REQUEST
+
+    # 5. POST /api/volumetrik - body kosong
+    resp_empty = client.post(
+        "/api/volumetrik", content="", headers={"Content-Type": "application/json"}
+    )
+    assert resp_empty.status_code == 400
+    assert resp_empty.json()["kode"] == VOL_TEST_INVALID_REQUEST
+
+    # 6. POST /api/volumetrik - payload terlalu besar (>64 KB)
+    big_payload = json.dumps({"pembagi": 6000, "padding": "x" * 70000})
+    resp_big = client.post(
+        "/api/volumetrik", content=big_payload, headers={"Content-Type": "application/json"}
+    )
+    assert resp_big.status_code == 413
+    assert resp_big.json()["kode"] == VOL_TEST_PAYLOAD_TOO_LARGE
+
+    # 7. GET /api/volumetrik -> 405 Method Not Allowed
+    resp_get = client.get("/api/volumetrik")
+    assert resp_get.status_code == 405
+
+    # 8. Pastikan 'volumetrik' terdaftar pada root endpoint tools
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "volumetrik" in root_resp.json()["tools"]
 
 
 # --- Runner mandiri ---------------------------------------------------------

@@ -480,6 +480,21 @@ from .utang import (
     hitung_rencana as hitung_utang,
     limits_payload as utang_limits_payload_func,
 )
+from .volumetrik import (
+    BERAT_TIDAK_VALID as VOL_BERAT_TIDAK_VALID,
+    DIMENSI_TIDAK_VALID as VOL_DIMENSI_TIDAK_VALID,
+    INVALID_REQUEST as VOL_INVALID_REQUEST,
+    KOLI_KOSONG as VOL_KOLI_KOSONG,
+    MAX_BODY_BYTES as VOL_MAX_BODY_BYTES,
+    PAYLOAD_TOO_LARGE as VOL_PAYLOAD_TOO_LARGE,
+    PEMBAGI_TIDAK_DIKENAL as VOL_PEMBAGI_TIDAK_DIKENAL,
+    PEMBULATAN_TIDAK_DIKENAL as VOL_PEMBULATAN_TIDAK_DIKENAL,
+    TARIF_TIDAK_VALID as VOL_TARIF_TIDAK_VALID,
+    TERLALU_BANYAK_KOLI as VOL_TERLALU_BANYAK_KOLI,
+    VolumetrikError,
+    hitung_volumetrik,
+    limits_payload as volumetrik_limits_payload_func,
+)
 from .keramik import (
     INVALID_CADANGAN as KR_INVALID_CADANGAN,
     INVALID_CUSTOM_SIZE as KR_INVALID_CUSTOM_SIZE,
@@ -1382,6 +1397,17 @@ async def handle_kiblat_error(request: Request, exc: KiblatError) -> JSONRespons
 async def handle_utang_error(request: Request, exc: UtangError) -> JSONResponse:
     """Error kalkulator rencana bebas utang yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
     logger.warning("rencana bebas utang ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.exception_handler(VolumetrikError)
+async def handle_volumetrik_error(request: Request, exc: VolumetrikError) -> JSONResponse:
+    """Error hitung berat volumetrik yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("hitung volumetrik ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),
@@ -2660,6 +2686,27 @@ def _reject_oversized_utang_content_length(request: Request) -> None:
 
 def _utang_limits_payload() -> dict:
     return utang_limits_payload_func()
+
+
+def _reject_oversized_volumetrik_content_length(request: Request) -> None:
+    """Tolak lebih awal bila Content-Length sudah jelas melebihi batas 64 KB."""
+    raw = request.headers.get("content-length")
+    if not raw:
+        return
+    try:
+        declared = int(raw)
+    except ValueError:
+        return
+    if declared > VOL_MAX_BODY_BYTES:
+        raise VolumetrikError(
+            VOL_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+
+def _volumetrik_limits_payload() -> dict:
+    return volumetrik_limits_payload_func()
 
 
 def _reject_oversized_keramik_content_length(request: Request) -> None:
@@ -5591,6 +5638,76 @@ async def utang_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(content={"ok": True, "data": result}, headers=headers)
 
 
+@app.get("/api/volumetrik/limits")
+async def volumetrik_limits() -> JSONResponse:
+    """Batas dan konfigurasi yang berlaku untuk Hitung Berat Volumetrik Paket."""
+    return JSONResponse(content={"ok": True, "data": _volumetrik_limits_payload()}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/volumetrik")
+async def volumetrik_endpoint(request: Request) -> JSONResponse:
+    """Hitung berat volumetrik paket kiriman di memori."""
+    started = time.perf_counter()
+
+    _reject_oversized_volumetrik_content_length(request)
+
+    body_bytes = await request.body()
+    if len(body_bytes) > VOL_MAX_BODY_BYTES:
+        raise VolumetrikError(
+            VOL_PAYLOAD_TOO_LARGE,
+            "Ukuran permintaan melebihi batas maksimum 64 KB.",
+            413,
+        )
+
+    if not body_bytes or not body_bytes.strip():
+        raise VolumetrikError(
+            VOL_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        raise VolumetrikError(
+            VOL_INVALID_REQUEST,
+            "Permintaan tidak valid. Kirim objek JSON, bukan formulir.",
+            400,
+        )
+
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        raise VolumetrikError(
+            VOL_INVALID_REQUEST,
+            "Format JSON tidak valid atau bukan objek JSON.",
+            400,
+        )
+
+    if not isinstance(payload, dict):
+        raise VolumetrikError(
+            VOL_INVALID_REQUEST,
+            "Permintaan harus berupa objek JSON.",
+            400,
+        )
+
+    result = hitung_volumetrik(payload)
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    # PENTING: JANGAN catat nama koli atau rincian data pengguna ke log.
+    logger.info(
+        "hitung volumetrik selesai: koli=%d durasi=%.0fms",
+        len(result.get("koli", [])),
+        duration_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "X-Processing-Ms": f"{duration_ms:.0f}",
+    }
+    return JSONResponse(content={"ok": True, "data": result}, headers=headers)
+
+
 @app.get("/api/keramik/limits")
 async def keramik_limits() -> JSONResponse:
     """Batas dan konfigurasi yang berlaku untuk Hitung Keramik Lantai."""
@@ -8067,6 +8184,7 @@ async def root() -> dict:
             "ac",
             "kiblat",
             "utang",
+            "volumetrik",
             "watermark",
             "kompres-video",
         ],

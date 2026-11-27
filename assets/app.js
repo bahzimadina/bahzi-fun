@@ -98,6 +98,7 @@
         { name: 'Simulasi cicilan', desc: 'Hitung perkiraan angsuran tiap bulan, total bunga, dan sisa utang bulan demi bulan.', status: 'available', action: 'cicilan' },
         { name: 'Simulasi tabungan', desc: 'Perkirakan saldo akhir tabungan berbunga, cari setoran bulanan untuk sebuah target, atau lihat berapa lama target itu tercapai.', status: 'available', action: 'tabungan' },
         { name: 'Rencana bebas utang', desc: 'Susun urutan pelunasan beberapa utang sekaligus dan lihat kapan kamu bebas utang.', status: 'available', action: 'utang' },
+        { name: 'Berat volumetrik paket', desc: 'Hitung berat yang dipakai ekspedisi dari ukuran kardus dan perkirakan ongkirnya.', status: 'available', action: 'volumetrik' },
         { name: 'Hitung kalori', desc: 'Perkirakan kebutuhan kalori harian, IMT, dan rentang berat ideal dari tinggi dan berat badanmu.', status: 'available', action: 'kalori' },
         { name: 'Hitung IPK', desc: 'Hitung IPK dari daftar mata kuliah, lihat predikatnya, dan cek berapa SKS nilai A lagi yang perlu dikejar untuk mencapai target.', status: 'available', action: 'ipk' },
         { name: 'Hitung keramik lantai', desc: 'Hitung jumlah keping dan dus keramik untuk sebuah ruangan, plus perkiraan biayanya.', status: 'available', action: 'keramik' },
