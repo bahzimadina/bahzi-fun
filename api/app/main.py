@@ -889,6 +889,13 @@ from .video_trim import (
     limits_payload as video_trim_limits_payload,
     potong as potong_video,
 )
+from .kompres_video import (
+    MAX_BYTES as VIDEO_COMPRESS_MAX_BYTES,
+    KompresResult,
+    KompresVideoError,
+    kompres as kompres_video_func,
+    limits_payload as video_compress_limits_payload,
+)
 from .audio_extract import (
     ALLOWED_FORMATS as AUDIO_ALLOWED_FORMATS,
     MAX_BYTES as AUDIO_MAX_BYTES,
@@ -987,6 +994,9 @@ _ocr_semaphore = threading.Semaphore(1)
 # Batasi satu proses pemotongan video sekaligus di tingkat modul
 _video_trim_semaphore = threading.Semaphore(1)
 
+# Batasi satu proses kompresi video sekaligus di tingkat modul
+_video_compress_semaphore = threading.Semaphore(1)
+
 # Batasi satu proses ekstraksi audio sekaligus di tingkat modul
 _audio_extract_semaphore = threading.Semaphore(1)
 
@@ -1033,6 +1043,17 @@ async def handle_audio_extract_error(request: Request, exc: AudioExtractError) -
 async def handle_video_trim_error(request: Request, exc: VideoTrimError) -> JSONResponse:
     """Error pemotongan video yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
     logger.warning("potong video ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.exception_handler(KompresVideoError)
+async def handle_kompres_video_error(request: Request, exc: KompresVideoError) -> JSONResponse:
+    """Error kompresi video yang sudah terklasifikasi -> JSON rapi + status HTTP tepat."""
+    logger.warning("kompres video ditolak: code=%s status=%s path=%s", exc.code, exc.status_code, request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),
@@ -1674,7 +1695,9 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
             },
             headers={"Cache-Control": "no-store"},
         )
-    if request.url.path.startswith("/api/video/trim"):
+    if request.url.path.startswith("/api/video/compress"):
+        msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file', 'mode', 'preset', 'target_mb', dan 'kecilkan'."
+    elif request.url.path.startswith("/api/video/trim"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'file', 'mulai', 'akhir', dan 'mode'."
     elif request.url.path.startswith("/api/listrik"):
         msg = "Permintaan tidak valid. Kirim multipart/form-data dengan field 'mode'."
@@ -7773,6 +7796,81 @@ async def video_trim_endpoint(
     return Response(content=result.data, media_type=result.mime_type, headers=headers)
 
 
+@app.get("/api/video/compress/limits")
+async def video_compress_limits() -> JSONResponse:
+    """Batas yang berlaku untuk kompresi video."""
+    return JSONResponse(content=video_compress_limits_payload(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/video/compress")
+async def video_compress_endpoint(
+    request: Request,
+    file: UploadFile | None = File(None),
+    mode: str = Form("kualitas"),
+    preset: str = Form("seimbang"),
+    target_mb: str = Form(""),
+    kecilkan: str = Form("ya"),
+) -> Response:
+    """Kompres video di server memakai ffmpeg."""
+    started = time.perf_counter()
+
+    if file is None:
+        raise KompresVideoError("EMPTY_FILE", "Berkas video belum dipilih.", 400)
+
+    data = await file.read()
+    if not data or len(data) == 0:
+        raise KompresVideoError("EMPTY_FILE", "Berkas video kosong.", 400)
+
+    if len(data) > VIDEO_COMPRESS_MAX_BYTES:
+        raise KompresVideoError(
+            "FILE_TOO_LARGE",
+            f"Ukuran berkas melebihi batas {VIDEO_COMPRESS_MAX_BYTES // (1024 * 1024)} MB.",
+            413,
+        )
+
+    if not _video_compress_semaphore.acquire(blocking=False):
+        raise KompresVideoError("BUSY", "Server sedang memproses kompresi video lain. Coba lagi sebentar lagi.", 503)
+
+    try:
+        result = await run_in_threadpool(
+            kompres_video_func,
+            data,
+            file.filename or "",
+            mode,
+            preset,
+            target_mb,
+            kecilkan,
+        )
+    finally:
+        _video_compress_semaphore.release()
+
+    durasi_proses_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "kompres video selesai: mode=%s preset=%s durasi=%.1fs in_bytes=%d out_bytes=%d hemat=%.1f%% durasi=%.0fms",
+        result.mode,
+        result.preset,
+        result.durasi_detik,
+        result.input_bytes,
+        result.output_bytes,
+        result.hemat_percent,
+        durasi_proses_ms,
+    )
+
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{result.output_name}"',
+        "X-Input-Bytes": str(result.input_bytes),
+        "X-Output-Bytes": str(result.output_bytes),
+        "X-Hemat-Percent": f"{result.hemat_percent:.1f}",
+        "X-Duration-Seconds": f"{result.durasi_detik:.1f}",
+        "X-Resolution": result.resolusi,
+        "X-Mode": result.mode,
+        "X-Preset": result.preset,
+        "X-Processing-Ms": str(int(durasi_proses_ms)),
+    }
+    return Response(content=result.data, media_type=result.mime_type, headers=headers)
+
+
 @app.get("/api/audio/extract/limits")
 async def audio_extract_limits() -> JSONResponse:
     """Batas yang berlaku untuk ekstraksi audio dari video."""
@@ -7970,6 +8068,7 @@ async def root() -> dict:
             "kiblat",
             "utang",
             "watermark",
+            "kompres-video",
         ],
     }
 

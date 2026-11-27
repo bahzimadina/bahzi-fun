@@ -1087,6 +1087,21 @@ from app.video_reverse import (
     limits_payload as video_reverse_limits_payload,
     probe as video_reverse_probe,
 )
+from app.kompres_video import (
+    ALLOWED_FORMATS as VIDEO_COMPRESS_ALLOWED_FORMATS,
+    MAX_BYTES as VIDEO_COMPRESS_MAX_BYTES,
+    MAX_DURATION_SECONDS as VIDEO_COMPRESS_MAX_DURATION_SECONDS,
+    MAX_OUTPUT_BYTES as VIDEO_COMPRESS_MAX_OUTPUT_BYTES,
+    MIN_VIDEO_BITRATE as VIDEO_COMPRESS_MIN_BITRATE,
+    PRESETS as VIDEO_COMPRESS_PRESETS,
+    KompresResult,
+    KompresVideoError,
+    deteksi_format_magic as video_compress_deteksi_format_magic,
+    hitung_bitrate_target as video_compress_hitung_bitrate_target,
+    kompres as video_kompres,
+    limits_payload as video_compress_limits_payload,
+    probe_video as video_compress_probe,
+)
 
 
 SKIPPED: list[str] = []
@@ -21173,6 +21188,397 @@ def test_watermark_root_tools_terdaftar() -> None:
     resp = client.get("/")
     assert resp.status_code == 200
     assert "watermark" in resp.json()["tools"]
+
+
+# --- Pengujian Kompres Video (FFmpeg) ----------------------------------------
+def test_video_compress_limits_payload() -> None:
+    """Uji payload batas operasional kompresi video."""
+    payload = video_compress_limits_payload()
+    wajib = [
+        "max_bytes",
+        "max_duration_seconds",
+        "allowed_formats",
+        "presets",
+        "target_mb_min",
+        "target_mb_max",
+        "target_mb_default",
+        "max_output_bytes",
+        "timeout_seconds",
+    ]
+    for k in wajib:
+        assert k in payload, f"Kunci {k} harus ada dalam limits_payload"
+
+    assert payload["max_bytes"] == VIDEO_COMPRESS_MAX_BYTES
+    assert payload["max_duration_seconds"] == VIDEO_COMPRESS_MAX_DURATION_SECONDS
+    assert payload["allowed_formats"] == ["MP4", "MOV", "WEBM", "MKV"]
+    assert len(payload["presets"]) == 3
+    preset_ids = [p["id"] for p in payload["presets"]]
+    assert "ringan" in preset_ids
+    assert "seimbang" in preset_ids
+    assert "kuat" in preset_ids
+    assert payload["target_mb_min"] == 1
+    assert payload["target_mb_max"] == 20
+    assert payload["target_mb_default"] == 5
+    assert payload["max_output_bytes"] == VIDEO_COMPRESS_MAX_OUTPUT_BYTES
+    assert payload["timeout_seconds"] == 110
+
+
+def test_video_compress_deteksi_format_dan_tolak_bukan_video() -> None:
+    """Uji deteksi format video dan penolakan berkas non-video."""
+    # MP4
+    mp4_bytes = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32
+    assert video_compress_deteksi_format_magic(mp4_bytes) == "mp4"
+
+    # MOV
+    mov_bytes = b"\x00\x00\x00\x1cftypqt  \x00\x00\x02\x00" + b"\x00" * 32
+    assert video_compress_deteksi_format_magic(mov_bytes) == "mov"
+
+    # WebM
+    webm_bytes = b"\x1a\x45\xdf\xa3" + b"\x00" * 8 + b"webm" + b"\x00" * 32
+    assert video_compress_deteksi_format_magic(webm_bytes) == "webm"
+
+    # MKV
+    mkv_bytes = b"\x1a\x45\xdf\xa3" + b"\x00" * 8 + b"matroska" + b"\x00" * 32
+    assert video_compress_deteksi_format_magic(mkv_bytes) == "mkv"
+
+    # Bukan video
+    assert video_compress_deteksi_format_magic(b"Halo teks biasa") is None
+    assert video_compress_deteksi_format_magic(b"%PDF-1.4\n1 0 obj") is None
+    assert video_compress_deteksi_format_magic(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20) is None
+
+    # Berkas kosong
+    try:
+        video_compress_deteksi_format_magic(b"")
+        assert False, "Harus melempar KompresVideoError EMPTY_FILE"
+    except KompresVideoError as exc:
+        assert exc.code == "EMPTY_FILE"
+        assert exc.status_code == 400
+
+    # Kompres berkas teks harus ditolak dengan UNSUPPORTED_FORMAT
+    try:
+        video_kompres(b"Halo teks bukan video sama sekali", "bukan_video.txt")
+        assert False, "Harus melempar KompresVideoError UNSUPPORTED_FORMAT"
+    except KompresVideoError as exc:
+        assert exc.code == "UNSUPPORTED_FORMAT"
+        assert exc.status_code == 400
+
+    # Kompres berkas PNG harus ditolak dengan UNSUPPORTED_FORMAT
+    png_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
+    try:
+        video_kompres(png_data, "gambar.png")
+        assert False, "Harus melempar KompresVideoError UNSUPPORTED_FORMAT"
+    except KompresVideoError as exc:
+        assert exc.code == "UNSUPPORTED_FORMAT"
+        assert exc.status_code == 400
+
+
+def test_video_compress_durasi_terlalu_panjang_ditolak() -> None:
+    """Uji penolakan video yang durasinya melebihi batas 120 detik."""
+    import app.kompres_video as kv_mod
+
+    asli_probe = kv_mod.probe_video
+
+    def fake_probe(data: bytes, ext_hint: str = "mp4") -> dict[str, Any]:
+        return {
+            "container": "mp4",
+            "durasi": 130.0,  # > 120 detik
+            "lebar": 640,
+            "tinggi": 480,
+            "ada_video": True,
+            "kodek_video": "h264",
+            "ada_audio": True,
+        }
+
+    kv_mod.probe_video = fake_probe
+    try:
+        fake_data = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00" + b"\x00" * 32
+        video_kompres(fake_data, "lama.mp4")
+        assert False, "Harus melempar DURATION_TOO_LONG"
+    except KompresVideoError as exc:
+        assert exc.code == "DURATION_TOO_LONG"
+        assert exc.status_code == 400
+    finally:
+        kv_mod.probe_video = asli_probe
+
+
+def test_video_compress_hitung_bitrate_target() -> None:
+    """Uji fungsi murni perhitungan bitrate target ukuran video."""
+    # Target 5 MB, durasi 60 detik -> sekitar 640 kbps total, audio dipisah
+    video_kbps, audio_kbps = video_compress_hitung_bitrate_target(target_mb=5, durasi_detik=60, ada_audio=True)
+    total_kbps = video_kbps + audio_kbps
+    assert 630 <= total_kbps <= 650
+    assert audio_kbps == 96
+    assert video_kbps == total_kbps - 96
+    assert video_kbps >= VIDEO_COMPRESS_MIN_BITRATE
+
+    # Tanpa audio: seluruh bitrate untuk video
+    v_no_aud, a_no_aud = video_compress_hitung_bitrate_target(target_mb=5, durasi_detik=60, ada_audio=False)
+    assert a_no_aud == 0
+    assert v_no_aud == total_kbps
+
+    # Target mustahil: durasi 120 detik tapi target cuma 1 MB (bitrate terlalu rendah < 150 kbps)
+    try:
+        video_compress_hitung_bitrate_target(target_mb=1, durasi_detik=120, ada_audio=True)
+        assert False, "Harus melempar TARGET_TOO_SMALL"
+    except KompresVideoError as exc:
+        assert exc.code == "TARGET_TOO_SMALL"
+        assert exc.status_code == 400
+
+
+def test_video_compress_jalur_sukses_nyata_kualitas_dan_target() -> None:
+    """Uji alur nyata kompresi video menggunakan ffmpeg untuk mode kualitas dan target."""
+    import shutil
+    if shutil.which("ffmpeg") is None:
+        SKIPPED.append("uji kompres video nyata dilewati: ffmpeg tidak ada di PATH")
+        return
+
+    video_data = make_test_video(duration=2, format_name="mp4", with_audio=True)
+    if not video_data:
+        SKIPPED.append("pembuatan video uji gagal")
+        return
+
+    # 1. Mode kualitas (preset kuat)
+    res_kualitas = video_kompres(
+        video_data,
+        nama_asal="video_uji.mp4",
+        mode="kualitas",
+        preset="kuat",
+        kecilkan=True,
+    )
+    assert isinstance(res_kualitas, KompresResult)
+    assert len(res_kualitas.data) > 0
+    # Cek magic bytes MP4: offset 4 'ftyp'
+    assert res_kualitas.data[4:8] == b"ftyp"
+    assert res_kualitas.output_name == "video_uji-kompres.mp4"
+    assert res_kualitas.mime_type == "video/mp4"
+    assert res_kualitas.mode == "kualitas"
+    assert res_kualitas.preset == "kuat"
+    assert res_kualitas.hemat_percent >= 0.0
+
+    # 2. Mode target ukuran (target 2 MB)
+    res_target = video_kompres(
+        video_data,
+        nama_asal="video_uji.mp4",
+        mode="target",
+        target_mb=2,
+        kecilkan=True,
+    )
+    assert isinstance(res_target, KompresResult)
+    assert len(res_target.data) > 0
+    assert res_target.data[4:8] == b"ftyp"
+    assert res_target.mode == "target"
+    assert res_target.preset == "target 2 MB"
+
+    # 3. Opsi kecilkan = False
+    res_noscaling = video_kompres(
+        video_data,
+        nama_asal="video_uji.mp4",
+        mode="kualitas",
+        preset="ringan",
+        kecilkan=False,
+    )
+    assert len(res_noscaling.data) > 0
+
+
+def test_http_video_compress_endpoint() -> None:
+    """Uji endpoint HTTP GET limits dan POST kompres video via TestClient."""
+    client = _test_client()
+    if client is None:
+        return
+
+    # Root mendaftarkan kompres-video
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    assert "kompres-video" in root_resp.json()["tools"]
+
+    # Limits endpoint
+    limits_resp = client.get("/api/video/compress/limits")
+    assert limits_resp.status_code == 200
+    lim_data = limits_resp.json()
+    assert lim_data["max_bytes"] == VIDEO_COMPRESS_MAX_BYTES
+    assert lim_data["max_duration_seconds"] == VIDEO_COMPRESS_MAX_DURATION_SECONDS
+    assert lim_data["allowed_formats"] == ["MP4", "MOV", "WEBM", "MKV"]
+
+    # POST tanpa file -> 400 EMPTY_FILE
+    r_nofile = client.post("/api/video/compress", data={"mode": "kualitas", "preset": "seimbang"})
+    assert r_nofile.status_code == 400
+    assert r_nofile.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file kosong -> 400 EMPTY_FILE
+    r_empty = client.post(
+        "/api/video/compress",
+        files=[("file", ("kosong.mp4", b"", "video/mp4"))],
+        data={"mode": "kualitas", "preset": "seimbang"},
+    )
+    assert r_empty.status_code == 400
+    assert r_empty.json()["error"]["code"] == "EMPTY_FILE"
+
+    # POST file terlalu besar -> 413 FILE_TOO_LARGE
+    r_large = client.post(
+        "/api/video/compress",
+        files=[("file", ("besar.mp4", b"0" * (VIDEO_COMPRESS_MAX_BYTES + 10), "video/mp4"))],
+        data={"mode": "kualitas", "preset": "seimbang"},
+    )
+    assert r_large.status_code == 413
+    assert r_large.json()["error"]["code"] == "FILE_TOO_LARGE"
+
+    # POST preset tidak valid -> 400 INVALID_PRESET
+    r_preset = client.post(
+        "/api/video/compress",
+        files=[("file", ("uji.mp4", b"fake-data-123", "video/mp4"))],
+        data={"mode": "kualitas", "preset": "ngawur"},
+    )
+    assert r_preset.status_code == 400
+    assert r_preset.json()["error"]["code"] == "INVALID_PRESET"
+
+    # POST target tidak valid -> 400 INVALID_TARGET
+    r_target_inv = client.post(
+        "/api/video/compress",
+        files=[("file", ("uji.mp4", b"fake-data-123", "video/mp4"))],
+        data={"mode": "target", "target_mb": "abc"},
+    )
+    assert r_target_inv.status_code == 400
+    assert r_target_inv.json()["error"]["code"] == "INVALID_TARGET"
+
+    # POST target di luar rentang -> 400 INVALID_TARGET
+    r_target_out = client.post(
+        "/api/video/compress",
+        files=[("file", ("uji.mp4", b"fake-data-123", "video/mp4"))],
+        data={"mode": "target", "target_mb": "50"},
+    )
+    assert r_target_out.status_code == 400
+    assert r_target_out.json()["error"]["code"] == "INVALID_TARGET"
+
+    # POST berkas bukan video -> 400 UNSUPPORTED_FORMAT
+    r_not_video = client.post(
+        "/api/video/compress",
+        files=[("file", ("dokumen.txt", b"Halo bukan video", "text/plain"))],
+        data={"mode": "kualitas", "preset": "seimbang"},
+    )
+    assert r_not_video.status_code == 400
+    assert r_not_video.json()["error"]["code"] == "UNSUPPORTED_FORMAT"
+
+    # Uji sukses nyata jika ffmpeg ada
+    import shutil
+    if shutil.which("ffmpeg") is not None:
+        video_data = make_test_video(duration=2, format_name="mp4", with_audio=True)
+        if video_data:
+            r_ok = client.post(
+                "/api/video/compress",
+                files=[("file", ("contoh.mp4", video_data, "video/mp4"))],
+                data={"mode": "kualitas", "preset": "kuat", "kecilkan": "ya"},
+            )
+            assert r_ok.status_code == 200
+            assert r_ok.headers["content-type"] == "video/mp4"
+            assert "attachment; filename=\"contoh-kompres.mp4\"" in r_ok.headers["content-disposition"]
+            assert "x-input-bytes" in r_ok.headers
+            assert "x-output-bytes" in r_ok.headers
+            assert "x-hemat-percent" in r_ok.headers
+            assert "x-duration-seconds" in r_ok.headers
+            assert "x-resolution" in r_ok.headers
+            assert "x-mode" in r_ok.headers
+            assert "x-preset" in r_ok.headers
+            assert "x-processing-ms" in r_ok.headers
+            assert r_ok.headers["cache-control"] == "no-store"
+            assert len(r_ok.content) > 0
+            assert r_ok.content[4:8] == b"ftyp"
+
+            # Mode target: pastikan header X-Preset berformat 'target X MB'
+            r_target = client.post(
+                "/api/video/compress",
+                files=[("file", ("contoh.mp4", video_data, "video/mp4"))],
+                data={"mode": "target", "target_mb": "2", "kecilkan": "ya"},
+            )
+            assert r_target.status_code == 200
+            assert r_target.headers["x-preset"] == "target 2 MB"
+
+
+def test_video_compress_fallback_ekstensi_dan_mime() -> None:
+    """Uji fallback ke berkas asli bila hasil kompresi tidak lebih kecil.
+
+    Ekstensi dan MIME keluaran harus mengikuti kontainer asli (.mov, .webm, .mkv).
+    Bila hasil kompresi lebih kecil, ekstensi tetap .mp4.
+    """
+    import app.kompres_video as kv_mod
+
+    fake_data = b"\x00\x00\x00\x1cftypqt  \x00\x00\x02\x00" + b"\x00" * 100
+
+    def fake_probe_mov(data: bytes, ext_hint: str = "mov") -> dict[str, Any]:
+        return {
+            "container": "mov",
+            "durasi": 5.0,
+            "lebar": 640,
+            "tinggi": 480,
+            "ada_video": True,
+            "kodek_video": "h264",
+            "ada_audio": True,
+        }
+
+    orig_probe = kv_mod.probe_video
+    orig_run = kv_mod.subprocess.run
+
+    # Skenario 1: Hasil kompresi lebih besar (fallback aktif) -> ekstensi .mov, mime video/quicktime
+    def fake_run_larger(cmd, *args, **kwargs):
+        out_path = cmd[-1]
+        with open(out_path, "wb") as f:
+            f.write(b"X" * (len(fake_data) + 100))
+        class Ret:
+            returncode = 0
+        return Ret()
+
+    kv_mod.probe_video = fake_probe_mov
+    kv_mod.subprocess.run = fake_run_larger
+    try:
+        res_fallback = kv_mod.kompres(fake_data, "rekaman.mov")
+        assert res_fallback.output_name == "rekaman-kompres.mov"
+        assert res_fallback.mime_type == "video/quicktime"
+        assert res_fallback.hemat_percent == 0.0
+        assert res_fallback.data == fake_data
+    finally:
+        kv_mod.probe_video = orig_probe
+        kv_mod.subprocess.run = orig_run
+
+    # Skenario 2: Kontainer webm saat fallback -> ekstensi .webm, mime video/webm
+    def fake_probe_webm(data: bytes, ext_hint: str = "webm") -> dict[str, Any]:
+        return {
+            "container": "webm",
+            "durasi": 5.0,
+            "lebar": 640,
+            "tinggi": 480,
+            "ada_video": True,
+            "kodek_video": "vp8",
+            "ada_audio": False,
+        }
+
+    kv_mod.probe_video = fake_probe_webm
+    kv_mod.subprocess.run = fake_run_larger
+    try:
+        res_webm = kv_mod.kompres(fake_data, "animasi.webm")
+        assert res_webm.output_name == "animasi-kompres.webm"
+        assert res_webm.mime_type == "video/webm"
+    finally:
+        kv_mod.probe_video = orig_probe
+        kv_mod.subprocess.run = orig_run
+
+    # Skenario 3: Hasil kompresi lebih kecil -> tetap .mp4 dan video/mp4
+    def fake_run_smaller(cmd, *args, **kwargs):
+        out_path = cmd[-1]
+        with open(out_path, "wb") as f:
+            f.write(b"X" * (len(fake_data) // 2))
+        class Ret:
+            returncode = 0
+        return Ret()
+
+    kv_mod.probe_video = fake_probe_mov
+    kv_mod.subprocess.run = fake_run_smaller
+    try:
+        res_success = kv_mod.kompres(fake_data, "rekaman.mov")
+        assert res_success.output_name == "rekaman-kompres.mp4"
+        assert res_success.mime_type == "video/mp4"
+        assert res_success.hemat_percent == 50.0
+    finally:
+        kv_mod.probe_video = orig_probe
+        kv_mod.subprocess.run = orig_run
 
 
 

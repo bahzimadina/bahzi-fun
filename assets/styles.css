@@ -15269,6 +15269,218 @@ body.has-cookiebar { padding-bottom: 4.5rem; }
   }
 }
 
+/* ================= Kompres Video: panel alat inline ================= */
+.kompres-video__preview-orig {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .7rem .8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.kompres-video__orig-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+}
+
+.kompres-video__filename {
+  margin: 0;
+  font-weight: 600;
+  font-size: .88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kompres-video__meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+.kompres-video__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.kompres-video__fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.kompres-video__legend {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: .25rem;
+}
+
+.kompres-video__modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .5rem;
+}
+
+.kompres-video__presets {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.kompres-video__radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  padding: .65rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .88rem;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+
+.kompres-video__radio-label:hover {
+  border-color: var(--primary);
+}
+
+.kompres-video__radio-label input[type="radio"] {
+  margin-top: .15rem;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.kompres-video__preset-text {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
+
+.kompres-video__preset-text strong {
+  font-size: .88rem;
+  color: var(--text);
+}
+
+.kompres-video__preset-text span {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.kompres-video__target-box {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+.kompres-video__hint {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+.kompres-video__checkbox-wrap {
+  padding-top: .25rem;
+}
+
+.kompres-video__checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .6rem;
+  cursor: pointer;
+  font-size: .88rem;
+  color: var(--text);
+}
+
+@media (max-width: 600px) {
+  .kompres-video__checkbox-label {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+  }
+}
+
+.kompres-video__checkbox-label input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.kompres-video__result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .8rem;
+  padding: 1.25rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.kompres-video__result-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25rem;
+}
+
+.kompres-video__result-label {
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+}
+
+.kompres-video__result-savings {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.kompres-video__result-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .5rem 1.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: .84rem;
+  color: var(--text-muted);
+}
+
+.kompres-video__result-stats strong {
+  color: var(--text);
+}
+
+.kompres-video__result-note {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (pointer: coarse) {
+  #kompres-video-panel input,
+  #kompres-video-panel button,
+  #kompres-video-panel a.btn,
+  #kompres-video-panel .kompres-video__radio-label,
+  #kompres-video-panel .kompres-video__checkbox-label {
+    min-height: 44px;
+  }
+}
+
 
 
 
